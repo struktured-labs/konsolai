@@ -7,6 +7,8 @@ set(claude_SRCS
     ClaudeHookHandler.cpp
     NotificationManager.cpp
     ClaudeNotificationWidget.cpp
+    ClaudeSessionState.cpp
+    ClaudeSessionRegistry.cpp
 )
 
 add_library(konsolai_claude STATIC ${claude_SRCS})
