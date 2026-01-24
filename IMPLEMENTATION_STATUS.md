@@ -1,8 +1,8 @@
 # Konsolai Implementation Status
 
 **Last Updated:** 2025-01-24
-**Version:** 0.1.0
-**Current Phase:** 8 (Profile System - Pending)
+**Version:** 0.1.0-phase8-core
+**Status:** All Core Phases Complete
 
 ## Completed Phases
 
@@ -140,20 +140,31 @@
 
 ---
 
-## Remaining Phase
+### ✅ Phase 8: Profile System (v0.1.0-phase8-core)
+**Status:** Core Complete (UI Editor Pending)
 
-### ⏳ Phase 8: Profile System (Not Started)
-**Status:** Pending
+**Created:**
+- Profile properties for Claude integration
+- SessionManager integration for automatic ClaudeSession creation
 
-**Objectives:**
-- Extend profile with Claude-specific properties
-- Add Claude tab to profile editor
-- Properties: claudeEnabled, tmuxPersistence, claudeModel, claudeArgs, notificationChannels, autoApproveRead, hooksConfigPath
+**Properties Added:**
+- `ClaudeEnabled` (bool) - Enable Claude integration
+- `ClaudeTmuxPersistence` (bool) - Use tmux persistence (default: true)
+- `ClaudeModel` (QString) - Model to use (default: "claude-sonnet-4")
+- `ClaudeArgs` (QString) - Additional CLI arguments
+- `ClaudeNotificationChannels` (int) - Bitmask for notification channels (default: 15 = all)
+- `ClaudeAutoApproveRead` (bool) - Auto-approve Read tool (default: false)
+- `ClaudeHooksConfigPath` (QString) - Custom hooks config path
 
-**Files to Modify:**
-- `src/profile/Profile.{h,cpp}`
-- `src/widgets/EditProfileDialog.{h,cpp}`
-- Add new UI file: `widgets/EditProfileClaudePage.ui`
+**Integration:**
+- SessionManager checks `Profile::ClaudeEnabled` during creation
+- Creates `ClaudeSession` when enabled, `Session` when disabled
+- Passes profile name and working directory to ClaudeSession
+- All profile settings applied via `applyProfile()`
+
+**Pending:**
+- Profile editor UI (EditProfileClaudePage.ui)
+- Settings dialog integration
 
 ---
 
