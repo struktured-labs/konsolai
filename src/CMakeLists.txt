@@ -136,6 +136,7 @@ add_subdirectory(keyboardtranslator)
 add_subdirectory(characters)
 add_subdirectory(decoders)
 add_subdirectory(plugins)
+add_subdirectory(claude)
 if(WIN32)
     set(ptyqt_srcs ptyqt/iptyprocess.cpp ptyqt/conptyprocess.cpp)
 endif()
@@ -287,6 +288,7 @@ target_link_libraries(konsoleprivate
     konsolehelpers
     konsolecharacters
     konsoledecoders
+    konsolai_claude
     KF6::NewStuffCore
     KF6::NewStuffWidgets
     ${konsole_LIBS}
