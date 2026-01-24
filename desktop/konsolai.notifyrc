@@ -1,7 +1,7 @@
 [Global]
 IconName=utilities-terminal
-DesktopEntry=org.kde.konsole
-Comment=Konsole
+DesktopEntry=org.kde.konsolai
+Comment=Konsolai
 Comment[af]=Konsole
 Comment[ar]=كونسول
 Comment[as]=Konsole
@@ -1534,4 +1534,31 @@ Comment[tr]=Kabuk istemi bir bildirim tetikledi
 Comment[uk]=Запит оболонки ініціював сповіщення
 Comment[zh_CN]=外壳程序的提示触发了一条通知
 Comment[zh_TW]=shell 提示字元觸發了通知
+Action=Popup
+
+# Claude-specific notification events
+
+[Event/permissionRequired]
+Name=Permission Required
+Comment=Claude requires permission to perform an action
+Action=Popup|Sound
+
+[Event/error]
+Name=Claude Error
+Comment=Claude encountered an error
+Action=Popup|Sound
+
+[Event/waitingInput]
+Name=Waiting for Input
+Comment=Claude is waiting for user input
+Action=Popup|Sound
+
+[Event/taskComplete]
+Name=Task Complete
+Comment=Claude completed a task
+Action=Popup
+
+[Event/info]
+Name=Information
+Comment=General Claude information
 Action=Popup

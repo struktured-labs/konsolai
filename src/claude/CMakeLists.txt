@@ -5,6 +5,8 @@ set(claude_SRCS
     ClaudeProcess.cpp
     ClaudeSession.cpp
     ClaudeHookHandler.cpp
+    NotificationManager.cpp
+    ClaudeNotificationWidget.cpp
 )
 
 add_library(konsolai_claude STATIC ${claude_SRCS})
@@ -13,7 +15,12 @@ target_link_libraries(konsolai_claude
     PUBLIC
     Qt::Core
     Qt::Network
+    Qt::Widgets
+    Qt::Multimedia
     KF6::CoreAddons
+    KF6::Notifications
+    KF6::StatusNotifierItem
+    KF6::I18n
 )
 
 target_include_directories(konsolai_claude
