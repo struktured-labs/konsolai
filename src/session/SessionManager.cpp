@@ -9,6 +9,9 @@
 // Own
 #include "SessionManager.h"
 
+// Claude integration
+#include "claude/ClaudeSession.h"
+
 // Qt
 #include <QStringList>
 
@@ -93,7 +96,16 @@ Session *SessionManager::createSession(Profile::Ptr profile)
     }
 
     // configuration information found, create a new session based on this
-    auto session = new Session();
+    // Check if Claude integration is enabled for this profile
+    Session *session = nullptr;
+    if (profile->property<bool>(Profile::ClaudeEnabled)) {
+        // Create ClaudeSession with profile name and working directory
+        QString profileName = profile->property<QString>(Profile::Name);
+        QString workingDir = profile->property<QString>(Profile::Directory);
+        session = new Konsolai::ClaudeSession(profileName, workingDir);
+    } else {
+        session = new Session();
+    }
     Q_ASSERT(session);
     applyProfile(session, profile, false);
 
