@@ -1,5 +1,19 @@
 # Claude integration module for Konsolai
 
+set(dbus_xml_srcs)
+if(HAVE_DBUS)
+    # Generate D-Bus adaptor for Claude interface
+    qt_add_dbus_adaptor(
+        claudeadaptors_SRCS
+        org.kde.konsolai.Claude.xml
+        ClaudeSession.h
+        Konsolai::ClaudeSession
+        ClaudeSessionAdaptor
+        claudesessionadaptor
+    )
+    set(dbus_xml_srcs ${claudeadaptors_SRCS})
+endif()
+
 set(claude_SRCS
     TmuxManager.cpp
     ClaudeProcess.cpp
@@ -9,6 +23,7 @@ set(claude_SRCS
     ClaudeNotificationWidget.cpp
     ClaudeSessionState.cpp
     ClaudeSessionRegistry.cpp
+    ${dbus_xml_srcs}
 )
 
 add_library(konsolai_claude STATIC ${claude_SRCS})
@@ -25,10 +40,19 @@ target_link_libraries(konsolai_claude
     KF6::I18n
 )
 
+if(HAVE_DBUS)
+    target_link_libraries(konsolai_claude
+        PUBLIC
+        Qt::DBus
+        KF6::DBusAddons
+    )
+endif()
+
 target_include_directories(konsolai_claude
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 # Hook handler binary

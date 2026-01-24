@@ -9,9 +9,15 @@
 #include "TmuxManager.h"
 #include "ClaudeProcess.h"
 
+#include "config-konsole.h"
+
 #include <QObject>
 #include <QString>
 #include <QPointer>
+
+#if HAVE_DBUS
+#include <QDBusContext>
+#endif
 
 // Forward declarations
 namespace Konsole {
@@ -28,6 +34,7 @@ namespace Konsolai
  * - tmux-backed session persistence
  * - Claude process lifecycle management
  * - State tracking and notifications
+ * - D-Bus interface for external control
  *
  * Session naming convention: konsolai-{profile}-{8-char-id}
  *
@@ -36,9 +43,20 @@ namespace Konsolai
  * - Closing tab → tmux session continues (can be reattached later)
  * - Session state visible in tab indicators
  */
+#if HAVE_DBUS
+class ClaudeSession : public QObject, protected QDBusContext
+#else
 class ClaudeSession : public QObject
+#endif
 {
     Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.konsolai.Claude")
+
+    Q_PROPERTY(QString state READ stateString)
+    Q_PROPERTY(QString currentTask READ currentTask)
+    Q_PROPERTY(QString sessionName READ sessionName)
+    Q_PROPERTY(QString sessionId READ sessionId)
+    Q_PROPERTY(QString profileName READ profileName)
 
 public:
     /**
@@ -139,6 +157,42 @@ public:
      * Get the session transcript (captured from tmux pane)
      */
     QString transcript(int lines = 1000);
+
+    // D-Bus property accessors
+    QString stateString() const;
+    QString currentTask() const;
+
+public Q_SLOTS:
+    // D-Bus methods
+    /**
+     * Send a prompt to Claude
+     */
+    Q_SCRIPTABLE void sendPrompt(const QString &prompt);
+
+    /**
+     * Approve a pending permission request
+     */
+    Q_SCRIPTABLE void approvePermission();
+
+    /**
+     * Deny a pending permission request
+     */
+    Q_SCRIPTABLE void denyPermission();
+
+    /**
+     * Stop Claude (send Ctrl+C)
+     */
+    Q_SCRIPTABLE void stop();
+
+    /**
+     * Restart the Claude session
+     */
+    Q_SCRIPTABLE void restart();
+
+    /**
+     * Get session transcript via D-Bus
+     */
+    Q_SCRIPTABLE QString getTranscript(int lines = 1000);
 
 Q_SIGNALS:
     /**

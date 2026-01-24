@@ -151,6 +151,76 @@ QString ClaudeSession::transcript(int lines)
     return QString();
 }
 
+// D-Bus property accessors
+QString ClaudeSession::stateString() const
+{
+    if (!m_claudeProcess) {
+        return QStringLiteral("NotRunning");
+    }
+
+    switch (m_claudeProcess->state()) {
+    case ClaudeProcess::State::NotRunning:
+        return QStringLiteral("NotRunning");
+    case ClaudeProcess::State::Starting:
+        return QStringLiteral("Starting");
+    case ClaudeProcess::State::Idle:
+        return QStringLiteral("Idle");
+    case ClaudeProcess::State::Working:
+        return QStringLiteral("Working");
+    case ClaudeProcess::State::WaitingInput:
+        return QStringLiteral("WaitingInput");
+    case ClaudeProcess::State::Error:
+        return QStringLiteral("Error");
+    default:
+        return QStringLiteral("Unknown");
+    }
+}
+
+QString ClaudeSession::currentTask() const
+{
+    return m_claudeProcess ? m_claudeProcess->currentTask() : QString();
+}
+
+// D-Bus methods
+void ClaudeSession::sendPrompt(const QString &prompt)
+{
+    sendText(prompt + QStringLiteral("\n"));
+}
+
+void ClaudeSession::approvePermission()
+{
+    // Send 'y' followed by Enter to approve
+    sendText(QStringLiteral("y\n"));
+}
+
+void ClaudeSession::denyPermission()
+{
+    // Send 'n' followed by Enter to deny
+    sendText(QStringLiteral("n\n"));
+}
+
+void ClaudeSession::stop()
+{
+    // Send Ctrl+C to stop Claude
+    if (m_tmuxManager) {
+        m_tmuxManager->sendKeys(m_sessionName, QStringLiteral("C-c"));
+    }
+}
+
+void ClaudeSession::restart()
+{
+    // Kill and restart by sending a new claude command
+    stop();
+    // Wait a bit, then send claude command
+    // This is a simple implementation - could be improved
+    sendText(QStringLiteral("claude\n"));
+}
+
+QString ClaudeSession::getTranscript(int lines)
+{
+    return transcript(lines);
+}
+
 } // namespace Konsolai
 
 #include "moc_ClaudeSession.cpp"

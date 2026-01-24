@@ -1,0 +1,85 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.kde.konsolai.Claude">
+    <!-- Properties -->
+    <property name="state" type="s" access="read">
+      <annotation name="org.qtproject.QtDBus.QtTypeName" value="QString"/>
+    </property>
+    <property name="currentTask" type="s" access="read">
+      <annotation name="org.qtproject.QtDBus.QtTypeName" value="QString"/>
+    </property>
+    <property name="sessionName" type="s" access="read">
+      <annotation name="org.qtproject.QtDBus.QtTypeName" value="QString"/>
+    </property>
+    <property name="sessionId" type="s" access="read">
+      <annotation name="org.qtproject.QtDBus.QtTypeName" value="QString"/>
+    </property>
+    <property name="profileName" type="s" access="read">
+      <annotation name="org.qtproject.QtDBus.QtTypeName" value="QString"/>
+    </property>
+
+    <!-- Methods -->
+    <method name="sendPrompt">
+      <arg name="prompt" type="s" direction="in"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QString"/>
+    </method>
+
+    <method name="sendText">
+      <arg name="text" type="s" direction="in"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QString"/>
+    </method>
+
+    <method name="approvePermission">
+    </method>
+
+    <method name="denyPermission">
+    </method>
+
+    <method name="stop">
+    </method>
+
+    <method name="restart">
+    </method>
+
+    <method name="detach">
+    </method>
+
+    <method name="kill">
+    </method>
+
+    <method name="getTranscript">
+      <arg name="lines" type="i" direction="in"/>
+      <arg name="transcript" type="s" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="int"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QString"/>
+    </method>
+
+    <!-- Signals -->
+    <signal name="stateChanged">
+      <arg name="newState" type="s"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QString"/>
+    </signal>
+
+    <signal name="permissionRequested">
+      <arg name="action" type="s"/>
+      <arg name="description" type="s"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QString"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In1" value="QString"/>
+    </signal>
+
+    <signal name="notificationReceived">
+      <arg name="type" type="s"/>
+      <arg name="message" type="s"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QString"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In1" value="QString"/>
+    </signal>
+
+    <signal name="taskStarted">
+      <arg name="taskDescription" type="s"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QString"/>
+    </signal>
+
+    <signal name="taskFinished">
+    </signal>
+  </interface>
+</node>
