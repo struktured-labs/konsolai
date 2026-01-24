@@ -4,6 +4,7 @@ set(claude_SRCS
     TmuxManager.cpp
     ClaudeProcess.cpp
     ClaudeSession.cpp
+    ClaudeHookHandler.cpp
 )
 
 add_library(konsolai_claude STATIC ${claude_SRCS})
@@ -20,3 +21,16 @@ target_include_directories(konsolai_claude
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
 )
+
+# Hook handler binary
+# This is called by Claude hooks to send events to Konsolai
+add_executable(konsolai-hook-handler
+    tools/konsolai-hook-handler.cpp
+)
+
+target_link_libraries(konsolai-hook-handler
+    Qt::Core
+    Qt::Network
+)
+
+install(TARGETS konsolai-hook-handler ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
