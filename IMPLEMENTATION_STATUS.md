@@ -2,7 +2,7 @@
 
 **Last Updated:** 2025-01-24
 **Version:** 0.1.0
-**Current Phase:** 7 (UI Changes - In Progress)
+**Current Phase:** 8 (Profile System - Pending)
 
 ## Completed Phases
 
@@ -104,31 +104,39 @@
 
 ---
 
-## Current Phase
+### ✅ Phase 7: UI Changes (v0.1.0-phase7)
+**Status:** Complete
 
-### 🔄 Phase 7: UI Changes (In Progress)
-**Status:** In Progress
+**Created:**
+- `src/claude/ClaudeStatusWidget.{h,cpp}` - Status bar widget
+- `src/claude/ClaudeMenu.{h,cpp}` - Claude menu
+- `src/claude/ClaudeTabIndicator.h` - Tab status indicator
+- `desktop/konsolaiui.rc` - Updated UI definition with Claude menu
 
-**Objectives:**
-- Add tab bar status indicators (colored dots showing Claude state)
-- Add status bar Claude widget showing current state/task
-- Add "Claude" menu to menu bar
-- Add Claude submenu to tab context menu
-- Add keyboard shortcuts (Ctrl+Shift+A/D/R for approve/deny/restart)
+**Features:**
+- **Status Bar Widget:** Shows Claude state (icon + text) and current task
+  - Animated spinner when Claude is working (10-frame Braille characters)
+  - Color-coded: Gray (NotRunning), Green (Idle), Blue (Working), Orange (Waiting), Red (Error)
+  - Format: `[●] Claude: Working │ Task: Writing code...`
 
-**Files to Modify:**
-- `src/ViewManager.{h,cpp}` - Tab management
-- `src/MainWindow.{h,cpp}` - Menu bar
-- `src/widgets/ViewContainer.{h,cpp}` - Tab bar
-- `src/session/SessionController.{h,cpp}` - Tab context menu
-- `src/widgets/TerminalHeaderBar.{h,cpp}` - Status bar
+- **Claude Menu:** Full menu with keyboard shortcuts
+  - Approve Permission (Ctrl+Shift+A)
+  - Deny Permission (Ctrl+Shift+D)
+  - Stop Claude (Ctrl+Shift+S)
+  - Restart Claude (Ctrl+Shift+R)
+  - Detach Session / Kill Session
+  - Reattach Session submenu (lists orphaned sessions)
+  - Configure Hooks...
 
-**Next Steps:**
-1. Create ClaudeStatusWidget for status bar
-2. Add status indicators to tab bar
-3. Create Claude menu and actions
-4. Wire up keyboard shortcuts
-5. Integrate with ViewManager to show Claude state
+- **Tab Indicator:** 12x12 pixel colored dot showing Claude state
+  - Spinning animation when Working
+  - Integrated into tab bar (before title)
+
+**Integration:**
+- MainWindow connects to active ClaudeSession in `activeViewChanged()`
+- Menu added to konsolaiui.rc between Edit and View menus
+- Status widget added to QStatusBar
+- All actions added to KActionCollection for shortcuts
 
 ---
 
@@ -183,9 +191,16 @@ src/claude/
 ├── ClaudeNotificationWidget.{h,cpp}    # In-terminal overlay widget
 ├── ClaudeSessionState.{h,cpp}          # Serializable session state
 ├── ClaudeSessionRegistry.{h,cpp}       # Session tracking and persistence
+├── ClaudeStatusWidget.{h,cpp}          # Status bar widget
+├── ClaudeMenu.{h,cpp}                  # Claude menu with actions
+├── ClaudeTabIndicator.h                # Tab status indicator (12x12 dot)
 ├── org.kde.konsolai.Claude.xml         # D-Bus interface definition
 └── tools/
     └── konsolai-hook-handler.cpp       # Hook handler binary
+
+desktop/
+├── konsolaiui.rc                       # UI definition with Claude menu
+└── konsolai.qrc                        # Qt resource file
 ```
 
 ---
