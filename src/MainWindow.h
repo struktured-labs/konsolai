@@ -30,6 +30,12 @@ class KActionMenu;
 class KHamburgerMenu;
 class KToggleAction;
 
+namespace Konsolai
+{
+class ClaudeMenu;
+class ClaudeStatusWidget;
+}
+
 namespace Konsole
 {
 class ViewManager;
@@ -227,6 +233,10 @@ private:
     KToggleAction *_toggleMenuBarAction;
     KActionMenu *_newTabMenuAction;
     KHamburgerMenu *_hamburgerMenu;
+
+    // Claude integration
+    Konsolai::ClaudeMenu *_claudeMenu = nullptr;
+    Konsolai::ClaudeStatusWidget *_claudeStatusWidget = nullptr;
 
     QPointer<SessionController> _pluggedController;
     std::vector<IKonsolePlugin *> _plugins;

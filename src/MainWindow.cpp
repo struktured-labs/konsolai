@@ -45,6 +45,11 @@
 #include "ViewManager.h"
 #include "WindowSystemInfo.h"
 
+// Claude integration
+#include "claude/ClaudeMenu.h"
+#include "claude/ClaudeStatusWidget.h"
+#include "claude/ClaudeSession.h"
+
 #include "profile/ProfileList.h"
 #include "profile/ProfileManager.h"
 
@@ -269,6 +274,20 @@ void MainWindow::activeViewChanged(SessionController *controller)
     _pluggedController = controller;
     _pluggedController->view()->installEventFilter(this);
 
+    // Update Claude UI with active session
+    if (controller->session()) {
+        // Check if this is a ClaudeSession
+        auto *claudeSession = qobject_cast<Konsolai::ClaudeSession*>(controller->session());
+        if (claudeSession) {
+            _claudeMenu->setActiveSession(claudeSession);
+            _claudeStatusWidget->setSession(claudeSession);
+        } else {
+            // Clear Claude UI for non-Claude sessions
+            _claudeMenu->setActiveSession(nullptr);
+            _claudeStatusWidget->clearSession();
+        }
+    }
+
     setBlur(ViewManager::profileHasBlurEnabled(SessionManager::instance()->sessionProfile(_pluggedController->session())));
 
     // listen for title changes from the current session
@@ -431,6 +450,31 @@ void MainWindow::setupActions()
             viewManager()->loadLayoutFile();
         }
     });
+
+    // Claude Menu
+    _claudeMenu = new Konsolai::ClaudeMenu(this);
+    connect(_claudeMenu, &Konsolai::ClaudeMenu::reattachRequested,
+            this, [this](const QString &sessionName) {
+                // TODO: Implement reattach functionality
+                qDebug() << "Reattach requested for session:" << sessionName;
+            });
+    connect(_claudeMenu, &Konsolai::ClaudeMenu::configureHooksRequested,
+            this, [this]() {
+                // TODO: Open hooks configuration dialog
+                qDebug() << "Configure hooks requested";
+            });
+
+    // Add Claude menu actions to collection for shortcuts
+    collection->addAction(QStringLiteral("claude-approve"), _claudeMenu->approveAction());
+    collection->addAction(QStringLiteral("claude-deny"), _claudeMenu->denyAction());
+    collection->addAction(QStringLiteral("claude-stop"), _claudeMenu->stopAction());
+    collection->addAction(QStringLiteral("claude-restart"), _claudeMenu->restartAction());
+    collection->addAction(QStringLiteral("claude-detach"), _claudeMenu->detachAction());
+    collection->addAction(QStringLiteral("claude-kill"), _claudeMenu->killAction());
+
+    // Claude Status Widget
+    _claudeStatusWidget = new Konsolai::ClaudeStatusWidget(this);
+    statusBar()->addPermanentWidget(_claudeStatusWidget);
 }
 
 void MainWindow::updateHamburgerMenu()

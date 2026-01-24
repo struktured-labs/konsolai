@@ -23,6 +23,9 @@ set(claude_SRCS
     ClaudeNotificationWidget.cpp
     ClaudeSessionState.cpp
     ClaudeSessionRegistry.cpp
+    ClaudeStatusWidget.cpp
+    ClaudeMenu.cpp
+    ClaudeTabIndicator.cpp
     ${dbus_xml_srcs}
 )
 
