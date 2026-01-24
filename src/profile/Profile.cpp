@@ -57,6 +57,7 @@ static const char TERMINAL_GROUP[] = "Terminal Features";
 static const char CURSOR_GROUP[] = "Cursor Options";
 static const char INTERACTION_GROUP[] = "Interaction Options";
 static const char ENCODING_GROUP[] = "Encoding Options";
+static const char CLAUDE_GROUP[] = "Claude Integration";
 
 const std::vector<Profile::PropertyInfo> Profile::DefaultProperties = {
     // General
@@ -176,6 +177,15 @@ const std::vector<Profile::PropertyInfo> Profile::DefaultProperties = {
 
     // Encoding
     {DefaultEncoding, "DefaultEncoding", ENCODING_GROUP, DEFAULT_ENCODING},
+
+    // Claude Integration
+    {ClaudeEnabled, "ClaudeEnabled", CLAUDE_GROUP, false},
+    {ClaudeTmuxPersistence, "ClaudeTmuxPersistence", CLAUDE_GROUP, true},
+    {ClaudeModel, "ClaudeModel", CLAUDE_GROUP, QLatin1String("claude-sonnet-4")},
+    {ClaudeArgs, "ClaudeArgs", CLAUDE_GROUP, QString()},
+    {ClaudeNotificationChannels, "ClaudeNotificationChannels", CLAUDE_GROUP, 15}, // All channels enabled by default
+    {ClaudeAutoApproveRead, "ClaudeAutoApproveRead", CLAUDE_GROUP, false},
+    {ClaudeHooksConfigPath, "ClaudeHooksConfigPath", CLAUDE_GROUP, QString()},
 };
 
 QHash<QString, Profile::PropertyInfo> Profile::PropertyInfoByName;

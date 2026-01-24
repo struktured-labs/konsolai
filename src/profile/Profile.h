@@ -430,6 +430,30 @@ public:
         /** (int) Milliseconds interval between autosave activations
          */
         AutoSaveInterval,
+
+        // Claude Integration Properties
+        /** (bool) Enable Claude integration for this profile
+         */
+        ClaudeEnabled,
+        /** (bool) Use tmux for session persistence
+         */
+        ClaudeTmuxPersistence,
+        /** (QString) Claude model to use (e.g., "claude-sonnet-4")
+         */
+        ClaudeModel,
+        /** (QString) Additional arguments to pass to Claude CLI
+         */
+        ClaudeArgs,
+        /** (int) Notification channels bitmask
+         * See NotificationManager::Channel
+         */
+        ClaudeNotificationChannels,
+        /** (bool) Auto-approve Read tool permissions
+         */
+        ClaudeAutoApproveRead,
+        /** (QString) Path to Claude hooks configuration file
+         */
+        ClaudeHooksConfigPath,
     };
 
     Q_ENUM(Property)
