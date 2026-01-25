@@ -10,12 +10,17 @@
 // Qt
 #include <QApplication>
 #include <QDebug>
+#include <QDialog>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
 #include <QProcess>
 #include <QScreen>
 #include <QStatusBar>
+#include <QTimer>
+#include <QVBoxLayout>
 #include <QWindow>
 
 // KDE
@@ -53,6 +58,7 @@
 #include "claude/ClaudeMenu.h"
 #include "claude/ClaudeProcess.h"
 #include "claude/ClaudeSession.h"
+#include "claude/ClaudeSessionRegistry.h"
 #include "claude/ClaudeSessionWizard.h"
 #include "claude/ClaudeStatusWidget.h"
 #include "claude/TmuxManager.h"
@@ -458,13 +464,52 @@ void MainWindow::setupActions()
         }
     });
 
+    // Quick Session Switcher (Ctrl+Shift+P)
+    action = collection->addAction(QStringLiteral("session-switcher"));
+    action->setIcon(QIcon::fromTheme(QStringLiteral("system-search")));
+    action->setText(i18nc("@action:inmenu", "Quick Session Switcher"));
+    collection->setDefaultShortcut(action, Qt::CTRL | Qt::SHIFT | Qt::Key_P);
+    connect(action, &QAction::triggered, this, &MainWindow::showSessionSwitcher);
+
     // Claude Menu
     _claudeMenu = new Konsolai::ClaudeMenu(this);
-    connect(_claudeMenu, &Konsolai::ClaudeMenu::reattachRequested,
-            this, [this](const QString &sessionName) {
-                // TODO: Implement reattach functionality
-                qDebug() << "Reattach requested for session:" << sessionName;
-            });
+    connect(_claudeMenu, &Konsolai::ClaudeMenu::reattachRequested, this, [this](const QString &sessionName) {
+        qDebug() << "Reattach requested for session:" << sessionName;
+
+        // Get the Claude profile
+        Profile::Ptr claudeProfile;
+        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+        for (const Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+
+        if (!claudeProfile) {
+            qWarning() << "No Claude profile found for reattaching";
+            return;
+        }
+
+        // Create a ClaudeSession for reattach
+        auto *claudeSession = Konsolai::ClaudeSession::createForReattach(sessionName, this);
+
+        // Apply profile settings
+        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+
+        // Create view and add to container
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        // Start the session (will attach to existing tmux)
+        claudeSession->run();
+
+        // Register with registry
+        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+        if (registry) {
+            registry->registerSession(claudeSession);
+        }
+    });
     connect(_claudeMenu, &Konsolai::ClaudeMenu::configureHooksRequested,
             this, [this]() {
                 // TODO: Open hooks configuration dialog
@@ -1133,6 +1178,169 @@ void MainWindow::applyKonsoleSettings()
     setAutoSaveSettings();
 
     updateWindowCaption();
+
+    // Auto-reattach orphaned Claude sessions on startup (delayed to ensure UI is ready)
+    QTimer::singleShot(500, this, &MainWindow::autoReattachClaudeSessions);
+}
+
+void MainWindow::autoReattachClaudeSessions()
+{
+    static bool alreadyRan = false;
+    if (alreadyRan) {
+        return;
+    }
+    alreadyRan = true;
+
+    auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+    if (!registry) {
+        return;
+    }
+
+    QList<Konsolai::ClaudeSessionState> orphans = registry->orphanedSessions();
+    if (orphans.isEmpty()) {
+        return;
+    }
+
+    qDebug() << "Auto-reattaching" << orphans.size() << "orphaned Claude sessions";
+
+    // Get the Claude profile
+    Profile::Ptr claudeProfile;
+    const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+    for (const Profile::Ptr &profile : profiles) {
+        if (profile->property<bool>(Profile::ClaudeEnabled)) {
+            claudeProfile = profile;
+            break;
+        }
+    }
+
+    if (!claudeProfile) {
+        qWarning() << "No Claude profile found for reattaching sessions";
+        return;
+    }
+
+    for (const Konsolai::ClaudeSessionState &state : orphans) {
+        qDebug() << "Reattaching session:" << state.sessionName;
+
+        // Create a ClaudeSession for reattach
+        auto *claudeSession = Konsolai::ClaudeSession::createForReattach(state.sessionName, this);
+
+        // Set initial working directory
+        if (!state.workingDirectory.isEmpty()) {
+            claudeSession->setInitialWorkingDirectory(state.workingDirectory);
+        }
+
+        // Apply profile settings
+        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+
+        // Create view and add to container
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        // Start the session (will attach to existing tmux)
+        claudeSession->run();
+
+        // Register with registry
+        registry->registerSession(claudeSession);
+    }
+}
+
+void MainWindow::showSessionSwitcher()
+{
+    // Create a simple dialog for quick session switching
+    QDialog dialog(this);
+    dialog.setWindowTitle(i18n("Quick Session Switcher"));
+    dialog.setMinimumWidth(400);
+
+    auto *layout = new QVBoxLayout(&dialog);
+
+    // Search box
+    auto *searchEdit = new QLineEdit(&dialog);
+    searchEdit->setPlaceholderText(i18n("Search sessions or create new..."));
+    searchEdit->setClearButtonEnabled(true);
+    layout->addWidget(searchEdit);
+
+    // Session list
+    auto *listWidget = new QListWidget(&dialog);
+    layout->addWidget(listWidget);
+
+    // Populate with current tabs
+    const QList<Session *> sessions = _viewManager->sessions();
+    for (Session *session : sessions) {
+        auto *item = new QListWidgetItem(session->title(Session::DisplayedTitleRole));
+        item->setData(Qt::UserRole, session->sessionId());
+        item->setData(Qt::UserRole + 1, QStringLiteral("tab"));
+        listWidget->addItem(item);
+    }
+
+    // Add orphaned sessions
+    auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+    if (registry) {
+        QList<Konsolai::ClaudeSessionState> orphans = registry->orphanedSessions();
+        for (const Konsolai::ClaudeSessionState &state : orphans) {
+            auto *item = new QListWidgetItem(QStringLiteral("[Detached] %1").arg(state.sessionName));
+            item->setData(Qt::UserRole, state.sessionName);
+            item->setData(Qt::UserRole + 1, QStringLiteral("orphan"));
+            item->setForeground(Qt::gray);
+            listWidget->addItem(item);
+        }
+    }
+
+    // Add "New Claude Session" option
+    auto *newItem = new QListWidgetItem(i18n("+ New Claude Session..."));
+    newItem->setData(Qt::UserRole + 1, QStringLiteral("new"));
+    newItem->setForeground(QColor(0, 120, 212));
+    listWidget->addItem(newItem);
+
+    // Filter function
+    auto filterList = [listWidget, searchEdit]() {
+        QString filter = searchEdit->text().toLower();
+        for (int i = 0; i < listWidget->count(); ++i) {
+            QListWidgetItem *item = listWidget->item(i);
+            bool matches = filter.isEmpty() || item->text().toLower().contains(filter);
+            item->setHidden(!matches);
+        }
+    };
+
+    connect(searchEdit, &QLineEdit::textChanged, &dialog, filterList);
+
+    // Handle selection
+    connect(listWidget, &QListWidget::itemActivated, &dialog, [&](QListWidgetItem *item) {
+        QString type = item->data(Qt::UserRole + 1).toString();
+
+        if (type == QStringLiteral("tab")) {
+            // Switch to existing tab
+            int sessionId = item->data(Qt::UserRole).toInt();
+            _viewManager->setCurrentSession(sessionId);
+            dialog.accept();
+        } else if (type == QStringLiteral("orphan")) {
+            // Reattach orphaned session
+            QString sessionName = item->data(Qt::UserRole).toString();
+            Q_EMIT _claudeMenu->reattachRequested(sessionName);
+            dialog.accept();
+        } else if (type == QStringLiteral("new")) {
+            // Launch wizard for new session
+            dialog.accept();
+            Profile::Ptr claudeProfile;
+            const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+            for (const Profile::Ptr &profile : profiles) {
+                if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                    claudeProfile = profile;
+                    break;
+                }
+            }
+            if (claudeProfile) {
+                newFromProfile(claudeProfile);
+            }
+        }
+    });
+
+    // Select first item
+    if (listWidget->count() > 0) {
+        listWidget->setCurrentRow(0);
+    }
+
+    searchEdit->setFocus();
+    dialog.exec();
 }
 
 void MainWindow::activateMenuBar()

@@ -192,6 +192,12 @@ private Q_SLOTS:
 
     void applyKonsoleSettings();
 
+    // Auto-reattach orphaned Claude sessions on startup
+    void autoReattachClaudeSessions();
+
+    // Show quick session switcher dialog (Ctrl+Shift+P)
+    void showSessionSwitcher();
+
     // Ask the window manager to show this application window
     void activationRequest(const QString &xdgActivationToken);
 
