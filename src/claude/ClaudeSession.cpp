@@ -150,8 +150,10 @@ void ClaudeSession::run()
     qDebug() << "  Working dir:" << m_workingDir;
     qDebug() << "  Session name:" << m_sessionName;
 
+    // Note: Session::run() strips the first argument (historical reasons),
+    // so we need to include the program name as the first argument
     setProgram(QStringLiteral("sh"));
-    setArguments({QStringLiteral("-c"), tmuxCommand});
+    setArguments({QStringLiteral("sh"), QStringLiteral("-c"), tmuxCommand});
 
     // Call parent run()
     Session::run();
