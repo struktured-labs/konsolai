@@ -49,11 +49,11 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     m_tmuxManager = new TmuxManager(this);
     m_claudeProcess = new ClaudeProcess(this);
 
-    // Set up the Session to run tmux
-    QString tmuxCommand = shellCommand();
-    setProgram(QStringLiteral("sh"));
-    setArguments({QStringLiteral("-c"), tmuxCommand});
+    // Set initial working directory (may be overridden by ViewManager later)
     setInitialWorkingDirectory(m_workingDir);
+
+    // NOTE: We don't set program/arguments here - we do it in run()
+    // This allows ViewManager to set the correct working directory first
 
     connectSignals();
 }
@@ -83,13 +83,28 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     m_tmuxManager = new TmuxManager(this);
     m_claudeProcess = new ClaudeProcess(this);
 
-    // Set up the Session to reattach to tmux
+    setInitialWorkingDirectory(m_workingDir);
+
+    // NOTE: We don't set program/arguments here - we do it in run()
+
+    connectSignals();
+}
+
+void ClaudeSession::run()
+{
+    // Use the current initialWorkingDirectory (may have been updated by ViewManager)
+    QString workDir = initialWorkingDirectory();
+    if (!workDir.isEmpty()) {
+        m_workingDir = workDir;
+    }
+
+    // Build the tmux command now that we have the correct working directory
     QString tmuxCommand = shellCommand();
     setProgram(QStringLiteral("sh"));
     setArguments({QStringLiteral("-c"), tmuxCommand});
-    setInitialWorkingDirectory(m_workingDir);
 
-    connectSignals();
+    // Call parent run()
+    Session::run();
 }
 
 void ClaudeSession::connectSignals()

@@ -457,7 +457,7 @@ public Q_SLOTS:
      *
      * This creates the terminal process and connects the teletype to it.
      */
-    void run();
+    virtual void run();
 
     /**
      * Returns the environment of this session as a list of strings like

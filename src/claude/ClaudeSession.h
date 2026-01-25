@@ -121,6 +121,12 @@ public:
     QString shellCommand() const;
 
     /**
+     * Override run() to build the tmux command just before starting.
+     * This ensures the correct working directory is used.
+     */
+    void run() override;
+
+    /**
      * Get the ClaudeProcess instance for state tracking
      */
     ClaudeProcess* claudeProcess() { return m_claudeProcess; }
