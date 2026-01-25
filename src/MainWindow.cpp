@@ -51,9 +51,11 @@
 
 // Claude integration
 #include "claude/ClaudeMenu.h"
+#include "claude/ClaudeProcess.h"
 #include "claude/ClaudeSession.h"
 #include "claude/ClaudeSessionWizard.h"
 #include "claude/ClaudeStatusWidget.h"
+#include "claude/TmuxManager.h"
 
 #include "profile/ProfileList.h"
 #include "profile/ProfileManager.h"
@@ -961,6 +963,38 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
     // Show wizard for Claude-enabled profiles
     if (profile->property<bool>(Profile::ClaudeEnabled)) {
         qDebug() << "Claude profile detected";
+
+        // Check prerequisites before showing wizard
+        QStringList missingDeps;
+        if (!Konsolai::TmuxManager::isAvailable()) {
+            missingDeps << QStringLiteral("tmux");
+        }
+        if (!Konsolai::ClaudeProcess::isAvailable()) {
+            missingDeps << QStringLiteral("claude CLI");
+        }
+
+        if (!missingDeps.isEmpty()) {
+            QMessageBox msgBox(this);
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setWindowTitle(i18n("Missing Dependencies"));
+            msgBox.setText(i18n("The following dependencies are required for Claude sessions:"));
+            QString details = missingDeps.join(QStringLiteral(", ")) + QStringLiteral("\n\n");
+            details += QStringLiteral("To install:\n");
+            if (!Konsolai::TmuxManager::isAvailable()) {
+                details += QStringLiteral("  tmux: sudo apt install tmux\n");
+            }
+            if (!Konsolai::ClaudeProcess::isAvailable()) {
+                details += QStringLiteral("  claude: npm install -g @anthropic-ai/claude-code\n");
+            }
+            msgBox.setInformativeText(details);
+            msgBox.setStandardButtons(QMessageBox::Ok | QMessageBox::Cancel);
+            msgBox.setDefaultButton(QMessageBox::Cancel);
+
+            if (msgBox.exec() != QMessageBox::Ok) {
+                return;
+            }
+            // User clicked OK - continue anyway (maybe they'll install before session starts)
+        }
 
         // Check if Shift is held - if so, skip wizard
         bool skipWizard = QApplication::keyboardModifiers() & Qt::ShiftModifier;

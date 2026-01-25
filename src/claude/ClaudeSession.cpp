@@ -6,6 +6,7 @@
 #include "ClaudeSession.h"
 
 #include <QDir>
+#include <QMessageBox>
 #include <QRegularExpression>
 
 namespace Konsolai
@@ -92,19 +93,70 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
 
 void ClaudeSession::run()
 {
+    qDebug() << "ClaudeSession::run() called";
+
+    // Validate prerequisites
+    if (!TmuxManager::isAvailable()) {
+        qWarning() << "tmux is NOT available!";
+        qWarning() << "Showing error dialog...";
+        QMessageBox msgBox;
+        msgBox.setIcon(QMessageBox::Critical);
+        msgBox.setWindowTitle(QStringLiteral("Claude Session Error"));
+        msgBox.setText(QStringLiteral("tmux is not installed or not in PATH."));
+        msgBox.setInformativeText(
+            QStringLiteral("Please install tmux to use Claude sessions:\n"
+                           "  sudo apt install tmux  # Debian/Ubuntu\n"
+                           "  sudo dnf install tmux  # Fedora\n"
+                           "  sudo pacman -S tmux    # Arch"));
+        msgBox.exec();
+        qWarning() << "Error dialog closed, returning from run()";
+        return;
+    }
+
+    if (!ClaudeProcess::isAvailable()) {
+        qWarning() << "Claude CLI is NOT available!";
+        QMessageBox msgBox;
+        msgBox.setIcon(QMessageBox::Critical);
+        msgBox.setWindowTitle(QStringLiteral("Claude Session Error"));
+        msgBox.setText(QStringLiteral("Claude CLI is not installed or not in PATH."));
+        msgBox.setInformativeText(
+            QStringLiteral("Please install Claude CLI:\n"
+                           "  npm install -g @anthropic-ai/claude-code\n\n"
+                           "Or visit: https://claude.ai/download"));
+        msgBox.exec();
+        return;
+    }
+
     // Use the current initialWorkingDirectory (may have been updated by ViewManager)
     QString workDir = initialWorkingDirectory();
     if (!workDir.isEmpty()) {
         m_workingDir = workDir;
     }
 
+    // Validate working directory
+    if (!m_workingDir.isEmpty() && !QDir(m_workingDir).exists()) {
+        QMessageBox::warning(nullptr,
+                             QStringLiteral("Claude Session Warning"),
+                             QStringLiteral("Working directory does not exist:\n%1\n\n"
+                                            "Using current directory instead.")
+                                 .arg(m_workingDir));
+        m_workingDir = QDir::currentPath();
+    }
+
     // Build the tmux command now that we have the correct working directory
     QString tmuxCommand = shellCommand();
+
+    qDebug() << "ClaudeSession::run() - tmux command:" << tmuxCommand;
+    qDebug() << "  Working dir:" << m_workingDir;
+    qDebug() << "  Session name:" << m_sessionName;
+
     setProgram(QStringLiteral("sh"));
     setArguments({QStringLiteral("-c"), tmuxCommand});
 
     // Call parent run()
     Session::run();
+
+    qDebug() << "ClaudeSession::run() - session started, isRunning:" << isRunning();
 }
 
 void ClaudeSession::connectSignals()
