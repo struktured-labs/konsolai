@@ -1016,9 +1016,23 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     QProcess::execute(QStringLiteral("git"), {QStringLiteral("init"), workDir});
                 }
                 if (!wizard.worktreeBranch().isEmpty()) {
-                    QProcess::execute(
+                    // Check if branch exists
+                    QProcess checkBranch;
+                    checkBranch.start(
                         QStringLiteral("git"),
-                        {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("worktree"), QStringLiteral("add"), workDir, wizard.worktreeBranch()});
+                        {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("rev-parse"), QStringLiteral("--verify"), wizard.worktreeBranch()});
+                    checkBranch.waitForFinished(5000);
+                    bool branchExists = (checkBranch.exitCode() == 0);
+
+                    QStringList args = {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("worktree"), QStringLiteral("add")};
+                    if (!branchExists) {
+                        // Create new branch with -b flag
+                        args << QStringLiteral("-b") << wizard.worktreeBranch() << workDir;
+                    } else {
+                        // Use existing branch
+                        args << workDir << wizard.worktreeBranch();
+                    }
+                    QProcess::execute(QStringLiteral("git"), args);
                 }
 
                 createSession(profile, workDir);
