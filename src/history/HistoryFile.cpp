@@ -43,7 +43,8 @@ HistoryFile::HistoryFile()
     if (!historyFileLocation.exists()) {
         QString fileLocation;
         KSharedConfigPtr appConfig = KSharedConfig::openConfig();
-        if (qApp->applicationName() != QLatin1String("konsole")) {
+        const QString appName = qApp->applicationName();
+        if (appName != QLatin1String("konsole") && appName != QLatin1String("konsolai")) {
             // Check if "kpart"rc has "FileLocation" group; AFAIK
             // only possible if user manually added it. If not
             // found, use konsole's config.

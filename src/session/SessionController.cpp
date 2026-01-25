@@ -2226,8 +2226,9 @@ void SessionController::zmodemUpload()
 
 bool SessionController::isKonsolePart() const
 {
-    // Check to see if we are being called from Konsole or a KPart
-    return !(qApp->applicationName() == QLatin1String("konsole"));
+    // Check to see if we are being called from Konsole/Konsolai or a KPart
+    const QString appName = qApp->applicationName();
+    return !(appName == QLatin1String("konsole") || appName == QLatin1String("konsolai"));
 }
 
 QString SessionController::userTitle() const

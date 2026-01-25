@@ -709,7 +709,14 @@ Session *MainWindow::createSession(Profile::Ptr profile, const QString &director
         profile = ProfileManager::instance()->defaultProfile();
     }
 
-    const QString newSessionDirectory = profile->startInCurrentSessionDir() ? directory : QString();
+    // For Claude sessions, always use the provided directory
+    QString newSessionDirectory;
+    if (profile->property<bool>(Profile::ClaudeEnabled)) {
+        newSessionDirectory = directory;
+    } else {
+        newSessionDirectory = profile->startInCurrentSessionDir() ? directory : QString();
+    }
+
     Session *session = _viewManager->createSession(profile, newSessionDirectory);
 
     // create view before starting the session process so that the session
@@ -718,6 +725,11 @@ Session *MainWindow::createSession(Profile::Ptr profile, const QString &director
     // don't like this happening
     auto newView = _viewManager->createView(session);
     _viewManager->activeContainer()->addView(newView);
+
+    // Start the session
+    if (!session->isRunning()) {
+        session->run();
+    }
 
     return session;
 }

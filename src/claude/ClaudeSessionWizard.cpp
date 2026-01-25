@@ -8,6 +8,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDebug>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileSystemModel>
@@ -90,6 +91,10 @@ void ClaudeSessionWizard::setDefaultDirectory(const QString &path)
 
 QString ClaudeSessionWizard::selectedDirectory() const
 {
+    // Return from line edit in case m_selectedDirectory wasn't updated
+    if (m_directoryEdit && !m_directoryEdit->text().isEmpty()) {
+        return m_directoryEdit->text();
+    }
     return m_selectedDirectory;
 }
 
@@ -483,14 +488,17 @@ bool DirectorySelectionPage::isComplete() const
 bool DirectorySelectionPage::validatePage()
 {
     QString path = m_wizard->m_directoryEdit->text();
+    qDebug() << "DirectorySelectionPage::validatePage() - path:" << path;
 
     if (!QDir(path).exists()) {
+        qDebug() << "Directory does not exist!";
         QMessageBox::warning(const_cast<DirectorySelectionPage *>(this), i18n("Invalid Directory"), i18n("The selected directory does not exist."));
         return false;
     }
 
     // Save to recent directories
     m_wizard->saveRecentDirectory(path);
+    qDebug() << "DirectorySelectionPage::validatePage() - returning true";
     return true;
 }
 

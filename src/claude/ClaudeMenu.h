@@ -75,6 +75,22 @@ public:
     }
 
     /**
+     * Check if Triple Yolo Mode is enabled (auto-continue prompts)
+     */
+    bool isTripleYoloMode() const
+    {
+        return m_tripleYoloMode;
+    }
+
+    /**
+     * Get the auto-continue prompt
+     */
+    QString autoContinuePrompt() const
+    {
+        return m_autoContinuePrompt;
+    }
+
+    /**
      * Set Yolo Mode state
      */
     void setYoloMode(bool enabled);
@@ -83,6 +99,16 @@ public:
      * Set Double Yolo Mode state
      */
     void setDoubleYoloMode(bool enabled);
+
+    /**
+     * Set Triple Yolo Mode state
+     */
+    void setTripleYoloMode(bool enabled);
+
+    /**
+     * Set the auto-continue prompt
+     */
+    void setAutoContinuePrompt(const QString &prompt);
 
 Q_SIGNALS:
     /**
@@ -105,6 +131,11 @@ Q_SIGNALS:
      */
     void doubleYoloModeChanged(bool enabled);
 
+    /**
+     * Emitted when Triple Yolo Mode state changes
+     */
+    void tripleYoloModeChanged(bool enabled);
+
 private Q_SLOTS:
     void onApprove();
     void onDeny();
@@ -119,6 +150,8 @@ private Q_SLOTS:
     void updateActionStates();
     void onYoloModeToggled(bool checked);
     void onDoubleYoloModeToggled(bool checked);
+    void onTripleYoloModeToggled(bool checked);
+    void onSetAutoContinuePrompt();
 
 private:
     void createActions();
@@ -143,10 +176,16 @@ private:
     // Yolo mode actions
     QAction *m_yoloModeAction = nullptr;
     QAction *m_doubleYoloModeAction = nullptr;
+    QAction *m_tripleYoloModeAction = nullptr;
+    QAction *m_setPromptAction = nullptr;
 
     // Yolo mode state
     bool m_yoloMode = false;
     bool m_doubleYoloMode = false;
+    bool m_tripleYoloMode = false;
+
+    // Auto-continue prompt for Triple Yolo
+    QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
 };
 
 } // namespace Konsolai

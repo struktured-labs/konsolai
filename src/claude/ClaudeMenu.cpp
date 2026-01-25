@@ -10,6 +10,7 @@
 
 #include <KLocalizedString>
 #include <QActionGroup>
+#include <QInputDialog>
 
 namespace Konsolai
 {
@@ -82,6 +83,19 @@ void ClaudeMenu::createActions()
     m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
     m_doubleYoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("security-low")));
     connect(m_doubleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onDoubleYoloModeToggled);
+
+    // Triple Yolo Mode - auto-continue with prompt
+    m_tripleYoloModeAction = addAction(i18n("&Triple Yolo Mode (Auto-Continue)"));
+    m_tripleYoloModeAction->setCheckable(true);
+    m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
+    m_tripleYoloModeAction->setToolTip(i18n("Automatically send continue prompt when Claude becomes idle"));
+    m_tripleYoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("media-playback-start")));
+    connect(m_tripleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onTripleYoloModeToggled);
+
+    // Set Auto-Continue Prompt
+    m_setPromptAction = addAction(i18n("Set Auto-Continue &Prompt..."));
+    m_setPromptAction->setToolTip(i18n("Configure the prompt sent when Triple Yolo auto-continues"));
+    connect(m_setPromptAction, &QAction::triggered, this, &ClaudeMenu::onSetAutoContinuePrompt);
 
     addSeparator();
 
@@ -301,6 +315,45 @@ void ClaudeMenu::setDoubleYoloMode(bool enabled)
     }
 
     Q_EMIT doubleYoloModeChanged(enabled);
+}
+
+void ClaudeMenu::onTripleYoloModeToggled(bool checked)
+{
+    setTripleYoloMode(checked);
+}
+
+void ClaudeMenu::onSetAutoContinuePrompt()
+{
+    bool ok = false;
+    QString prompt = QInputDialog::getMultiLineText(this,
+                                                    i18n("Auto-Continue Prompt"),
+                                                    i18n("Enter the prompt to send when Claude becomes idle:"),
+                                                    m_autoContinuePrompt,
+                                                    &ok);
+
+    if (ok && !prompt.isEmpty()) {
+        setAutoContinuePrompt(prompt);
+    }
+}
+
+void ClaudeMenu::setTripleYoloMode(bool enabled)
+{
+    if (m_tripleYoloMode == enabled) {
+        return;
+    }
+
+    m_tripleYoloMode = enabled;
+
+    if (m_tripleYoloModeAction) {
+        m_tripleYoloModeAction->setChecked(enabled);
+    }
+
+    Q_EMIT tripleYoloModeChanged(enabled);
+}
+
+void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
+{
+    m_autoContinuePrompt = prompt;
 }
 
 } // namespace Konsolai
