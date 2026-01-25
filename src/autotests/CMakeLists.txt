@@ -50,3 +50,16 @@ ecm_add_tests(
     ViewManagerTest.cpp
     LINK_LIBRARIES ${KONSOLE_TEST_LIBS} KF6::Parts
 )
+
+# Claude Integration Tests
+set(KONSOLAI_CLAUDE_TEST_LIBS Qt::Test Qt::Network konsolai_claude konsoleprivate)
+
+ecm_add_tests(
+    TmuxManagerTest.cpp
+    ClaudeProcessTest.cpp
+    ClaudeSessionStateTest.cpp
+    ClaudeHookHandlerTest.cpp
+    NotificationManagerTest.cpp
+    ProfileClaudeTest.cpp
+    LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
+)
