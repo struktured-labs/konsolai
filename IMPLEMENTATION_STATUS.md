@@ -182,6 +182,12 @@
 - Linked into main `konsoleprivate` library
 - Hook handler binary: `konsolai-hook-handler`
 
+**Testing:**
+- ✅ Comprehensive unit test suite added (1815 lines, 6 test classes)
+- ✅ Tests integrated into CMakeLists.txt with ECM
+- Tests cover: TmuxManager, ClaudeProcess, ClaudeSessionState, ClaudeHookHandler, NotificationManager, Profile properties
+- Tests use Qt Test framework with proper signal/slot verification
+
 **Not Yet Tested:**
 - Full build verification (CMake + make)
 - Runtime integration with Konsole codebase
