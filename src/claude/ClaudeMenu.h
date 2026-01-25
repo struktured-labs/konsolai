@@ -24,6 +24,9 @@ class ClaudeSessionRegistry;
  * - Stop Claude (Ctrl+Shift+S)
  * - Restart Claude (Ctrl+Shift+R)
  * - ---
+ * - Yolo Mode (auto-approve all permissions)
+ * - Double Yolo Mode (auto-accept completions)
+ * - ---
  * - Detach Session
  * - Kill Session
  * - ---
@@ -55,6 +58,32 @@ public:
     QAction* detachAction() const { return m_detachAction; }
     QAction* killAction() const { return m_killAction; }
 
+    /**
+     * Check if Yolo Mode is enabled (auto-approve all permissions)
+     */
+    bool isYoloMode() const
+    {
+        return m_yoloMode;
+    }
+
+    /**
+     * Check if Double Yolo Mode is enabled (auto-accept completions)
+     */
+    bool isDoubleYoloMode() const
+    {
+        return m_doubleYoloMode;
+    }
+
+    /**
+     * Set Yolo Mode state
+     */
+    void setYoloMode(bool enabled);
+
+    /**
+     * Set Double Yolo Mode state
+     */
+    void setDoubleYoloMode(bool enabled);
+
 Q_SIGNALS:
     /**
      * Emitted when user wants to reattach to a session
@@ -65,6 +94,16 @@ Q_SIGNALS:
      * Emitted when user wants to configure hooks
      */
     void configureHooksRequested();
+
+    /**
+     * Emitted when Yolo Mode state changes
+     */
+    void yoloModeChanged(bool enabled);
+
+    /**
+     * Emitted when Double Yolo Mode state changes
+     */
+    void doubleYoloModeChanged(bool enabled);
 
 private Q_SLOTS:
     void onApprove();
@@ -78,6 +117,8 @@ private Q_SLOTS:
     void onConfigureHooks();
     void onOrphanedSessionsChanged();
     void updateActionStates();
+    void onYoloModeToggled(bool checked);
+    void onDoubleYoloModeToggled(bool checked);
 
 private:
     void createActions();
@@ -98,6 +139,14 @@ private:
 
     // Reattach submenu
     QMenu *m_reattachMenu = nullptr;
+
+    // Yolo mode actions
+    QAction *m_yoloModeAction = nullptr;
+    QAction *m_doubleYoloModeAction = nullptr;
+
+    // Yolo mode state
+    bool m_yoloMode = false;
+    bool m_doubleYoloMode = false;
 };
 
 } // namespace Konsolai

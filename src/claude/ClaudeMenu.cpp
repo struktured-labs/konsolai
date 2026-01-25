@@ -67,6 +67,24 @@ void ClaudeMenu::createActions()
 
     addSeparator();
 
+    // Yolo Mode - auto-approve all permissions
+    m_yoloModeAction = addAction(i18n("&Yolo Mode (Auto-Approve)"));
+    m_yoloModeAction->setCheckable(true);
+    m_yoloModeAction->setChecked(m_yoloMode);
+    m_yoloModeAction->setToolTip(i18n("Automatically approve all permission requests"));
+    m_yoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("security-low")));
+    connect(m_yoloModeAction, &QAction::toggled, this, &ClaudeMenu::onYoloModeToggled);
+
+    // Double Yolo Mode - auto-accept completions
+    m_doubleYoloModeAction = addAction(i18n("Double &Yolo Mode (Auto-Complete)"));
+    m_doubleYoloModeAction->setCheckable(true);
+    m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
+    m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
+    m_doubleYoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("security-low")));
+    connect(m_doubleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onDoubleYoloModeToggled);
+
+    addSeparator();
+
     // Detach Session
     m_detachAction = addAction(i18n("De&tach Session"));
     m_detachAction->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
@@ -243,6 +261,46 @@ void ClaudeMenu::updateReattachMenu()
         action->setToolTip(tooltip);
         connect(action, &QAction::triggered, this, &ClaudeMenu::onReattachSession);
     }
+}
+
+void ClaudeMenu::onYoloModeToggled(bool checked)
+{
+    setYoloMode(checked);
+}
+
+void ClaudeMenu::onDoubleYoloModeToggled(bool checked)
+{
+    setDoubleYoloMode(checked);
+}
+
+void ClaudeMenu::setYoloMode(bool enabled)
+{
+    if (m_yoloMode == enabled) {
+        return;
+    }
+
+    m_yoloMode = enabled;
+
+    if (m_yoloModeAction) {
+        m_yoloModeAction->setChecked(enabled);
+    }
+
+    Q_EMIT yoloModeChanged(enabled);
+}
+
+void ClaudeMenu::setDoubleYoloMode(bool enabled)
+{
+    if (m_doubleYoloMode == enabled) {
+        return;
+    }
+
+    m_doubleYoloMode = enabled;
+
+    if (m_doubleYoloModeAction) {
+        m_doubleYoloModeAction->setChecked(enabled);
+    }
+
+    Q_EMIT doubleYoloModeChanged(enabled);
 }
 
 } // namespace Konsolai

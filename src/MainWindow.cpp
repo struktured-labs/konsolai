@@ -8,6 +8,8 @@
 #include "MainWindow.h"
 
 // Qt
+#include <QApplication>
+#include <QDebug>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
@@ -491,6 +493,16 @@ void MainWindow::setupActions()
         auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(controller->session().data());
         _claudeMenu->setActiveSession(claudeSession);
         _claudeStatusWidget->setSession(claudeSession);
+
+        // Connect Yolo Mode auto-approval for this session
+        if (claudeSession) {
+            connect(claudeSession, &Konsolai::ClaudeSession::permissionRequested, this, [this, claudeSession](const QString &action, const QString &) {
+                if (_claudeMenu->isYoloMode()) {
+                    qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
+                    claudeSession->approvePermission();
+                }
+            });
+        }
     });
 }
 
@@ -936,25 +948,44 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
 {
     // Show wizard for Claude-enabled profiles
     if (profile->property<bool>(Profile::ClaudeEnabled)) {
-        Konsolai::ClaudeSessionWizard wizard(this);
-        wizard.setProfile(profile);
-        wizard.setDefaultDirectory(activeSessionDir());
+        qDebug() << "Claude profile detected";
 
-        if (wizard.exec() == QDialog::Accepted) {
-            QString workDir = wizard.selectedDirectory();
+        // Check if Shift is held - if so, skip wizard
+        bool skipWizard = QApplication::keyboardModifiers() & Qt::ShiftModifier;
 
-            // Git operations before session creation
-            if (wizard.shouldInitGit()) {
-                QProcess::execute(QStringLiteral("git"), {QStringLiteral("init"), workDir});
+        if (!skipWizard) {
+            Konsolai::ClaudeSessionWizard wizard(this);
+            wizard.setProfile(profile);
+            wizard.setDefaultDirectory(activeSessionDir());
+
+            int result = wizard.exec();
+            qDebug() << "Wizard result:" << result << "(Accepted=" << QDialog::Accepted << ")";
+
+            if (result == QDialog::Accepted) {
+                QString workDir = wizard.selectedDirectory();
+                qDebug() << "Creating Claude session in:" << workDir;
+
+                // Git operations before session creation
+                if (wizard.shouldInitGit()) {
+                    QProcess::execute(QStringLiteral("git"), {QStringLiteral("init"), workDir});
+                }
+                if (!wizard.worktreeBranch().isEmpty()) {
+                    QProcess::execute(
+                        QStringLiteral("git"),
+                        {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("worktree"), QStringLiteral("add"), workDir, wizard.worktreeBranch()});
+                }
+
+                createSession(profile, workDir);
+                qDebug() << "Session created via wizard";
+                return;
             }
-            if (!wizard.worktreeBranch().isEmpty()) {
-                QProcess::execute(
-                    QStringLiteral("git"),
-                    {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("worktree"), QStringLiteral("add"), workDir, wizard.worktreeBranch()});
-            }
-
-            createSession(profile, workDir);
+            // Wizard was cancelled
+            return;
         }
+
+        // Skip wizard - create session directly in current directory
+        qDebug() << "Skipping wizard, creating session in:" << activeSessionDir();
+        createSession(profile, activeSessionDir());
         return;
     }
 
