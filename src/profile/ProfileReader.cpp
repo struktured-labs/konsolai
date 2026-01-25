@@ -62,7 +62,16 @@ void ProfileReader::readProperties(const KConfig &config, Profile::Ptr profile)
         const QString name(QLatin1String(info.name));
 
         if (group.hasKey(name)) {
-            profile->setProperty(info.property, group.readEntry(name, QVariant(info.defaultValue.metaType())));
+            const QVariant &defaultVal = info.defaultValue;
+            QVariant value;
+
+            // Handle bool explicitly - KConfig stores as "true"/"false" strings
+            if (defaultVal.metaType().id() == QMetaType::Bool) {
+                value = group.readEntry(name, defaultVal.toBool());
+            } else {
+                value = group.readEntry(name, QVariant(defaultVal.metaType()));
+            }
+            profile->setProperty(info.property, value);
         }
     }
 }

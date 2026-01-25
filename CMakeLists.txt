@@ -61,6 +61,7 @@ find_package(KF6 ${KF6_DEP_VERSION} REQUIRED
     NotifyConfig
     Parts
     Service
+    StatusNotifierItem
     TextWidgets
     WidgetsAddons
     WindowSystem

@@ -11,7 +11,9 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
+#include <QProcess>
 #include <QScreen>
+#include <QStatusBar>
 #include <QWindow>
 
 // KDE
@@ -47,8 +49,9 @@
 
 // Claude integration
 #include "claude/ClaudeMenu.h"
-#include "claude/ClaudeStatusWidget.h"
 #include "claude/ClaudeSession.h"
+#include "claude/ClaudeSessionWizard.h"
+#include "claude/ClaudeStatusWidget.h"
 
 #include "profile/ProfileList.h"
 #include "profile/ProfileManager.h"
@@ -475,6 +478,20 @@ void MainWindow::setupActions()
     // Claude Status Widget
     _claudeStatusWidget = new Konsolai::ClaudeStatusWidget(this);
     statusBar()->addPermanentWidget(_claudeStatusWidget);
+
+    // Connect active view changes to update Claude menu and status
+    connect(viewManager(), &ViewManager::activeViewChanged, this, [this](SessionController *controller) {
+        if (!controller || !controller->session()) {
+            _claudeMenu->setActiveSession(nullptr);
+            _claudeStatusWidget->setSession(nullptr);
+            return;
+        }
+
+        // Check if this is a ClaudeSession
+        auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(controller->session().data());
+        _claudeMenu->setActiveSession(claudeSession);
+        _claudeStatusWidget->setSession(claudeSession);
+    });
 }
 
 void MainWindow::updateHamburgerMenu()
@@ -917,6 +934,30 @@ void MainWindow::showShortcutsDialog()
 
 void MainWindow::newFromProfile(const Profile::Ptr &profile)
 {
+    // Show wizard for Claude-enabled profiles
+    if (profile->property<bool>(Profile::ClaudeEnabled)) {
+        Konsolai::ClaudeSessionWizard wizard(this);
+        wizard.setProfile(profile);
+        wizard.setDefaultDirectory(activeSessionDir());
+
+        if (wizard.exec() == QDialog::Accepted) {
+            QString workDir = wizard.selectedDirectory();
+
+            // Git operations before session creation
+            if (wizard.shouldInitGit()) {
+                QProcess::execute(QStringLiteral("git"), {QStringLiteral("init"), workDir});
+            }
+            if (!wizard.worktreeBranch().isEmpty()) {
+                QProcess::execute(
+                    QStringLiteral("git"),
+                    {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("worktree"), QStringLiteral("add"), workDir, wizard.worktreeBranch()});
+            }
+
+            createSession(profile, workDir);
+        }
+        return;
+    }
+
     createSession(profile, activeSessionDir());
 }
 

@@ -137,15 +137,6 @@ void NotificationManager::showDesktopNotification(NotificationType type,
     notification->setIconName(iconName(type));
     notification->setComponentName(QStringLiteral("konsolai"));
 
-    // Add actions for permission requests
-    if (type == NotificationType::Permission) {
-        notification->setDefaultAction(i18n("View"));
-        connect(notification, &KNotification::defaultActivated, this, [notification]() {
-            // Activate the Konsolai window
-            notification->close();
-        });
-    }
-
     notification->sendEvent();
 }
 

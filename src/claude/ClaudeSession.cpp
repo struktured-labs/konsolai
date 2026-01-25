@@ -5,21 +5,20 @@
 
 #include "ClaudeSession.h"
 
+#include <QDir>
 #include <QRegularExpression>
 
 namespace Konsolai
 {
 
-ClaudeSession::ClaudeSession(const QString &profileName,
-                             const QString &workingDir,
-                             QObject *parent)
-    : QObject(parent)
+ClaudeSession::ClaudeSession(const QString &profileName, const QString &workingDir, QObject *parent)
+    : Konsole::Session(parent)
 {
     initializeNew(profileName, workingDir);
 }
 
 ClaudeSession::ClaudeSession(QObject *parent)
-    : QObject(parent)
+    : Konsole::Session(parent)
 {
     // Empty - used for reattach, initialization happens in initializeReattach()
 }
@@ -37,7 +36,7 @@ ClaudeSession::~ClaudeSession() = default;
 void ClaudeSession::initializeNew(const QString &profileName, const QString &workingDir)
 {
     m_profileName = profileName;
-    m_workingDir = workingDir;
+    m_workingDir = workingDir.isEmpty() ? QDir::currentPath() : workingDir;
     m_isReattach = false;
 
     // Generate unique session ID
@@ -49,6 +48,12 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     // Create managers
     m_tmuxManager = new TmuxManager(this);
     m_claudeProcess = new ClaudeProcess(this);
+
+    // Set up the Session to run tmux
+    QString tmuxCommand = shellCommand();
+    setProgram(QStringLiteral("sh"));
+    setArguments({QStringLiteral("-c"), tmuxCommand});
+    setInitialWorkingDirectory(m_workingDir);
 
     connectSignals();
 }
@@ -72,9 +77,17 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
         m_sessionId = QString();
     }
 
+    m_workingDir = QDir::currentPath();
+
     // Create managers
     m_tmuxManager = new TmuxManager(this);
     m_claudeProcess = new ClaudeProcess(this);
+
+    // Set up the Session to reattach to tmux
+    QString tmuxCommand = shellCommand();
+    setProgram(QStringLiteral("sh"));
+    setArguments({QStringLiteral("-c"), tmuxCommand});
+    setInitialWorkingDirectory(m_workingDir);
 
     connectSignals();
 }

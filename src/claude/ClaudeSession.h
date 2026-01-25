@@ -15,14 +15,8 @@
 #include <QString>
 #include <QPointer>
 
-#if HAVE_DBUS
-#include <QDBusContext>
-#endif
-
-// Forward declarations
-namespace Konsole {
-class Session;
-}
+// Konsole includes
+#include "../session/Session.h"
 
 namespace Konsolai
 {
@@ -30,7 +24,7 @@ namespace Konsolai
 /**
  * ClaudeSession manages a Claude-enabled terminal session.
  *
- * A ClaudeSession wraps a Konsole Session to provide:
+ * A ClaudeSession extends Konsole Session to provide:
  * - tmux-backed session persistence
  * - Claude process lifecycle management
  * - State tracking and notifications
@@ -42,12 +36,10 @@ namespace Konsolai
  * - New tab → creates ClaudeSession with tmux session
  * - Closing tab → tmux session continues (can be reattached later)
  * - Session state visible in tab indicators
+ *
+ * Note: Inherits QDBusContext from parent Session class
  */
-#if HAVE_DBUS
-class ClaudeSession : public QObject, protected QDBusContext
-#else
-class ClaudeSession : public QObject
-#endif
+class ClaudeSession : public Konsole::Session
 {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.konsolai.Claude")

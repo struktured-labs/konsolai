@@ -26,10 +26,12 @@ set(claude_SRCS
     ClaudeStatusWidget.cpp
     ClaudeMenu.cpp
     ClaudeTabIndicator.cpp
+    ClaudeSessionWizard.cpp
     ${dbus_xml_srcs}
 )
 
 add_library(konsolai_claude STATIC ${claude_SRCS})
+set_target_properties(konsolai_claude PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(konsolai_claude
     PUBLIC
@@ -55,6 +57,7 @@ target_include_directories(konsolai_claude
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/src
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
