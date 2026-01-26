@@ -152,6 +152,8 @@ private Q_SLOTS:
     void onDoubleYoloModeToggled(bool checked);
     void onTripleYoloModeToggled(bool checked);
     void onSetAutoContinuePrompt();
+    void onArchiveAll();
+    void onArchiveSession();
 
 private:
     void createActions();
@@ -168,6 +170,7 @@ private:
     QAction *m_restartAction = nullptr;
     QAction *m_detachAction = nullptr;
     QAction *m_killAction = nullptr;
+    QAction *m_archiveAllAction = nullptr;
     QAction *m_configureHooksAction = nullptr;
 
     // Reattach submenu

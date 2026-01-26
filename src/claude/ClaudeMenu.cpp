@@ -7,10 +7,12 @@
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
 #include "ClaudeSessionState.h"
+#include "TmuxManager.h"
 
 #include <KLocalizedString>
 #include <QActionGroup>
 #include <QInputDialog>
+#include <QMessageBox>
 
 namespace Konsolai
 {
@@ -110,6 +112,14 @@ void ClaudeMenu::createActions()
     m_killAction->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     m_killAction->setToolTip(i18n("Kill the Claude session completely"));
     connect(m_killAction, &QAction::triggered, this, &ClaudeMenu::onKill);
+
+    addSeparator();
+
+    // Archive All Sessions
+    m_archiveAllAction = addAction(i18n("&Archive All Detached Sessions"));
+    m_archiveAllAction->setIcon(QIcon::fromTheme(QStringLiteral("archive-remove")));
+    m_archiveAllAction->setToolTip(i18n("Kill all detached tmux sessions"));
+    connect(m_archiveAllAction, &QAction::triggered, this, &ClaudeMenu::onArchiveAll);
 
     addSeparator();
 
@@ -259,7 +269,7 @@ void ClaudeMenu::updateReattachMenu()
         return;
     }
 
-    // Add action for each orphaned session
+    // Add submenu for each orphaned session with reattach and archive options
     for (const ClaudeSessionState &state : orphans) {
         QString displayName = state.sessionName;
         if (!state.profileName.isEmpty()) {
@@ -270,10 +280,26 @@ void ClaudeMenu::updateReattachMenu()
         QString tooltip = QStringLiteral("Last accessed: %1\nWorking directory: %2")
                               .arg(timeAgo, state.workingDirectory);
 
-        QAction *action = m_reattachMenu->addAction(displayName);
-        action->setData(state.sessionName);
-        action->setToolTip(tooltip);
-        connect(action, &QAction::triggered, this, &ClaudeMenu::onReattachSession);
+        // Create submenu for this session
+        QMenu *sessionMenu = m_reattachMenu->addMenu(displayName);
+        sessionMenu->setToolTip(tooltip);
+
+        // Reattach action
+        QAction *reattachAction = sessionMenu->addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Reattach"));
+        reattachAction->setData(state.sessionName);
+        connect(reattachAction, &QAction::triggered, this, &ClaudeMenu::onReattachSession);
+
+        // Archive action
+        QAction *archiveAction = sessionMenu->addAction(QIcon::fromTheme(QStringLiteral("archive-remove")), i18n("Archive (Kill)"));
+        archiveAction->setData(state.sessionName);
+        connect(archiveAction, &QAction::triggered, this, &ClaudeMenu::onArchiveSession);
+    }
+
+    // Add separator and "Archive All" if there are multiple sessions
+    if (orphans.size() > 1) {
+        m_reattachMenu->addSeparator();
+        QAction *archiveAllAction = m_reattachMenu->addAction(QIcon::fromTheme(QStringLiteral("archive-remove")), i18n("Archive All..."));
+        connect(archiveAllAction, &QAction::triggered, this, &ClaudeMenu::onArchiveAll);
     }
 }
 
@@ -354,6 +380,61 @@ void ClaudeMenu::setTripleYoloMode(bool enabled)
 void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
 {
     m_autoContinuePrompt = prompt;
+}
+
+void ClaudeMenu::onArchiveAll()
+{
+    if (!m_registry) {
+        return;
+    }
+
+    QList<ClaudeSessionState> orphans = m_registry->orphanedSessions();
+    if (orphans.isEmpty()) {
+        return;
+    }
+
+    // Confirm with user
+    int count = orphans.size();
+    QMessageBox::StandardButton reply = QMessageBox::question(this,
+                                                              i18n("Archive All Sessions"),
+                                                              i18n("This will permanently kill %1 detached tmux session(s).\n\nAre you sure?", count),
+                                                              QMessageBox::Yes | QMessageBox::No,
+                                                              QMessageBox::No);
+
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    // Kill all orphaned sessions
+    TmuxManager tmux;
+    for (const ClaudeSessionState &state : orphans) {
+        tmux.killSession(state.sessionName);
+    }
+
+    // Refresh the registry
+    m_registry->refreshOrphanedSessions();
+}
+
+void ClaudeMenu::onArchiveSession()
+{
+    QAction *action = qobject_cast<QAction *>(sender());
+    if (!action) {
+        return;
+    }
+
+    QString sessionName = action->data().toString();
+    if (sessionName.isEmpty()) {
+        return;
+    }
+
+    // Kill the tmux session
+    TmuxManager tmux;
+    tmux.killSession(sessionName);
+
+    // Refresh the registry
+    if (m_registry) {
+        m_registry->refreshOrphanedSessions();
+    }
 }
 
 } // namespace Konsolai
