@@ -161,6 +161,13 @@ bool TmuxManager::killSession(const QString &sessionName)
     return ok;
 }
 
+bool TmuxManager::detachSession(const QString &sessionName)
+{
+    bool ok = false;
+    executeCommand({QStringLiteral("detach-client"), QStringLiteral("-s"), sessionName}, &ok);
+    return ok;
+}
+
 bool TmuxManager::sendKeys(const QString &sessionName, const QString &keys)
 {
     bool ok = false;

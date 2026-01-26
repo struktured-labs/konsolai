@@ -503,11 +503,9 @@ void MainWindow::setupActions()
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
         // Create view and add to container
+        // Note: createView() internally calls session->run()
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
-
-        // Start the session (will attach to existing tmux)
-        claudeSession->run();
 
         // Register with registry
         auto *registry = Konsolai::ClaudeSessionRegistry::instance();
@@ -1066,23 +1064,49 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     QProcess::execute(QStringLiteral("git"), {QStringLiteral("init"), workDir});
                 }
                 if (!wizard.worktreeBranch().isEmpty()) {
+                    QString branchName = wizard.worktreeBranch();
+                    QString repoRoot = wizard.repoRoot();
+
+                    // Create worktree path as sibling to repo, named after branch
+                    QDir repoDir(repoRoot);
+                    repoDir.cdUp();
+                    QString worktreePath = repoDir.filePath(branchName);
+
+                    qDebug() << "Creating worktree:" << worktreePath << "for branch:" << branchName;
+
                     // Check if branch exists
                     QProcess checkBranch;
                     checkBranch.start(
                         QStringLiteral("git"),
-                        {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("rev-parse"), QStringLiteral("--verify"), wizard.worktreeBranch()});
+                        {QStringLiteral("-C"), repoRoot, QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("refs/heads/") + branchName});
                     checkBranch.waitForFinished(5000);
                     bool branchExists = (checkBranch.exitCode() == 0);
 
-                    QStringList args = {QStringLiteral("-C"), wizard.repoRoot(), QStringLiteral("worktree"), QStringLiteral("add")};
+                    qDebug() << "Branch exists:" << branchExists;
+
+                    QStringList args = {QStringLiteral("-C"), repoRoot, QStringLiteral("worktree"), QStringLiteral("add")};
                     if (!branchExists) {
                         // Create new branch with -b flag
-                        args << QStringLiteral("-b") << wizard.worktreeBranch() << workDir;
+                        args << QStringLiteral("-b") << branchName << worktreePath;
                     } else {
                         // Use existing branch
-                        args << workDir << wizard.worktreeBranch();
+                        args << worktreePath << branchName;
                     }
-                    QProcess::execute(QStringLiteral("git"), args);
+
+                    qDebug() << "Git worktree command:" << args;
+                    int exitCode = QProcess::execute(QStringLiteral("git"), args);
+                    qDebug() << "Git worktree exit code:" << exitCode;
+
+                    if (exitCode == 0) {
+                        // Update workDir to the new worktree path
+                        workDir = worktreePath;
+                        qDebug() << "Worktree created, session will use:" << workDir;
+                    } else {
+                        QMessageBox::warning(this,
+                                             i18n("Worktree Error"),
+                                             i18n("Failed to create git worktree. Check if the branch name is valid and the path doesn't already exist."));
+                        return;
+                    }
                 }
 
                 createSession(profile, workDir);
@@ -1238,11 +1262,9 @@ void MainWindow::autoReattachClaudeSessions()
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
         // Create view and add to container
+        // Note: createView() internally calls session->run()
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
-
-        // Start the session (will attach to existing tmux)
-        claudeSession->run();
 
         // Register with registry
         registry->registerSession(claudeSession);

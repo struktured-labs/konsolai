@@ -7,7 +7,9 @@
 
 #include <QDir>
 #include <QMessageBox>
+#include <QProcess>
 #include <QRegularExpression>
+#include <QTimer>
 
 namespace Konsolai
 {
@@ -201,13 +203,22 @@ QString ClaudeSession::shellCommand() const
 
 void ClaudeSession::detach()
 {
-    if (m_tmuxManager) {
-        // The detach command is sent to tmux, not run in the terminal
-        // We need to use sendKeys to send the detach key sequence
-        // Default tmux prefix is Ctrl+b, then 'd' to detach
-        m_tmuxManager->sendKeys(m_sessionName, QStringLiteral("C-b d"));
+    // Detach: disconnect from tmux session while keeping it running.
+    // Use tmux detach-client to cleanly detach.
+    // Don't emit signals or call close() - let tmux disconnection
+    // naturally trigger the session end.
+
+    qDebug() << "ClaudeSession::detach() called for session:" << m_sessionName;
+
+    if (!m_sessionName.isEmpty()) {
+        QProcess process;
+        process.start(QStringLiteral("tmux"), {QStringLiteral("detach-client"), QStringLiteral("-s"), m_sessionName});
+        process.waitForFinished(5000);
+        qDebug() << "ClaudeSession::detach() - tmux detach-client exit code:" << process.exitCode();
     }
-    Q_EMIT detached();
+
+    // tmux detach-client will cause the "tmux attach" command in our terminal to exit,
+    // which will naturally trigger session termination through normal Konsole flow
 }
 
 void ClaudeSession::kill()

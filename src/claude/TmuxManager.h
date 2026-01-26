@@ -119,6 +119,11 @@ public:
     bool killSession(const QString &sessionName);
 
     /**
+     * Detach the client from a session (session keeps running in background)
+     */
+    bool detachSession(const QString &sessionName);
+
+    /**
      * Send keys to a tmux session
      */
     bool sendKeys(const QString &sessionName, const QString &keys);

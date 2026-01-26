@@ -199,8 +199,12 @@ void ClaudeMenu::onRestart()
 
 void ClaudeMenu::onDetach()
 {
+    qDebug() << "ClaudeMenu::onDetach() - m_activeSession:" << (void *)m_activeSession;
     if (m_activeSession) {
+        qDebug() << "  Session name:" << m_activeSession->sessionName();
         m_activeSession->detach();
+    } else {
+        qDebug() << "  No active session!";
     }
 }
 

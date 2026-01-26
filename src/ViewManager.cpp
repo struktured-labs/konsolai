@@ -654,9 +654,22 @@ Session *ViewManager::createSession(const Profile::Ptr &profile, const QString &
 
 void ViewManager::sessionFinished(Session *session)
 {
+    qDebug() << "ViewManager::sessionFinished() called for session:" << (session ? session->title(Session::DisplayedTitleRole) : QStringLiteral("null"));
+    qDebug() << "  Session ptr:" << (void *)session;
+    qDebug() << "  Container count:" << (_viewContainer.isNull() ? -1 : _viewContainer->count());
+    qDebug() << "  isRunning:" << (session ? session->isRunning() : false);
+
     // if this slot is called after the view manager's main widget
     // has been destroyed, do nothing
     if (_viewContainer.isNull()) {
+        qDebug() << "  _viewContainer is null, returning";
+        return;
+    }
+
+    // Guard against duplicate calls for the same session
+    // Check if this session is still in _sessionMap before processing
+    if (!_sessionMap.values().contains(session)) {
+        qDebug() << "  Session not in _sessionMap (already processed), returning";
         return;
     }
 
@@ -664,6 +677,7 @@ void ViewManager::sessionFinished(Session *session)
         // The last session/tab, and only one view (no splits), emit empty()
         // so that close() is called in MainWindow, fixes #432077
         if (_viewContainer->count() == 1 && _viewContainer->currentTabViewCount() == 1) {
+            qDebug() << "  Last tab - emitting empty() to close window";
             Q_EMIT empty();
             return;
         }
@@ -671,38 +685,58 @@ void ViewManager::sessionFinished(Session *session)
 
     Q_ASSERT(session);
 
+    qDebug() << "  Looking up view for session";
     auto view = _sessionMap.key(session);
+    qDebug() << "  View:" << (void *)view;
     _sessionMap.remove(view);
 
     if (SessionManager::instance()->isClosingAllSessions()) {
+        qDebug() << "  isClosingAllSessions, returning";
+        return;
+    }
+
+    if (!view) {
+        qDebug() << "  View is null, returning";
         return;
     }
 
     // Before deleting the view, let's unmaximize if it's maximized.
+    qDebug() << "  Getting splitter from view parent";
     auto *splitter = qobject_cast<ViewSplitter *>(view->parentWidget());
+    qDebug() << "  Splitter:" << (void *)splitter;
     if (splitter == nullptr) {
+        qDebug() << "  Splitter is null, returning";
         return;
     }
+    qDebug() << "  Calling clearMaximized";
     splitter->clearMaximized();
 
+    qDebug() << "  Calling view->deleteLater()";
     view->deleteLater();
+    qDebug() << "  Connecting destroyed signal";
     connect(view, &QObject::destroyed, this, [this]() {
         toggleActionsBasedOnState();
     });
 
+    qDebug() << "  Checking _pluggedController";
     // Only remove the controller from factory() if it's actually controlling
     // the session from the sender.
     // This fixes BUG: 348478 - messed up menus after a detached tab is closed
     if ((!_pluggedController.isNull()) && (_pluggedController->session() == session)) {
+        qDebug() << "  Emitting unplugController";
         // This is needed to remove this controller from factory() in
         // order to prevent BUG: 185466 - disappearing menu popup
         Q_EMIT unplugController(_pluggedController);
     }
 
+    qDebug() << "  Checking _sessionMap.empty():" << _sessionMap.empty();
     if (!_sessionMap.empty()) {
+        qDebug() << "  Calling updateTerminalDisplayHistory";
         updateTerminalDisplayHistory(view, true);
+        qDebug() << "  Calling focusAnotherTerminal";
         focusAnotherTerminal(splitter->getToplevelSplitter());
     }
+    qDebug() << "  sessionFinished() complete";
 }
 
 void ViewManager::focusAnotherTerminal(ViewSplitter *toplevelSplitter)
