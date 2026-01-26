@@ -108,6 +108,47 @@ public:
      */
     ClaudeProcess::State claudeState() const;
 
+    // ========== Per-Session Yolo Mode Settings ==========
+
+    /**
+     * Yolo Mode Level 1: Auto-approve all permission requests
+     */
+    bool yoloMode() const
+    {
+        return m_yoloMode;
+    }
+    void setYoloMode(bool enabled);
+
+    /**
+     * Yolo Mode Level 2: Auto-accept tab completions and suggestions
+     */
+    bool doubleYoloMode() const
+    {
+        return m_doubleYoloMode;
+    }
+    void setDoubleYoloMode(bool enabled);
+
+    /**
+     * Yolo Mode Level 3: Auto-continue with prompt when Claude finishes
+     */
+    bool tripleYoloMode() const
+    {
+        return m_tripleYoloMode;
+    }
+    void setTripleYoloMode(bool enabled);
+
+    /**
+     * The prompt to send in Triple Yolo mode when Claude becomes idle
+     */
+    QString autoContinuePrompt() const
+    {
+        return m_autoContinuePrompt;
+    }
+    void setAutoContinuePrompt(const QString &prompt)
+    {
+        m_autoContinuePrompt = prompt;
+    }
+
     /**
      * Whether this session is for reattaching to an existing tmux session
      */
@@ -228,6 +269,21 @@ Q_SIGNALS:
      */
     void killed();
 
+    /**
+     * Emitted when yolo mode changes
+     */
+    void yoloModeChanged(bool enabled);
+
+    /**
+     * Emitted when double yolo mode changes
+     */
+    void doubleYoloModeChanged(bool enabled);
+
+    /**
+     * Emitted when triple yolo mode changes
+     */
+    void tripleYoloModeChanged(bool enabled);
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -244,6 +300,12 @@ private:
 
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;
+
+    // Per-session yolo mode settings
+    bool m_yoloMode = false;
+    bool m_doubleYoloMode = false;
+    bool m_tripleYoloMode = false;
+    QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
 };
 
 } // namespace Konsolai

@@ -314,6 +314,30 @@ QString ClaudeSession::getTranscript(int lines)
     return transcript(lines);
 }
 
+void ClaudeSession::setYoloMode(bool enabled)
+{
+    if (m_yoloMode != enabled) {
+        m_yoloMode = enabled;
+        Q_EMIT yoloModeChanged(enabled);
+    }
+}
+
+void ClaudeSession::setDoubleYoloMode(bool enabled)
+{
+    if (m_doubleYoloMode != enabled) {
+        m_doubleYoloMode = enabled;
+        Q_EMIT doubleYoloModeChanged(enabled);
+    }
+}
+
+void ClaudeSession::setTripleYoloMode(bool enabled)
+{
+    if (m_tripleYoloMode != enabled) {
+        m_tripleYoloMode = enabled;
+        Q_EMIT tripleYoloModeChanged(enabled);
+    }
+}
+
 } // namespace Konsolai
 
 #include "moc_ClaudeSession.cpp"

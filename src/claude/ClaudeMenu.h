@@ -159,6 +159,7 @@ private:
     void createActions();
     void createReattachMenu();
     void updateReattachMenu();
+    void syncYoloModesFromSession();
 
     ClaudeSession *m_activeSession = nullptr;
     ClaudeSessionRegistry *m_registry = nullptr;

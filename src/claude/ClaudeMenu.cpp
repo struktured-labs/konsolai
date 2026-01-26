@@ -159,14 +159,29 @@ void ClaudeMenu::setActiveSession(ClaudeSession *session)
     if (m_activeSession) {
         connect(m_activeSession, &ClaudeSession::stateChanged,
                 this, &ClaudeMenu::updateActionStates);
-        connect(m_activeSession, &QObject::destroyed,
-                this, [this]() {
-                    m_activeSession = nullptr;
-                    updateActionStates();
-                });
+        connect(m_activeSession, &QObject::destroyed, this, [this]() {
+            m_activeSession = nullptr;
+            updateActionStates();
+            syncYoloModesFromSession();
+        });
+
+        // Sync yolo modes with per-session settings
+        connect(m_activeSession, &ClaudeSession::yoloModeChanged, this, [this](bool enabled) {
+            if (m_yoloModeAction)
+                m_yoloModeAction->setChecked(enabled);
+        });
+        connect(m_activeSession, &ClaudeSession::doubleYoloModeChanged, this, [this](bool enabled) {
+            if (m_doubleYoloModeAction)
+                m_doubleYoloModeAction->setChecked(enabled);
+        });
+        connect(m_activeSession, &ClaudeSession::tripleYoloModeChanged, this, [this](bool enabled) {
+            if (m_tripleYoloModeAction)
+                m_tripleYoloModeAction->setChecked(enabled);
+        });
     }
 
     updateActionStates();
+    syncYoloModesFromSession();
 }
 
 void ClaudeMenu::onApprove()
@@ -243,12 +258,11 @@ void ClaudeMenu::onOrphanedSessionsChanged()
 void ClaudeMenu::updateActionStates()
 {
     bool hasSession = (m_activeSession != nullptr);
-    bool isWaiting = hasSession &&
-                     (m_activeSession->claudeState() == ClaudeProcess::State::WaitingInput);
 
-    // Permission actions only available when waiting for input
-    m_approveAction->setEnabled(isWaiting);
-    m_denyAction->setEnabled(isWaiting);
+    // Permission actions available when there's an active Claude session
+    // (We can't reliably detect "waiting" state without hooks, so always enable)
+    m_approveAction->setEnabled(hasSession);
+    m_denyAction->setEnabled(hasSession);
 
     // Other actions available when session exists
     m_stopAction->setEnabled(hasSession);
@@ -329,6 +343,11 @@ void ClaudeMenu::setYoloMode(bool enabled)
         m_yoloModeAction->setChecked(enabled);
     }
 
+    // Update per-session setting
+    if (m_activeSession) {
+        m_activeSession->setYoloMode(enabled);
+    }
+
     Q_EMIT yoloModeChanged(enabled);
 }
 
@@ -342,6 +361,11 @@ void ClaudeMenu::setDoubleYoloMode(bool enabled)
 
     if (m_doubleYoloModeAction) {
         m_doubleYoloModeAction->setChecked(enabled);
+    }
+
+    // Update per-session setting
+    if (m_activeSession) {
+        m_activeSession->setDoubleYoloMode(enabled);
     }
 
     Q_EMIT doubleYoloModeChanged(enabled);
@@ -378,12 +402,62 @@ void ClaudeMenu::setTripleYoloMode(bool enabled)
         m_tripleYoloModeAction->setChecked(enabled);
     }
 
+    // Update per-session setting
+    if (m_activeSession) {
+        m_activeSession->setTripleYoloMode(enabled);
+    }
+
     Q_EMIT tripleYoloModeChanged(enabled);
 }
 
 void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
 {
     m_autoContinuePrompt = prompt;
+
+    // Update per-session setting
+    if (m_activeSession) {
+        m_activeSession->setAutoContinuePrompt(prompt);
+    }
+}
+
+void ClaudeMenu::syncYoloModesFromSession()
+{
+    if (m_activeSession) {
+        // Sync menu checkboxes with session's settings (without triggering signals)
+        if (m_yoloModeAction) {
+            m_yoloModeAction->blockSignals(true);
+            m_yoloModeAction->setChecked(m_activeSession->yoloMode());
+            m_yoloModeAction->blockSignals(false);
+        }
+        if (m_doubleYoloModeAction) {
+            m_doubleYoloModeAction->blockSignals(true);
+            m_doubleYoloModeAction->setChecked(m_activeSession->doubleYoloMode());
+            m_doubleYoloModeAction->blockSignals(false);
+        }
+        if (m_tripleYoloModeAction) {
+            m_tripleYoloModeAction->blockSignals(true);
+            m_tripleYoloModeAction->setChecked(m_activeSession->tripleYoloMode());
+            m_tripleYoloModeAction->blockSignals(false);
+        }
+        m_autoContinuePrompt = m_activeSession->autoContinuePrompt();
+    } else {
+        // No session - show global defaults
+        if (m_yoloModeAction) {
+            m_yoloModeAction->blockSignals(true);
+            m_yoloModeAction->setChecked(m_yoloMode);
+            m_yoloModeAction->blockSignals(false);
+        }
+        if (m_doubleYoloModeAction) {
+            m_doubleYoloModeAction->blockSignals(true);
+            m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
+            m_doubleYoloModeAction->blockSignals(false);
+        }
+        if (m_tripleYoloModeAction) {
+            m_tripleYoloModeAction->blockSignals(true);
+            m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
+            m_tripleYoloModeAction->blockSignals(false);
+        }
+    }
 }
 
 void ClaudeMenu::onArchiveAll()
