@@ -1,0 +1,145 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            extra-cmake-modules \
+            gettext \
+            libkf6config-dev \
+            libkf6configwidgets-dev \
+            libkf6coreaddons-dev \
+            libkf6crash-dev \
+            libkf6dbusaddons-dev \
+            libkf6globalaccel-dev \
+            libkf6guiaddons-dev \
+            libkf6i18n-dev \
+            libkf6iconthemes-dev \
+            libkf6kio-dev \
+            libkf6newstuff-dev \
+            libkf6notifications-dev \
+            libkf6notifyconfig-dev \
+            libkf6parts-dev \
+            libkf6pty-dev \
+            libkf6service-dev \
+            libkf6textwidgets-dev \
+            libkf6widgetsaddons-dev \
+            libkf6windowsystem-dev \
+            libkf6xmlgui-dev \
+            qt6-base-dev \
+            qt6-multimedia-dev \
+            qt6-5compat-dev \
+            libicu-dev
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --config ${{env.BUILD_TYPE}} -j$(nproc)
+
+      - name: Package
+        run: |
+          cd build
+          DESTDIR=AppDir cmake --install . --prefix=/usr
+          # Create tarball
+          tar -czvf konsolai-linux-x86_64.tar.gz -C AppDir .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: konsolai-linux-x86_64
+          path: build/konsolai-linux-x86_64.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          modules: 'qt5compat qtmultimedia'
+
+      - name: Install Craft
+        shell: pwsh
+        run: |
+          # Install KDE Craft for Windows dependencies
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/KDE/craft/master/setup/install_craft.ps1" -OutFile install_craft.ps1
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          ./install_craft.ps1 --prefix C:/CraftRoot --branch master
+
+      - name: Build with Craft
+        shell: pwsh
+        run: |
+          # Source Craft environment
+          C:/CraftRoot/craft/craftenv.ps1
+
+          # Install KDE Frameworks dependencies
+          craft --install-deps konsole
+
+          # Build konsolai
+          cd ${{ github.workspace }}
+          cmake -B build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_PREFIX_PATH="C:/CraftRoot"
+          cmake --build build --config ${{env.BUILD_TYPE}}
+
+      - name: Package
+        shell: pwsh
+        run: |
+          cd build
+          cpack -G ZIP
+          Rename-Item -Path "konsolai-*.zip" -NewName "konsolai-windows-x86_64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: konsolai-windows-x86_64
+          path: build/konsolai-windows-x86_64.zip
+
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: konsolai-linux-x86_64
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: konsolai-windows-x86_64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            konsolai-linux-x86_64.tar.gz
+            konsolai-windows-x86_64.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
