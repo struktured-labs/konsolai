@@ -171,7 +171,22 @@ bool TmuxManager::detachSession(const QString &sessionName)
 bool TmuxManager::sendKeys(const QString &sessionName, const QString &keys)
 {
     bool ok = false;
-    executeCommand({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, keys}, &ok);
+    // Use -l for literal text to avoid interpretation issues
+    // Then send Enter separately if the text ends with \n
+    QString text = keys;
+    bool sendEnter = text.endsWith(QLatin1Char('\n'));
+    if (sendEnter) {
+        text.chop(1);
+    }
+
+    if (!text.isEmpty()) {
+        executeCommand({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, QStringLiteral("-l"), text}, &ok);
+    }
+
+    if (sendEnter && ok) {
+        executeCommand({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, QStringLiteral("Enter")}, &ok);
+    }
+
     return ok;
 }
 

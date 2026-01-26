@@ -55,6 +55,13 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     // Set initial working directory (may be overridden by ViewManager later)
     setInitialWorkingDirectory(m_workingDir);
 
+    // Set tab title based on working directory name
+    QString projectName = QDir(m_workingDir).dirName();
+    if (!projectName.isEmpty()) {
+        setTitle(Konsole::Session::NameRole, projectName);
+        setTitle(Konsole::Session::DisplayedTitleRole, projectName);
+    }
+
     // NOTE: We don't set program/arguments here - we do it in run()
     // This allows ViewManager to set the correct working directory first
 
@@ -87,6 +94,10 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     m_claudeProcess = new ClaudeProcess(this);
 
     setInitialWorkingDirectory(m_workingDir);
+
+    // Set tab title to session name for reattached sessions
+    setTitle(Konsole::Session::NameRole, existingSessionName);
+    setTitle(Konsole::Session::DisplayedTitleRole, existingSessionName);
 
     // NOTE: We don't set program/arguments here - we do it in run()
 
@@ -143,6 +154,13 @@ void ClaudeSession::run()
                                             "Using current directory instead.")
                                  .arg(m_workingDir));
         m_workingDir = QDir::currentPath();
+    }
+
+    // Update tab title based on final working directory
+    QString projectName = QDir(m_workingDir).dirName();
+    if (!projectName.isEmpty()) {
+        setTitle(Konsole::Session::NameRole, projectName);
+        setTitle(Konsole::Session::DisplayedTitleRole, projectName);
     }
 
     // Build the tmux command now that we have the correct working directory
