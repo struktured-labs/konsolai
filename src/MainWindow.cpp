@@ -98,6 +98,11 @@ MainWindow::MainWindow()
     // See https://phabricator.kde.org/D23108
     setAttribute(Qt::WA_NativeWindow);
 
+    // Initialize Claude session registry (singleton)
+    if (!Konsolai::ClaudeSessionRegistry::instance()) {
+        new Konsolai::ClaudeSessionRegistry(this);
+    }
+
     updateUseTransparency();
 
     // create actions for menus
