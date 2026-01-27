@@ -45,13 +45,16 @@ QString ClaudeHookHandler::hookHandlerPath()
     // First check if installed
     QString installed = QStandardPaths::findExecutable(QStringLiteral("konsolai-hook-handler"));
     if (!installed.isEmpty()) {
+        qDebug() << "ClaudeHookHandler: Found hook handler in PATH:" << installed;
         return installed;
     }
 
     // Check relative to application
     QString appDir = QCoreApplication::applicationDirPath();
     QString relative = appDir + QStringLiteral("/konsolai-hook-handler");
+    qDebug() << "ClaudeHookHandler: Checking for hook handler at:" << relative;
     if (QFile::exists(relative)) {
+        qDebug() << "ClaudeHookHandler: Found hook handler relative to app:" << relative;
         return relative;
     }
 
@@ -63,10 +66,13 @@ QString ClaudeHookHandler::hookHandlerPath()
 
     for (const QString &path : commonPaths) {
         if (QFile::exists(path)) {
+            qDebug() << "ClaudeHookHandler: Found hook handler at:" << path;
             return path;
         }
     }
 
+    qWarning() << "ClaudeHookHandler: Hook handler binary not found!";
+    qWarning() << "  Checked: QStandardPaths, appDir=" << appDir << ", /usr/local/bin, /usr/bin";
     return QString();
 }
 
@@ -227,8 +233,12 @@ QString ClaudeHookHandler::generateHooksConfig() const
 
     QString handlerPath = hookHandlerPath();
     if (handlerPath.isEmpty()) {
+        qWarning() << "ClaudeHookHandler: Cannot generate hooks config - hook handler not found";
         return QString();
     }
+
+    qDebug() << "ClaudeHookHandler: Generating hooks config with handler:" << handlerPath;
+    qDebug() << "  Socket path:" << m_socketPath;
 
     QJsonObject hooks;
 
