@@ -150,6 +150,45 @@ public:
     }
 
     /**
+     * Approval counts for each yolo mode level
+     */
+    int yoloApprovalCount() const
+    {
+        return m_yoloApprovalCount;
+    }
+    int doubleYoloApprovalCount() const
+    {
+        return m_doubleYoloApprovalCount;
+    }
+    int tripleYoloApprovalCount() const
+    {
+        return m_tripleYoloApprovalCount;
+    }
+    int totalApprovalCount() const
+    {
+        return m_yoloApprovalCount + m_doubleYoloApprovalCount + m_tripleYoloApprovalCount;
+    }
+
+    /**
+     * Increment approval counts (called when auto-approving)
+     */
+    void incrementYoloApproval()
+    {
+        m_yoloApprovalCount++;
+        Q_EMIT approvalCountChanged();
+    }
+    void incrementDoubleYoloApproval()
+    {
+        m_doubleYoloApprovalCount++;
+        Q_EMIT approvalCountChanged();
+    }
+    void incrementTripleYoloApproval()
+    {
+        m_tripleYoloApprovalCount++;
+        Q_EMIT approvalCountChanged();
+    }
+
+    /**
      * Whether this session is for reattaching to an existing tmux session
      */
     bool isReattach() const { return m_isReattach; }
@@ -299,6 +338,11 @@ Q_SIGNALS:
      */
     void tripleYoloModeChanged(bool enabled);
 
+    /**
+     * Emitted when approval count changes
+     */
+    void approvalCountChanged();
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -321,6 +365,11 @@ private:
     bool m_doubleYoloMode = false;
     bool m_tripleYoloMode = false;
     QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
+
+    // Approval counters
+    int m_yoloApprovalCount = 0;
+    int m_doubleYoloApprovalCount = 0;
+    int m_tripleYoloApprovalCount = 0;
 };
 
 } // namespace Konsolai

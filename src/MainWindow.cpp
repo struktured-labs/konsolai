@@ -625,9 +625,11 @@ void MainWindow::setupActions()
                     &Konsolai::ClaudeSession::permissionRequested,
                     this,
                     [this, claudeSession, notifyMgr](const QString &action, const QString &details) {
-                        if (_claudeMenu->isYoloMode()) {
+                        Q_UNUSED(details)
+                        if (_claudeMenu->isYoloMode() || claudeSession->yoloMode()) {
                             qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
                             claudeSession->approvePermission();
+                            claudeSession->incrementYoloApproval();
                         } else {
                             // Show notification for permission request
                             notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,

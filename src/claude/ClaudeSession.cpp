@@ -39,7 +39,8 @@ ClaudeSession::~ClaudeSession() = default;
 void ClaudeSession::initializeNew(const QString &profileName, const QString &workingDir)
 {
     m_profileName = profileName;
-    m_workingDir = workingDir.isEmpty() ? QDir::currentPath() : workingDir;
+    // Use home directory as fallback instead of current path (which might be build dir)
+    m_workingDir = workingDir.isEmpty() ? QDir::homePath() : workingDir;
     m_isReattach = false;
 
     // Generate unique session ID
