@@ -58,12 +58,19 @@ void ClaudeStatusWidget::setSession(ClaudeSession *session)
                 this, &ClaudeStatusWidget::updateTask);
         connect(m_session, &ClaudeSession::taskFinished,
                 this, [this]() { updateTask(QString()); });
+        connect(m_session, &ClaudeSession::approvalCountChanged, this, &ClaudeStatusWidget::updateDisplay);
         connect(m_session, &QObject::destroyed,
                 this, &ClaudeStatusWidget::onSessionDestroyed);
 
-        // Update with current state
-        updateState(m_session->claudeState());
-        updateTask(m_session->claudeProcess()->currentTask());
+        // Update with current state - use Idle if session is running
+        ClaudeProcess::State initialState = m_session->claudeState();
+        if (initialState == ClaudeProcess::State::NotRunning && m_session->isRunning()) {
+            initialState = ClaudeProcess::State::Idle;
+        }
+        updateState(initialState);
+        if (m_session->claudeProcess()) {
+            updateTask(m_session->claudeProcess()->currentTask());
+        }
     } else {
         clearSession();
     }
@@ -125,7 +132,12 @@ void ClaudeStatusWidget::updateDisplay()
         icon = QString::fromUtf8(SPINNER_FRAMES[m_spinnerIndex]);
     }
 
-    m_stateLabel->setText(QStringLiteral("%1 Claude: %2").arg(icon, stateStr));
+    // Build status text with approval count if any
+    QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
+    if (m_session && m_session->totalApprovalCount() > 0) {
+        statusText += QStringLiteral(" │ ⚡%1").arg(m_session->totalApprovalCount());
+    }
+    m_stateLabel->setText(statusText);
 
     // Show task if present
     if (!m_currentTask.isEmpty()) {
