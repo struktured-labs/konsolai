@@ -98,6 +98,12 @@ void SessionManagerPanel::setupUi()
     m_activeCategory->setFlags(Qt::ItemIsEnabled);
     m_activeCategory->setExpanded(true);
 
+    m_closedCategory = new QTreeWidgetItem(m_treeWidget);
+    m_closedCategory->setText(0, i18n("Closed"));
+    m_closedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("window-close")));
+    m_closedCategory->setFlags(Qt::ItemIsEnabled);
+    m_closedCategory->setExpanded(true);
+
     m_archivedCategory = new QTreeWidgetItem(m_treeWidget);
     m_archivedCategory->setText(0, i18n("Archived"));
     m_archivedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("archive-remove")));
@@ -403,6 +409,9 @@ void SessionManagerPanel::updateTreeWidget()
     while (m_activeCategory->childCount() > 0) {
         delete m_activeCategory->takeChild(0);
     }
+    while (m_closedCategory->childCount() > 0) {
+        delete m_closedCategory->takeChild(0);
+    }
     while (m_archivedCategory->childCount() > 0) {
         delete m_archivedCategory->takeChild(0);
     }
@@ -414,18 +423,25 @@ void SessionManagerPanel::updateTreeWidget()
     });
 
     // Add sessions to appropriate categories
+    // Priority: Archived > Pinned > Active (has tab) > Closed (no tab)
     for (const auto &meta : sortedMeta) {
+        bool isActive = m_activeSessions.contains(meta.sessionId);
+
         if (meta.isArchived) {
             addSessionToTree(meta, m_archivedCategory);
         } else if (meta.isPinned) {
             addSessionToTree(meta, m_pinnedCategory);
-        } else {
+        } else if (isActive) {
             addSessionToTree(meta, m_activeCategory);
+        } else {
+            // Not active (tab closed) but not archived - goes to Closed
+            addSessionToTree(meta, m_closedCategory);
         }
     }
 
     // Update category visibility
     m_pinnedCategory->setHidden(m_pinnedCategory->childCount() == 0);
+    m_closedCategory->setHidden(m_closedCategory->childCount() == 0);
     m_archivedCategory->setHidden(m_archivedCategory->childCount() == 0);
 }
 

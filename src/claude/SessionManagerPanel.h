@@ -158,6 +158,7 @@ private:
     QPushButton *m_collapseButton = nullptr;
     QTreeWidgetItem *m_pinnedCategory = nullptr;
     QTreeWidgetItem *m_activeCategory = nullptr;
+    QTreeWidgetItem *m_closedCategory = nullptr;
     QTreeWidgetItem *m_archivedCategory = nullptr;
 
     QMap<QString, SessionMetadata> m_metadata;
