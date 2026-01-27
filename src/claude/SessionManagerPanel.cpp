@@ -455,12 +455,33 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName = meta.sessionName;
     }
 
+    // Add yolo mode and approval count indicators for active sessions
+    bool isActive = m_activeSessions.contains(meta.sessionId);
+    if (isActive) {
+        ClaudeSession *session = m_activeSessions[meta.sessionId];
+        if (session) {
+            // Add yolo mode indicator
+            if (session->tripleYoloMode()) {
+                displayName += QStringLiteral(" ⚡⚡⚡");
+            } else if (session->doubleYoloMode()) {
+                displayName += QStringLiteral(" ⚡⚡");
+            } else if (session->yoloMode()) {
+                displayName += QStringLiteral(" ⚡");
+            }
+
+            // Add approval count
+            int count = session->totalApprovalCount();
+            if (count > 0) {
+                displayName += QStringLiteral(" [%1]").arg(count);
+            }
+        }
+    }
+
     item->setText(0, displayName);
     item->setData(0, Qt::UserRole, meta.sessionId);
     item->setToolTip(0, QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString()));
 
     // Set icon based on state
-    bool isActive = m_activeSessions.contains(meta.sessionId);
     if (meta.isArchived) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-grey")));
     } else if (isActive) {
