@@ -34,6 +34,7 @@ namespace Konsolai
 {
 class ClaudeMenu;
 class ClaudeStatusWidget;
+class SessionManagerPanel;
 }
 
 namespace Konsole
@@ -243,6 +244,7 @@ private:
     // Claude integration
     Konsolai::ClaudeMenu *_claudeMenu = nullptr;
     Konsolai::ClaudeStatusWidget *_claudeStatusWidget = nullptr;
+    Konsolai::SessionManagerPanel *_sessionPanel = nullptr;
 
     QPointer<SessionController> _pluggedController;
     std::vector<IKonsolePlugin *> _plugins;

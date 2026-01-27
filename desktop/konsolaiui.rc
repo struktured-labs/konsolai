@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
 
-<gui name="konsolai" version="22">
+<gui name="konsolai" version="23">
     <MenuBar>
         <Menu name="file"><text>File</text>
             <Action name="new-window"/>
@@ -34,6 +34,8 @@
             <Action name="claude-archive-all"/>
         </Menu>
         <Menu name="view"><text>View</text>
+            <Action name="toggle-session-panel"/>
+            <Separator/>
             <Menu name="view-split"><text>Split View</text>
                 <Action name="split-view-left-right"/>
                 <Action name="split-view-top-bottom"/>

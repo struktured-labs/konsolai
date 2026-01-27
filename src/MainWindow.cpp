@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QDebug>
 #include <QDialog>
+#include <QDockWidget>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -62,6 +63,7 @@
 #include "claude/ClaudeSessionWizard.h"
 #include "claude/ClaudeStatusWidget.h"
 #include "claude/NotificationManager.h"
+#include "claude/SessionManagerPanel.h"
 #include "claude/TmuxManager.h"
 
 #include "profile/ProfileList.h"
@@ -537,6 +539,67 @@ void MainWindow::setupActions()
     _claudeStatusWidget = new Konsolai::ClaudeStatusWidget(this);
     statusBar()->addPermanentWidget(_claudeStatusWidget);
 
+    // Session Manager Panel (collapsible sidebar)
+    _sessionPanel = new Konsolai::SessionManagerPanel(this);
+
+    // Create dock widget for session panel
+    auto *sessionDock = new QDockWidget(i18n("Sessions"), this);
+    sessionDock->setObjectName(QStringLiteral("SessionManagerDock"));
+    sessionDock->setWidget(_sessionPanel);
+    sessionDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+    sessionDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    addDockWidget(Qt::LeftDockWidgetArea, sessionDock);
+
+    // Add toggle action for session panel
+    QAction *toggleSessionPanel = sessionDock->toggleViewAction();
+    toggleSessionPanel->setText(i18n("Session &Manager"));
+    toggleSessionPanel->setIcon(QIcon::fromTheme(QStringLiteral("view-list-tree")));
+    collection->addAction(QStringLiteral("toggle-session-panel"), toggleSessionPanel);
+
+    // Connect session panel signals
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::attachRequested, this, [this](const QString &sessionName) {
+        Q_EMIT _claudeMenu->reattachRequested(sessionName);
+    });
+
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::newSessionRequested, this, [this]() {
+        // Trigger new Claude tab action
+        triggerAction(QStringLiteral("new-tab"));
+    });
+
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::unarchiveRequested, this, [this](const QString &sessionId, const QString &workingDirectory) {
+        // Create a new session with the archived session's working directory
+        // Get the Claude profile
+        Profile::Ptr claudeProfile;
+        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+        for (const Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+
+        if (!claudeProfile) {
+            qWarning() << "No Claude profile found for unarchiving";
+            return;
+        }
+
+        // Create new session with the working directory
+        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workingDirectory, this);
+        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        // Register with panel
+        _sessionPanel->registerSession(claudeSession);
+
+        // Register with registry
+        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+        if (registry) {
+            registry->registerSession(claudeSession);
+        }
+    });
+
     // Connect active view changes to update Claude menu and status
     connect(viewManager(), &ViewManager::activeViewChanged, this, [this](SessionController *controller) {
         if (!controller || !controller->session()) {
@@ -552,6 +615,9 @@ void MainWindow::setupActions()
 
         // Connect Yolo Mode auto-approval and notifications for this session
         if (claudeSession) {
+            // Register with session panel
+            _sessionPanel->registerSession(claudeSession);
+
             auto *notifyMgr = Konsolai::NotificationManager::instance();
 
             // Permission requested - notify and maybe auto-approve
