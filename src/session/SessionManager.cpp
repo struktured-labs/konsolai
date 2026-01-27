@@ -11,6 +11,7 @@
 
 // Claude integration
 #include "claude/ClaudeSession.h"
+#include "claude/NotificationManager.h"
 
 // Qt
 #include <QStringList>
@@ -102,7 +103,40 @@ Session *SessionManager::createSession(Profile::Ptr profile)
         // Create ClaudeSession with profile name and working directory
         QString profileName = profile->property<QString>(Profile::Name);
         QString workingDir = profile->property<QString>(Profile::Directory);
-        session = new Konsolai::ClaudeSession(profileName, workingDir);
+        auto *claudeSession = new Konsolai::ClaudeSession(profileName, workingDir);
+        session = claudeSession;
+
+        // Connect ClaudeSession signals to NotificationManager
+        if (Konsolai::NotificationManager *notifMgr = Konsolai::NotificationManager::instance()) {
+            // Permission requested - show as Permission notification
+            connect(claudeSession,
+                    &Konsolai::ClaudeSession::permissionRequested,
+                    notifMgr,
+                    [notifMgr, claudeSession](const QString &action, const QString &description) {
+                        // Only notify if not in yolo mode (yolo mode auto-approves)
+                        if (!claudeSession->yoloMode()) {
+                            notifMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                                             QStringLiteral("Permission Required"),
+                                             QStringLiteral("%1\n%2").arg(action, description),
+                                             claudeSession);
+                        }
+                    });
+
+            // Task complete - show as TaskComplete notification
+            connect(claudeSession, &Konsolai::ClaudeSession::taskComplete, notifMgr, [notifMgr, claudeSession](const QString &summary) {
+                notifMgr->notify(Konsolai::NotificationManager::NotificationType::TaskComplete, QStringLiteral("Task Complete"), summary, claudeSession);
+            });
+
+            // Waiting for input - show as WaitingInput notification
+            connect(claudeSession, &Konsolai::ClaudeSession::waitingForInput, notifMgr, [notifMgr, claudeSession](const QString &prompt) {
+                notifMgr->notify(Konsolai::NotificationManager::NotificationType::WaitingInput, QStringLiteral("Waiting for Input"), prompt, claudeSession);
+            });
+
+            // Error occurred - show as Error notification
+            connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, notifMgr, [notifMgr, claudeSession](const QString &error) {
+                notifMgr->notify(Konsolai::NotificationManager::NotificationType::Error, QStringLiteral("Error"), error, claudeSession);
+            });
+        }
     } else {
         session = new Session();
     }

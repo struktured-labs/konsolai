@@ -75,21 +75,30 @@ void ClaudeHookHandler::ensureDirectoryExists()
     QString dir = sessionDataDir() + QStringLiteral("/sessions");
     QDir d(dir);
     if (!d.exists()) {
-        d.mkpath(dir);
+        bool created = d.mkpath(dir);
+        qDebug() << "ClaudeHookHandler: Created sessions directory:" << dir << "result:" << created;
+    } else {
+        qDebug() << "ClaudeHookHandler: Sessions directory already exists:" << dir;
     }
 }
 
 bool ClaudeHookHandler::start()
 {
+    qDebug() << "ClaudeHookHandler::start() called for session:" << m_sessionId;
+    qDebug() << "  Socket path:" << m_socketPath;
+
     if (m_server && m_server->isListening()) {
+        qDebug() << "  Already listening";
         return true;
     }
 
     ensureDirectoryExists();
+    qDebug() << "  Directory ensured:" << sessionDataDir() + QStringLiteral("/sessions");
 
     // Remove old socket file if exists
     if (QFile::exists(m_socketPath)) {
         QFile::remove(m_socketPath);
+        qDebug() << "  Removed old socket file";
     }
 
     m_server = new QLocalServer(this);
@@ -99,12 +108,14 @@ bool ClaudeHookHandler::start()
             this, &ClaudeHookHandler::onNewConnection);
 
     if (!m_server->listen(m_socketPath)) {
+        qWarning() << "ClaudeHookHandler: Failed to start hook server:" << m_server->errorString();
         Q_EMIT errorOccurred(QStringLiteral("Failed to start hook server: ") + m_server->errorString());
         delete m_server;
         m_server = nullptr;
         return false;
     }
 
+    qDebug() << "ClaudeHookHandler: Started listening on" << m_socketPath;
     return true;
 }
 
@@ -131,6 +142,7 @@ void ClaudeHookHandler::stop()
 
 void ClaudeHookHandler::onNewConnection()
 {
+    qDebug() << "ClaudeHookHandler: New connection received";
     while (m_server->hasPendingConnections()) {
         QLocalSocket *client = m_server->nextPendingConnection();
         if (client) {
@@ -141,6 +153,7 @@ void ClaudeHookHandler::onNewConnection()
             connect(client, &QLocalSocket::disconnected,
                     this, &ClaudeHookHandler::onClientDisconnected);
 
+            qDebug() << "ClaudeHookHandler: Client connected, total clients:" << m_clients.size();
             Q_EMIT clientConnected();
         }
     }
@@ -191,6 +204,7 @@ void ClaudeHookHandler::processJsonMessage(const QJsonObject &obj)
 {
     QString eventType = obj.value(QStringLiteral("event_type")).toString();
     if (eventType.isEmpty()) {
+        qWarning() << "ClaudeHookHandler: Hook message missing event_type";
         Q_EMIT errorOccurred(QStringLiteral("Hook message missing event_type"));
         return;
     }
@@ -199,6 +213,9 @@ void ClaudeHookHandler::processJsonMessage(const QJsonObject &obj)
     QJsonObject eventData = obj.value(QStringLiteral("data")).toObject();
     QJsonDocument dataDoc(eventData);
     QString dataString = QString::fromUtf8(dataDoc.toJson(QJsonDocument::Compact));
+
+    qDebug() << "ClaudeHookHandler: Received hook event:" << eventType;
+    qDebug() << "  Data:" << dataString.left(200);
 
     Q_EMIT hookEventReceived(eventType, dataString);
 }
@@ -283,7 +300,11 @@ QString ClaudeHookHandler::generateHooksConfig() const
     postToolHooks.append(postToolHook);
     hooks[QStringLiteral("PostToolUse")] = postToolHooks;
 
-    QJsonDocument doc(hooks);
+    // Wrap in "hooks" key as expected by Claude Code
+    QJsonObject root;
+    root[QStringLiteral("hooks")] = hooks;
+
+    QJsonDocument doc(root);
     return QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
 }
 

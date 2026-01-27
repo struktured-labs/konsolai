@@ -123,13 +123,14 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         QString notificationType = obj.value(QStringLiteral("type")).toString();
         QString message = obj.value(QStringLiteral("message")).toString();
 
-        if (notificationType == QStringLiteral("permission_request")) {
+        // Handle permission-related notifications (various naming conventions)
+        if (notificationType == QStringLiteral("permission_request") || notificationType == QStringLiteral("permission")
+            || notificationType == QStringLiteral("permission_required")) {
             setState(State::WaitingInput);
             QString action = obj.value(QStringLiteral("action")).toString();
             QString description = obj.value(QStringLiteral("description")).toString();
             Q_EMIT permissionRequested(action, description);
-        }
-        else if (notificationType == QStringLiteral("idle_prompt")) {
+        } else if (notificationType == QStringLiteral("idle_prompt") || notificationType == QStringLiteral("idle")) {
             setState(State::WaitingInput);
         }
 

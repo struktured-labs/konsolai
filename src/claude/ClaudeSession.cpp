@@ -4,8 +4,12 @@
 */
 
 #include "ClaudeSession.h"
+#include "ClaudeHookHandler.h"
 
 #include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMessageBox>
 #include <QProcess>
 #include <QRegularExpression>
@@ -53,6 +57,12 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     m_tmuxManager = new TmuxManager(this);
     m_claudeProcess = new ClaudeProcess(this);
 
+    // Create hook handler for receiving Claude hook events
+    m_hookHandler = new ClaudeHookHandler(m_sessionId, this);
+
+    // Connect hook handler to Claude process for state tracking
+    connect(m_hookHandler, &ClaudeHookHandler::hookEventReceived, m_claudeProcess, &ClaudeProcess::handleHookEvent);
+
     // Set initial working directory (may be overridden by ViewManager later)
     setInitialWorkingDirectory(m_workingDir);
 
@@ -96,6 +106,14 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     // Create managers
     m_tmuxManager = new TmuxManager(this);
     m_claudeProcess = new ClaudeProcess(this);
+
+    // Create hook handler for receiving Claude hook events
+    // For reattach, use the existing session name as the socket identifier
+    QString hookId = m_sessionId.isEmpty() ? m_sessionName : m_sessionId;
+    m_hookHandler = new ClaudeHookHandler(hookId, this);
+
+    // Connect hook handler to Claude process for state tracking
+    connect(m_hookHandler, &ClaudeHookHandler::hookEventReceived, m_claudeProcess, &ClaudeProcess::handleHookEvent);
 
     setInitialWorkingDirectory(m_workingDir);
 
@@ -173,6 +191,35 @@ void ClaudeSession::run()
         setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
     }
 
+    // Start the hook handler to receive Claude events
+    if (m_hookHandler) {
+        if (m_hookHandler->start()) {
+            qDebug() << "ClaudeSession::run() - Hook handler started on:" << m_hookHandler->socketPath();
+
+            // Write hooks config to project's .claude directory
+            QString hooksConfig = m_hookHandler->generateHooksConfig();
+            if (!hooksConfig.isEmpty()) {
+                QString claudeDir = m_workingDir + QStringLiteral("/.claude");
+                QDir dir(claudeDir);
+                if (!dir.exists()) {
+                    dir.mkpath(claudeDir);
+                }
+
+                QString hooksPath = claudeDir + QStringLiteral("/hooks.json");
+                QFile hooksFile(hooksPath);
+                if (hooksFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    hooksFile.write(hooksConfig.toUtf8());
+                    hooksFile.close();
+                    qDebug() << "ClaudeSession::run() - Wrote hooks config to:" << hooksPath;
+                } else {
+                    qWarning() << "ClaudeSession::run() - Failed to write hooks config to:" << hooksPath;
+                }
+            }
+        } else {
+            qWarning() << "ClaudeSession::run() - Failed to start hook handler";
+        }
+    }
+
     // Build the tmux command now that we have the correct working directory
     QString tmuxCommand = shellCommand();
 
@@ -204,6 +251,33 @@ void ClaudeSession::connectSignals()
             this, &ClaudeSession::taskStarted);
     connect(m_claudeProcess, &ClaudeProcess::taskFinished,
             this, &ClaudeSession::taskFinished);
+
+    // Handle yolo mode auto-approval for permission requests
+    connect(m_claudeProcess, &ClaudeProcess::permissionRequested, this, [this](const QString &action, const QString &description) {
+        Q_UNUSED(description);
+        qDebug() << "ClaudeSession: Permission requested:" << action << "yoloMode:" << m_yoloMode;
+        if (m_yoloMode) {
+            qDebug() << "ClaudeSession: Auto-approving permission (yolo mode)";
+            // Use a short delay to ensure the prompt is ready
+            QTimer::singleShot(100, this, [this]() {
+                approvePermission();
+                incrementYoloApproval();
+            });
+        }
+    });
+
+    // Handle task completion notifications for double yolo mode
+    connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
+        qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "tripleYoloMode:" << m_tripleYoloMode;
+        // Triple yolo: auto-continue when Claude becomes idle
+        if (m_tripleYoloMode && newState == ClaudeProcess::State::Idle) {
+            qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
+            QTimer::singleShot(500, this, [this]() {
+                sendPrompt(m_autoContinuePrompt);
+                incrementTripleYoloApproval();
+            });
+        }
+    });
 }
 
 ClaudeProcess::State ClaudeSession::claudeState() const

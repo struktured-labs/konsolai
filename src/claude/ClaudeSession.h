@@ -6,8 +6,9 @@
 #ifndef CLAUDESESSION_H
 #define CLAUDESESSION_H
 
-#include "TmuxManager.h"
+#include "ClaudeHookHandler.h"
 #include "ClaudeProcess.h"
+#include "TmuxManager.h"
 
 #include "config-konsole.h"
 
@@ -359,6 +360,7 @@ private:
 
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;
+    ClaudeHookHandler *m_hookHandler = nullptr;
 
     // Per-session yolo mode settings
     bool m_yoloMode = false;
