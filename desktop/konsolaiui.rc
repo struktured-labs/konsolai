@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
 
-<gui name="konsolai" version="21">
+<gui name="konsolai" version="22">
     <MenuBar>
         <Menu name="file"><text>File</text>
             <Action name="new-window"/>
@@ -23,8 +23,15 @@
             <Action name="claude-stop"/>
             <Action name="claude-restart"/>
             <Separator/>
+            <Action name="claude-yolo-mode"/>
+            <Action name="claude-double-yolo-mode"/>
+            <Action name="claude-triple-yolo-mode"/>
+            <Action name="claude-set-prompt"/>
+            <Separator/>
             <Action name="claude-detach"/>
             <Action name="claude-kill"/>
+            <Separator/>
+            <Action name="claude-archive-all"/>
         </Menu>
         <Menu name="view"><text>View</text>
             <Menu name="view-split"><text>Split View</text>

@@ -260,6 +260,21 @@ Q_SIGNALS:
     void taskFinished();
 
     /**
+     * Emitted when a task completes with summary
+     */
+    void taskComplete(const QString &summary);
+
+    /**
+     * Emitted when Claude is waiting for user input
+     */
+    void waitingForInput(const QString &prompt);
+
+    /**
+     * Emitted when an error occurs
+     */
+    void errorOccurred(const QString &error);
+
+    /**
      * Emitted when the session is detached
      */
     void detached();

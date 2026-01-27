@@ -61,6 +61,7 @@
 #include "claude/ClaudeSessionRegistry.h"
 #include "claude/ClaudeSessionWizard.h"
 #include "claude/ClaudeStatusWidget.h"
+#include "claude/NotificationManager.h"
 #include "claude/TmuxManager.h"
 
 #include "profile/ProfileList.h"
@@ -524,8 +525,13 @@ void MainWindow::setupActions()
     collection->addAction(QStringLiteral("claude-deny"), _claudeMenu->denyAction());
     collection->addAction(QStringLiteral("claude-stop"), _claudeMenu->stopAction());
     collection->addAction(QStringLiteral("claude-restart"), _claudeMenu->restartAction());
+    collection->addAction(QStringLiteral("claude-yolo-mode"), _claudeMenu->yoloModeAction());
+    collection->addAction(QStringLiteral("claude-double-yolo-mode"), _claudeMenu->doubleYoloModeAction());
+    collection->addAction(QStringLiteral("claude-triple-yolo-mode"), _claudeMenu->tripleYoloModeAction());
+    collection->addAction(QStringLiteral("claude-set-prompt"), _claudeMenu->setPromptAction());
     collection->addAction(QStringLiteral("claude-detach"), _claudeMenu->detachAction());
     collection->addAction(QStringLiteral("claude-kill"), _claudeMenu->killAction());
+    collection->addAction(QStringLiteral("claude-archive-all"), _claudeMenu->archiveAllAction());
 
     // Claude Status Widget
     _claudeStatusWidget = new Konsolai::ClaudeStatusWidget(this);
@@ -544,13 +550,46 @@ void MainWindow::setupActions()
         _claudeMenu->setActiveSession(claudeSession);
         _claudeStatusWidget->setSession(claudeSession);
 
-        // Connect Yolo Mode auto-approval for this session
+        // Connect Yolo Mode auto-approval and notifications for this session
         if (claudeSession) {
-            connect(claudeSession, &Konsolai::ClaudeSession::permissionRequested, this, [this, claudeSession](const QString &action, const QString &) {
-                if (_claudeMenu->isYoloMode()) {
-                    qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
-                    claudeSession->approvePermission();
-                }
+            auto *notifyMgr = Konsolai::NotificationManager::instance();
+
+            // Permission requested - notify and maybe auto-approve
+            connect(claudeSession,
+                    &Konsolai::ClaudeSession::permissionRequested,
+                    this,
+                    [this, claudeSession, notifyMgr](const QString &action, const QString &details) {
+                        if (_claudeMenu->isYoloMode()) {
+                            qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
+                            claudeSession->approvePermission();
+                        } else {
+                            // Show notification for permission request
+                            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                                              i18n("Permission Required"),
+                                              i18n("Claude needs permission to: %1", action),
+                                              claudeSession);
+                        }
+                    });
+
+            // Task complete notification
+            connect(claudeSession, &Konsolai::ClaudeSession::taskComplete, this, [claudeSession, notifyMgr](const QString &summary) {
+                notifyMgr->notify(Konsolai::NotificationManager::NotificationType::TaskComplete,
+                                  i18n("Task Complete"),
+                                  summary.isEmpty() ? i18n("Claude has finished the task") : summary,
+                                  claudeSession);
+            });
+
+            // Waiting for input notification
+            connect(claudeSession, &Konsolai::ClaudeSession::waitingForInput, this, [claudeSession, notifyMgr](const QString &prompt) {
+                notifyMgr->notify(Konsolai::NotificationManager::NotificationType::WaitingInput,
+                                  i18n("Input Required"),
+                                  prompt.isEmpty() ? i18n("Claude is waiting for your input") : prompt,
+                                  claudeSession);
+            });
+
+            // Error notification
+            connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, this, [claudeSession, notifyMgr](const QString &error) {
+                notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Error"), error, claudeSession);
             });
         }
     });

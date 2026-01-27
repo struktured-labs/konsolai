@@ -60,6 +60,9 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     if (!projectName.isEmpty()) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
+        // Use static title format to prevent process detection from overriding
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%n"));
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
     }
 
     // NOTE: We don't set program/arguments here - we do it in run()
@@ -98,6 +101,9 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     // Set tab title to session name for reattached sessions
     setTitle(Konsole::Session::NameRole, existingSessionName);
     setTitle(Konsole::Session::DisplayedTitleRole, existingSessionName);
+    // Use static title format to prevent process detection from overriding
+    setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%n"));
+    setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
 
     // NOTE: We don't set program/arguments here - we do it in run()
 
@@ -161,6 +167,9 @@ void ClaudeSession::run()
     if (!projectName.isEmpty()) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
+        // Use static title format to prevent process detection from overriding
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%n"));
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
     }
 
     // Build the tmux command now that we have the correct working directory

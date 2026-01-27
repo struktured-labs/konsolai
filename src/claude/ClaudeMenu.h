@@ -57,6 +57,30 @@ public:
     QAction* restartAction() const { return m_restartAction; }
     QAction* detachAction() const { return m_detachAction; }
     QAction* killAction() const { return m_killAction; }
+    QAction *yoloModeAction() const
+    {
+        return m_yoloModeAction;
+    }
+    QAction *doubleYoloModeAction() const
+    {
+        return m_doubleYoloModeAction;
+    }
+    QAction *tripleYoloModeAction() const
+    {
+        return m_tripleYoloModeAction;
+    }
+    QAction *setPromptAction() const
+    {
+        return m_setPromptAction;
+    }
+    QAction *archiveAllAction() const
+    {
+        return m_archiveAllAction;
+    }
+    QMenu *reattachMenu() const
+    {
+        return m_reattachMenu;
+    }
 
     /**
      * Check if Yolo Mode is enabled (auto-approve all permissions)
