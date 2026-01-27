@@ -828,8 +828,22 @@ void MainWindow::openUrls(const QList<QUrl> &urls)
 
 void MainWindow::newTab()
 {
-    Profile::Ptr defaultProfile = ProfileManager::instance()->defaultProfile();
-    createSession(defaultProfile, activeSessionDir());
+    // Prefer Claude profile for new tabs in Konsolai
+    Profile::Ptr profile;
+    const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+    for (const Profile::Ptr &p : profiles) {
+        if (p->property<bool>(Profile::ClaudeEnabled)) {
+            profile = p;
+            break;
+        }
+    }
+
+    // Fall back to default profile if no Claude profile exists
+    if (!profile) {
+        profile = ProfileManager::instance()->defaultProfile();
+    }
+
+    createSession(profile, activeSessionDir());
 }
 
 void MainWindow::setPluginsActions(const QList<QAction *> &actions)
@@ -886,6 +900,12 @@ Session *MainWindow::createSession(Profile::Ptr profile, const QString &director
     // Start the session
     if (!session->isRunning()) {
         session->run();
+    }
+
+    // Register Claude sessions with session panel
+    auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session);
+    if (claudeSession) {
+        _sessionPanel->registerSession(claudeSession);
     }
 
     return session;
