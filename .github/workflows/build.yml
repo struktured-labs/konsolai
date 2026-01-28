@@ -89,8 +89,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     env:
-      CRAFT_ROOT: C:/CraftRoot
-      CRAFT_ABI: windows-msvc2022_64-cl
+      CRAFT_ROOT: C:\CraftRoot
     steps:
       - uses: actions/checkout@v4
 
@@ -99,40 +98,48 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up Craft via CraftMaster
-        shell: bash
+      - name: Bootstrap Craft
+        shell: pwsh
         run: |
-          git clone --depth=1 https://invent.kde.org/packaging/craftmaster.git "$CRAFT_ROOT/CraftMaster"
-          python "$CRAFT_ROOT/CraftMaster/CraftMaster.py" \
-            --config "$GITHUB_WORKSPACE/.craftsettings.ini" \
-            --variables "WORKSPACE=$GITHUB_WORKSPACE"
+          $ErrorActionPreference = "Stop"
+          # Download CraftBootstrap.py directly
+          New-Item -ItemType Directory -Force -Path "$env:CRAFT_ROOT\download" | Out-Null
+          $bootstrapUrl = "https://raw.githubusercontent.com/KDE/craft/master/setup/CraftBootstrap.py"
+          Write-Host "Downloading $bootstrapUrl"
+          Invoke-WebRequest -Uri $bootstrapUrl -OutFile "$env:CRAFT_ROOT\download\CraftBootstrap.py"
+          # Run bootstrap with --use-defaults for non-interactive CI
+          Write-Host "Running CraftBootstrap.py"
+          python "$env:CRAFT_ROOT\download\CraftBootstrap.py" `
+            --prefix "$env:CRAFT_ROOT" `
+            --branch master `
+            --use-defaults
+          Write-Host "Craft bootstrap completed"
 
       - name: Install KDE dependencies
-        shell: bash
+        shell: pwsh
         run: |
-          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" \
-            --install-deps kde/applications/konsole
+          $ErrorActionPreference = "Stop"
+          & "$env:CRAFT_ROOT\craft\craftenv.ps1"
+          Write-Host "Installing konsole dependencies via Craft..."
+          craft --install-deps kde/applications/konsole
 
       - name: Build konsolai
         shell: pwsh
         run: |
-          $craftPrefix = "$env:CRAFT_ROOT/$env:CRAFT_ABI"
-          # Initialize Craft environment (sets PATH, compiler vars, etc.)
-          & "$craftPrefix/craft/craftenv.ps1"
-          # Configure with CMake using Craft-installed dependencies
+          $ErrorActionPreference = "Stop"
+          & "$env:CRAFT_ROOT\craft\craftenv.ps1"
           cmake -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DCMAKE_PREFIX_PATH="$craftPrefix" `
-            -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE/install"
-          # Build
+            -DCMAKE_PREFIX_PATH="$env:CRAFT_ROOT" `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}\install"
           cmake --build build
 
       - name: Package
         shell: pwsh
         run: |
           cmake --install build
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\install\*" `
-            -DestinationPath "$env:GITHUB_WORKSPACE\konsolai-windows-x86_64.zip"
+          Compress-Archive -Path "${{ github.workspace }}\install\*" `
+            -DestinationPath "${{ github.workspace }}\konsolai-windows-x86_64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
