@@ -519,6 +519,9 @@ void TerminalDisplay::updateImage()
     auto dirtyMask = new char[columnsToUpdate + 2];
     QRegion dirtyRegion;
 
+    std::optional<int> startDirtyIndex;
+    std::optional<int> endDirtyIndex;
+
     for (y = 0; y < linesToUpdate; ++y) {
         const Character *currentLine = &_image[y * _columns];
         const Character *const newLine = &newimg[y * columns];
@@ -533,6 +536,12 @@ void TerminalDisplay::updateImage()
         for (x = 0; x < columnsToUpdate; ++x) {
             if (newLine[x] != currentLine[x]) {
                 dirtyMask[x] = 1;
+
+                const int indexInImage = (y * columns) + x;
+                if (!startDirtyIndex) {
+                    startDirtyIndex = indexInImage;
+                }
+                endDirtyIndex = indexInImage;
             }
         }
 
@@ -655,6 +664,21 @@ void TerminalDisplay::updateImage()
     QAccessible::updateAccessibility(&dataChangeEvent);
     QAccessibleTextCursorEvent cursorEvent(this, _usedColumns * screenWindow()->screen()->getCursorY() + screenWindow()->screen()->getCursorX());
     QAccessible::updateAccessibility(&cursorEvent);
+
+    if (startDirtyIndex && endDirtyIndex) {
+        const auto maxIndex = _usedLines * _usedColumns;
+
+        // Ensure our indices are in-bounds. It can happen that we have more dirty cells than are on the display. Notably when shrinking the window
+        // we may have output stream past the current Display region. Let's make sure we aren't tapping into invalid inices when that happens.
+        startDirtyIndex = qBound(0, *startDirtyIndex, maxIndex);
+        endDirtyIndex = qBound(*startDirtyIndex, *endDirtyIndex, maxIndex);
+
+        Q_ASSERT(endDirtyIndex <= maxIndex);
+        Q_ASSERT(endDirtyIndex >= startDirtyIndex);
+        const QString newText = screenWindow()->screen()->text(*startDirtyIndex, *endDirtyIndex, Screen::PreserveLineBreaks);
+        QAccessibleTextUpdateEvent textUpdateEvent(this, 0, QString(), newText);
+        QAccessible::updateAccessibility(&textUpdateEvent);
+    }
 #endif
 }
 void TerminalDisplay::showResizeNotification()
