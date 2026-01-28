@@ -71,9 +71,9 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     if (!projectName.isEmpty()) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
-        // Use static title format to prevent process detection from overriding
-        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%n"));
-        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
+        // Use %d (directory name) instead of %n (process name) to show project folder
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%d"));
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%d"));
     }
 
     // NOTE: We don't set program/arguments here - we do it in run()
@@ -186,9 +186,9 @@ void ClaudeSession::run()
     if (!projectName.isEmpty()) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
-        // Use static title format to prevent process detection from overriding
-        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%n"));
-        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
+        // Use %d (directory name) instead of %n (process name) to show project folder
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%d"));
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%d"));
     }
 
     // Start the hook handler to receive Claude events
@@ -196,7 +196,8 @@ void ClaudeSession::run()
         if (m_hookHandler->start()) {
             qDebug() << "ClaudeSession::run() - Hook handler started on:" << m_hookHandler->socketPath();
 
-            // Write hooks config to project's .claude directory
+            // Write hooks config to project's .claude/settings.local.json
+            // Claude Code reads hooks from settings.local.json, not hooks.json
             QString hooksConfig = m_hookHandler->generateHooksConfig();
             if (!hooksConfig.isEmpty()) {
                 QString claudeDir = m_workingDir + QStringLiteral("/.claude");
@@ -205,14 +206,38 @@ void ClaudeSession::run()
                     dir.mkpath(claudeDir);
                 }
 
-                QString hooksPath = claudeDir + QStringLiteral("/hooks.json");
-                QFile hooksFile(hooksPath);
-                if (hooksFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                    hooksFile.write(hooksConfig.toUtf8());
-                    hooksFile.close();
-                    qDebug() << "ClaudeSession::run() - Wrote hooks config to:" << hooksPath;
+                QString settingsPath = claudeDir + QStringLiteral("/settings.local.json");
+
+                // Read existing settings if any
+                QJsonObject settings;
+                QFile existingFile(settingsPath);
+                if (existingFile.open(QIODevice::ReadOnly)) {
+                    QJsonDocument existingDoc = QJsonDocument::fromJson(existingFile.readAll());
+                    if (existingDoc.isObject()) {
+                        settings = existingDoc.object();
+                    }
+                    existingFile.close();
+                }
+
+                // Parse our hooks config and merge
+                QJsonDocument hooksDoc = QJsonDocument::fromJson(hooksConfig.toUtf8());
+                if (hooksDoc.isObject()) {
+                    QJsonObject hooksObj = hooksDoc.object();
+                    // The hooks are under "hooks" key in our generated config
+                    if (hooksObj.contains(QStringLiteral("hooks"))) {
+                        settings[QStringLiteral("hooks")] = hooksObj[QStringLiteral("hooks")];
+                    }
+                }
+
+                // Write merged settings
+                QFile settingsFile(settingsPath);
+                if (settingsFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QJsonDocument outDoc(settings);
+                    settingsFile.write(outDoc.toJson(QJsonDocument::Indented));
+                    settingsFile.close();
+                    qDebug() << "ClaudeSession::run() - Wrote hooks to:" << settingsPath;
                 } else {
-                    qWarning() << "ClaudeSession::run() - Failed to write hooks config to:" << hooksPath;
+                    qWarning() << "ClaudeSession::run() - Failed to write settings to:" << settingsPath;
                 }
             }
         } else {
@@ -420,7 +445,17 @@ void ClaudeSession::setYoloMode(bool enabled)
 {
     if (m_yoloMode != enabled) {
         m_yoloMode = enabled;
+        qDebug() << "ClaudeSession::setYoloMode:" << enabled << "current state:" << static_cast<int>(claudeState());
         Q_EMIT yoloModeChanged(enabled);
+
+        // If enabling yolo and currently waiting for permission, approve immediately
+        if (enabled && claudeState() == ClaudeProcess::State::WaitingInput) {
+            qDebug() << "ClaudeSession: Yolo mode enabled while waiting - auto-approving now";
+            QTimer::singleShot(100, this, [this]() {
+                approvePermission();
+                incrementYoloApproval();
+            });
+        }
     }
 }
 

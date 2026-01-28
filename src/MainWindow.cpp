@@ -62,6 +62,7 @@
 #include "claude/ClaudeSessionRegistry.h"
 #include "claude/ClaudeSessionWizard.h"
 #include "claude/ClaudeStatusWidget.h"
+#include "claude/KonsolaiSettings.h"
 #include "claude/NotificationManager.h"
 #include "claude/SessionManagerPanel.h"
 #include "claude/TmuxManager.h"
@@ -104,6 +105,11 @@ MainWindow::MainWindow()
     // Initialize Claude session registry (singleton)
     if (!Konsolai::ClaudeSessionRegistry::instance()) {
         new Konsolai::ClaudeSessionRegistry(this);
+    }
+
+    // Initialize Konsolai settings (singleton)
+    if (!Konsolai::KonsolaiSettings::instance()) {
+        new Konsolai::KonsolaiSettings(this);
     }
 
     updateUseTransparency();
@@ -299,6 +305,8 @@ void MainWindow::activeViewChanged(SessionController *controller)
     if (controller->session()) {
         // Check if this is a ClaudeSession
         auto *claudeSession = qobject_cast<Konsolai::ClaudeSession*>(controller->session());
+        qDebug() << "MainWindow::activeViewChanged - session:" << controller->session() << "isClaudeSession:" << (claudeSession != nullptr)
+                 << "title:" << controller->session()->title(Session::DisplayedTitleRole);
         if (claudeSession) {
             _claudeMenu->setActiveSession(claudeSession);
             _claudeStatusWidget->setSession(claudeSession);
@@ -510,11 +518,14 @@ void MainWindow::setupActions()
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
 
-        // Register with registry
+        // Register with registry and connect to UI
         auto *registry = Konsolai::ClaudeSessionRegistry::instance();
         if (registry) {
             registry->registerSession(claudeSession);
         }
+        _sessionPanel->registerSession(claudeSession);
+        _claudeMenu->setActiveSession(claudeSession);
+        _claudeStatusWidget->setSession(claudeSession);
     });
     connect(_claudeMenu, &Konsolai::ClaudeMenu::configureHooksRequested,
             this, [this]() {
@@ -902,10 +913,15 @@ Session *MainWindow::createSession(Profile::Ptr profile, const QString &director
         session->run();
     }
 
-    // Register Claude sessions with session panel
+    // Register Claude sessions and connect to status UI
     auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session);
     if (claudeSession) {
         _sessionPanel->registerSession(claudeSession);
+        // Explicitly connect status widget and menu - activeViewChanged may not
+        // fire reliably when creating sessions programmatically
+        _claudeMenu->setActiveSession(claudeSession);
+        _claudeStatusWidget->setSession(claudeSession);
+        qDebug() << "MainWindow::createSession - connected Claude UI to session:" << claudeSession->sessionId();
     }
 
     return session;
@@ -1194,12 +1210,10 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     QString branchName = wizard.worktreeBranch();
                     QString repoRoot = wizard.repoRoot();
 
-                    // Create worktree path as sibling to repo, named after branch
-                    QDir repoDir(repoRoot);
-                    repoDir.cdUp();
-                    QString worktreePath = repoDir.filePath(branchName);
+                    // Worktree path is the selected directory (e.g., ~/projects/fix-login-auth)
+                    QString worktreePath = workDir;
 
-                    qDebug() << "Creating worktree:" << worktreePath << "for branch:" << branchName;
+                    qDebug() << "Creating worktree:" << worktreePath << "for branch:" << branchName << "from repo:" << repoRoot;
 
                     // Check if branch exists
                     QProcess checkBranch;
@@ -1225,8 +1239,6 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     qDebug() << "Git worktree exit code:" << exitCode;
 
                     if (exitCode == 0) {
-                        // Update workDir to the new worktree path
-                        workDir = worktreePath;
                         qDebug() << "Worktree created, session will use:" << workDir;
                     } else {
                         QMessageBox::warning(this,
@@ -1393,8 +1405,11 @@ void MainWindow::autoReattachClaudeSessions()
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
 
-        // Register with registry
+        // Register with registry and connect to status UI
         registry->registerSession(claudeSession);
+        _sessionPanel->registerSession(claudeSession);
+        _claudeMenu->setActiveSession(claudeSession);
+        _claudeStatusWidget->setSession(claudeSession);
     }
 }
 

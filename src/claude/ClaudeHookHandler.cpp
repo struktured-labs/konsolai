@@ -242,73 +242,26 @@ QString ClaudeHookHandler::generateHooksConfig() const
 
     QJsonObject hooks;
 
-    // Notification hook
-    QJsonArray notificationHooks;
-    QJsonObject notificationHook;
-    notificationHook[QStringLiteral("matcher")] = QStringLiteral("*");
-    QJsonArray notificationCmd;
-    notificationCmd.append(handlerPath);
-    notificationCmd.append(QStringLiteral("--socket"));
-    notificationCmd.append(m_socketPath);
-    notificationCmd.append(QStringLiteral("--event"));
-    notificationCmd.append(QStringLiteral("Notification"));
-    notificationHook[QStringLiteral("hooks")] = QJsonArray{
-        QJsonObject{{QStringLiteral("type"), QStringLiteral("command")},
-                    {QStringLiteral("command"), notificationCmd}}
-    };
-    notificationHooks.append(notificationHook);
-    hooks[QStringLiteral("Notification")] = notificationHooks;
+    // Build command string for each hook type
+    // Claude Code expects: "command": "string" (not an array)
+    // and "matcher": {} (empty object for match-all, not a string)
+    auto makeHookEntry = [&](const QString &eventType) -> QJsonArray {
+        // Quote paths in case they contain spaces
+        QString cmdStr = QStringLiteral("'%1' --socket '%2' --event '%3'").arg(handlerPath, m_socketPath, eventType);
+        QJsonObject hookDef;
+        hookDef[QStringLiteral("type")] = QStringLiteral("command");
+        hookDef[QStringLiteral("command")] = cmdStr;
 
-    // Stop hook
-    QJsonArray stopHooks;
-    QJsonObject stopHook;
-    stopHook[QStringLiteral("matcher")] = QStringLiteral("*");
-    QJsonArray stopCmd;
-    stopCmd.append(handlerPath);
-    stopCmd.append(QStringLiteral("--socket"));
-    stopCmd.append(m_socketPath);
-    stopCmd.append(QStringLiteral("--event"));
-    stopCmd.append(QStringLiteral("Stop"));
-    stopHook[QStringLiteral("hooks")] = QJsonArray{
-        QJsonObject{{QStringLiteral("type"), QStringLiteral("command")},
-                    {QStringLiteral("command"), stopCmd}}
+        QJsonObject entry;
+        entry[QStringLiteral("matcher")] = QStringLiteral("*"); // string = match all
+        entry[QStringLiteral("hooks")] = QJsonArray{hookDef};
+        return QJsonArray{entry};
     };
-    stopHooks.append(stopHook);
-    hooks[QStringLiteral("Stop")] = stopHooks;
 
-    // PreToolUse hook
-    QJsonArray preToolHooks;
-    QJsonObject preToolHook;
-    preToolHook[QStringLiteral("matcher")] = QStringLiteral("*");
-    QJsonArray preToolCmd;
-    preToolCmd.append(handlerPath);
-    preToolCmd.append(QStringLiteral("--socket"));
-    preToolCmd.append(m_socketPath);
-    preToolCmd.append(QStringLiteral("--event"));
-    preToolCmd.append(QStringLiteral("PreToolUse"));
-    preToolHook[QStringLiteral("hooks")] = QJsonArray{
-        QJsonObject{{QStringLiteral("type"), QStringLiteral("command")},
-                    {QStringLiteral("command"), preToolCmd}}
-    };
-    preToolHooks.append(preToolHook);
-    hooks[QStringLiteral("PreToolUse")] = preToolHooks;
-
-    // PostToolUse hook
-    QJsonArray postToolHooks;
-    QJsonObject postToolHook;
-    postToolHook[QStringLiteral("matcher")] = QStringLiteral("*");
-    QJsonArray postToolCmd;
-    postToolCmd.append(handlerPath);
-    postToolCmd.append(QStringLiteral("--socket"));
-    postToolCmd.append(m_socketPath);
-    postToolCmd.append(QStringLiteral("--event"));
-    postToolCmd.append(QStringLiteral("PostToolUse"));
-    postToolHook[QStringLiteral("hooks")] = QJsonArray{
-        QJsonObject{{QStringLiteral("type"), QStringLiteral("command")},
-                    {QStringLiteral("command"), postToolCmd}}
-    };
-    postToolHooks.append(postToolHook);
-    hooks[QStringLiteral("PostToolUse")] = postToolHooks;
+    hooks[QStringLiteral("Notification")] = makeHookEntry(QStringLiteral("Notification"));
+    hooks[QStringLiteral("Stop")] = makeHookEntry(QStringLiteral("Stop"));
+    hooks[QStringLiteral("PreToolUse")] = makeHookEntry(QStringLiteral("PreToolUse"));
+    hooks[QStringLiteral("PostToolUse")] = makeHookEntry(QStringLiteral("PostToolUse"));
 
     // Wrap in "hooks" key as expected by Claude Code
     QJsonObject root;

@@ -9,10 +9,11 @@
 #include "ClaudeSessionState.h"
 #include "TmuxManager.h"
 
+#include "konsoleprivate_export.h"
+#include <QHash>
+#include <QList>
 #include <QObject>
 #include <QString>
-#include <QList>
-#include <QHash>
 #include <QTimer>
 
 namespace Konsolai
@@ -35,7 +36,7 @@ class ClaudeSession;
  * 3. Cross-reference to identify orphaned sessions
  * 4. Update menu with reattach options
  */
-class ClaudeSessionRegistry : public QObject
+class KONSOLEPRIVATE_EXPORT ClaudeSessionRegistry : public QObject
 {
     Q_OBJECT
 

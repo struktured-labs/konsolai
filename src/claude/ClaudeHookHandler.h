@@ -8,13 +8,14 @@
 #ifndef CLAUDEHOOKHANDLER_H
 #define CLAUDEHOOKHANDLER_H
 
-#include <QObject>
-#include <QString>
+#include "konsoleprivate_export.h"
+#include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
-#include <QJsonObject>
-#include <QTimer>
+#include <QObject>
 #include <QSet>
+#include <QString>
+#include <QTimer>
 
 namespace Konsolai
 {
@@ -35,7 +36,7 @@ class ClaudeSession;
  *
  * Socket path: ~/.konsolai/sessions/{session-id}.sock
  */
-class ClaudeHookHandler : public QObject
+class KONSOLEPRIVATE_EXPORT ClaudeHookHandler : public QObject
 {
     Q_OBJECT
 

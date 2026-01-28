@@ -8,10 +8,11 @@
 #ifndef TMUXMANAGER_H
 #define TMUXMANAGER_H
 
+#include "konsoleprivate_export.h"
 #include <QObject>
+#include <QProcess>
 #include <QString>
 #include <QStringList>
-#include <QProcess>
 
 namespace Konsolai
 {
@@ -23,7 +24,7 @@ namespace Konsolai
  * If Konsolai is closed, the tmux session continues running and can
  * be reattached later.
  */
-class TmuxManager : public QObject
+class KONSOLEPRIVATE_EXPORT TmuxManager : public QObject
 {
     Q_OBJECT
 

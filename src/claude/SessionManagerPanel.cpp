@@ -56,9 +56,7 @@ void SessionManagerPanel::setupUi()
     });
     headerLayout->addWidget(m_collapseButton);
 
-    auto *titleLabel = new QLabel(i18n("Sessions"), this);
-    titleLabel->setStyleSheet(QStringLiteral("font-weight: bold;"));
-    headerLayout->addWidget(titleLabel);
+    // Note: Title "Sessions" is shown in dock widget title bar, no need for duplicate label here
 
     headerLayout->addStretch();
 

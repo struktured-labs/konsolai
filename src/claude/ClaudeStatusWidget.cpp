@@ -6,6 +6,7 @@
 #include "ClaudeStatusWidget.h"
 #include "ClaudeSession.h"
 
+#include <QDebug>
 #include <QHBoxLayout>
 
 namespace Konsolai
@@ -64,6 +65,7 @@ void ClaudeStatusWidget::setSession(ClaudeSession *session)
 
         // Update with current state - use Idle if session is running
         ClaudeProcess::State initialState = m_session->claudeState();
+        qDebug() << "ClaudeStatusWidget::setSession - initial state:" << static_cast<int>(initialState) << "isRunning:" << m_session->isRunning();
         if (initialState == ClaudeProcess::State::NotRunning && m_session->isRunning()) {
             initialState = ClaudeProcess::State::Idle;
         }
@@ -91,6 +93,7 @@ void ClaudeStatusWidget::clearSession()
 
 void ClaudeStatusWidget::updateState(ClaudeProcess::State state)
 {
+    qDebug() << "ClaudeStatusWidget::updateState:" << static_cast<int>(state) << "(was:" << static_cast<int>(m_currentState) << ")";
     m_currentState = state;
 
     // Start/stop spinner based on state

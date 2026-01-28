@@ -28,6 +28,7 @@ set(claude_SRCS
     ClaudeTabIndicator.cpp
     ClaudeSessionWizard.cpp
     SessionManagerPanel.cpp
+    KonsolaiSettings.cpp
     ${dbus_xml_srcs}
 )
 
@@ -41,6 +42,7 @@ target_link_libraries(konsolai_claude
     Qt::Widgets
     Qt::Multimedia
     KF6::CoreAddons
+    KF6::ConfigCore
     KF6::Notifications
     KF6::StatusNotifierItem
     KF6::I18n

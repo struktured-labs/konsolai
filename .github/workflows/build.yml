@@ -17,6 +17,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Add KDE Neon repository (provides KF6 for Ubuntu 24.04)
+        run: |
+          # Add KDE Neon signing key
+          wget -qO - https://archive.neon.kde.org/public.key | sudo gpg --dearmor -o /etc/apt/keyrings/kde-neon.gpg
+          # Add KDE Neon unstable repository for KF6 packages
+          echo "deb [signed-by=/etc/apt/keyrings/kde-neon.gpg] https://archive.neon.kde.org/unstable noble main" | \
+            sudo tee /etc/apt/sources.list.d/kde-neon.list
+          # Pin KDE Neon packages to prefer them over Ubuntu's
+          cat <<'PINEOF' | sudo tee /etc/apt/preferences.d/kde-neon
+          Package: *
+          Pin: origin archive.neon.kde.org
+          Pin-Priority: 750
+          PINEOF
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -24,6 +38,8 @@ jobs:
             cmake \
             extra-cmake-modules \
             gettext \
+            g++ \
+            libkf6bookmarks-dev \
             libkf6config-dev \
             libkf6configwidgets-dev \
             libkf6coreaddons-dev \
@@ -40,6 +56,7 @@ jobs:
             libkf6parts-dev \
             libkf6pty-dev \
             libkf6service-dev \
+            libkf6statusnotifieritem-dev \
             libkf6textwidgets-dev \
             libkf6widgetsaddons-dev \
             libkf6windowsystem-dev \
@@ -47,7 +64,8 @@ jobs:
             qt6-base-dev \
             qt6-multimedia-dev \
             qt6-5compat-dev \
-            libicu-dev
+            libicu-dev \
+            zlib1g-dev
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INSTALL_PREFIX=/usr
@@ -68,57 +86,8 @@ jobs:
           name: konsolai-linux-x86_64
           path: build/konsolai-linux-x86_64.tar.gz
 
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.7.*'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2019_64'
-          modules: 'qt5compat qtmultimedia'
-
-      - name: Install Craft
-        shell: pwsh
-        run: |
-          # Install KDE Craft for Windows dependencies
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/KDE/craft/master/setup/install_craft.ps1" -OutFile install_craft.ps1
-          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-          ./install_craft.ps1 --prefix C:/CraftRoot --branch master
-
-      - name: Build with Craft
-        shell: pwsh
-        run: |
-          # Source Craft environment
-          C:/CraftRoot/craft/craftenv.ps1
-
-          # Install KDE Frameworks dependencies
-          craft --install-deps konsole
-
-          # Build konsolai
-          cd ${{ github.workspace }}
-          cmake -B build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_PREFIX_PATH="C:/CraftRoot"
-          cmake --build build --config ${{env.BUILD_TYPE}}
-
-      - name: Package
-        shell: pwsh
-        run: |
-          cd build
-          cpack -G ZIP
-          Rename-Item -Path "konsolai-*.zip" -NewName "konsolai-windows-x86_64.zip"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: konsolai-windows-x86_64
-          path: build/konsolai-windows-x86_64.zip
-
   release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -129,17 +98,11 @@ jobs:
         with:
           name: konsolai-linux-x86_64
 
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: konsolai-windows-x86_64
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             konsolai-linux-x86_64.tar.gz
-            konsolai-windows-x86_64.zip
           draft: false
           prerelease: false
           generate_release_notes: true

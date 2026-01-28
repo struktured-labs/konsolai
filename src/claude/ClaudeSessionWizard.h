@@ -12,6 +12,7 @@
 #include <QWizard>
 #include <QWizardPage>
 
+#include "konsoleprivate_export.h"
 #include "profile/Profile.h"
 
 class QLineEdit;
@@ -22,37 +23,41 @@ class QLabel;
 class QListWidget;
 class QFileSystemModel;
 class QTreeView;
+class QPlainTextEdit;
 
 namespace Konsolai
 {
 
 // Forward declarations
-class DirectorySelectionPage;
-class GitOptionsPage;
-class SessionOptionsPage;
+class PromptPage;
+class ConfirmPage;
 
 /**
  * Wizard for creating new Claude sessions.
  *
- * Pages:
- * 1. Directory Selection - Choose working directory
- * 2. Git Options - Git init, worktree selection
- * 3. Session Options - Model, auto-approve settings
+ * Prompt-centric design:
+ * 1. User enters a task description (prompt)
+ * 2. Folder and worktree names are auto-generated from prompt
+ * 3. Settings are pre-populated with sensible defaults
+ *
+ * Flow:
+ * - Enter prompt/task description
+ * - Folder name auto-generated (truncated, kebab-case)
+ * - Worktree name auto-generated (fuller version)
+ * - Project root defaults to ~/projects (configurable)
+ * - Git init is automatic
  */
-class ClaudeSessionWizard : public QWizard
+class KONSOLEPRIVATE_EXPORT ClaudeSessionWizard : public QWizard
 {
     Q_OBJECT
 
-    // Page classes need access to private widgets
-    friend class DirectorySelectionPage;
-    friend class GitOptionsPage;
-    friend class SessionOptionsPage;
+    friend class PromptPage;
+    friend class ConfirmPage;
 
 public:
     enum PageId {
-        DirectoryPageId,
-        GitOptionsPageId,
-        SessionOptionsPageId
+        PromptPageId,
+        ConfirmPageId
     };
 
     explicit ClaudeSessionWizard(QWidget *parent = nullptr);
@@ -64,7 +69,7 @@ public:
     void setProfile(const Konsole::Profile::Ptr &profile);
 
     /**
-     * Set the default directory to show
+     * Set the default directory to show (overrides project root)
      */
     void setDefaultDirectory(const QString &path);
 
@@ -103,59 +108,62 @@ public:
      */
     QString claudeArgs() const;
 
+    /**
+     * Get the task prompt
+     */
+    QString taskPrompt() const;
+
 private Q_SLOTS:
-    void onDirectoryChanged(const QString &path);
-    void onBrowseClicked();
-    void onCreateFolderClicked();
-    void onWorktreeSelectionChanged(int index);
+    void onPromptChanged();
+    void onFolderNameChanged(const QString &name);
+    void onProjectRootChanged(const QString &path);
 
 private:
-    void setupDirectoryPage();
-    void setupGitOptionsPage();
-    void setupSessionOptionsPage();
+    void setupPromptPage();
+    void setupConfirmPage();
+    QString generateFolderName(const QString &prompt) const;
+    QString generateWorktreeName(const QString &prompt) const;
     void detectGitState(const QString &path);
     QStringList getWorktrees(const QString &repoRoot);
-    QStringList getRecentDirectories() const;
-    void saveRecentDirectory(const QString &path);
+    void updatePreview();
 
-    // Directory page widgets
-    QLineEdit *m_directoryEdit = nullptr;
-    QPushButton *m_browseButton = nullptr;
-    QPushButton *m_createFolderButton = nullptr;
-    QComboBox *m_recentDirsCombo = nullptr;
-    QTreeView *m_dirTreeView = nullptr;
-    QFileSystemModel *m_fileSystemModel = nullptr;
+    // Prompt page widgets
+    QPlainTextEdit *m_promptEdit = nullptr;
+    QLineEdit *m_folderNameEdit = nullptr;
+    QLineEdit *m_worktreeNameEdit = nullptr;
+    QLineEdit *m_projectRootEdit = nullptr;
+    QPushButton *m_browseRootButton = nullptr;
+    QCheckBox *m_createWorktreeCheck = nullptr;
+    QLineEdit *m_sourceRepoEdit = nullptr;
+    QPushButton *m_browseRepoButton = nullptr;
+    QLabel *m_previewLabel = nullptr;
 
-    // Git options page widgets
-    QCheckBox *m_initGitCheck = nullptr;
-    QComboBox *m_worktreeCombo = nullptr;
-    QLineEdit *m_newWorktreeBranch = nullptr;
-    QLabel *m_gitStatusLabel = nullptr;
-    QLabel *m_currentBranchLabel = nullptr;
-
-    // Session options page widgets
+    // Confirm page widgets
     QComboBox *m_modelCombo = nullptr;
     QCheckBox *m_autoApproveReadCheck = nullptr;
-    QLineEdit *m_claudeArgsEdit = nullptr;
+    QCheckBox *m_initGitCheck = nullptr;
+    QLineEdit *m_gitRemoteEdit = nullptr;
+    QLabel *m_summaryLabel = nullptr;
 
     // State
     Konsole::Profile::Ptr m_profile;
     QString m_defaultDirectory;
     QString m_selectedDirectory;
     QString m_repoRoot;
+    QString m_taskPrompt;
     bool m_isGitRepo = false;
-    bool m_createNewWorktree = false;
+    bool m_useExistingDir = false;
 };
 
 /**
- * Directory selection wizard page
+ * Prompt input wizard page - main page where user enters task
  */
-class DirectorySelectionPage : public QWizardPage
+class PromptPage : public QWizardPage
 {
     Q_OBJECT
 
 public:
-    explicit DirectorySelectionPage(ClaudeSessionWizard *wizard);
+    explicit PromptPage(ClaudeSessionWizard *wizard);
 
     bool isComplete() const override;
     bool validatePage() override;
@@ -165,33 +173,17 @@ private:
 };
 
 /**
- * Git options wizard page
+ * Confirmation wizard page - review settings before creating
  */
-class GitOptionsPage : public QWizardPage
+class ConfirmPage : public QWizardPage
 {
     Q_OBJECT
 
 public:
-    explicit GitOptionsPage(ClaudeSessionWizard *wizard);
+    explicit ConfirmPage(ClaudeSessionWizard *wizard);
 
     void initializePage() override;
-    bool isComplete() const override;
-
-private:
-    ClaudeSessionWizard *m_wizard;
-};
-
-/**
- * Session options wizard page
- */
-class SessionOptionsPage : public QWizardPage
-{
-    Q_OBJECT
-
-public:
-    explicit SessionOptionsPage(ClaudeSessionWizard *wizard);
-
-    void initializePage() override;
+    bool validatePage() override;
 
 private:
     ClaudeSessionWizard *m_wizard;

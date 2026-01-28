@@ -8,9 +8,10 @@
 
 #include "ClaudeProcess.h"
 
-#include <QWidget>
+#include "konsoleprivate_export.h"
 #include <QLabel>
 #include <QTimer>
+#include <QWidget>
 
 namespace Konsolai
 {
@@ -27,7 +28,7 @@ class ClaudeSession;
  *
  * Format: "[Claude: Working] [Task: Writing code...]"
  */
-class ClaudeStatusWidget : public QWidget
+class KONSOLEPRIVATE_EXPORT ClaudeStatusWidget : public QWidget
 {
     Q_OBJECT
 
