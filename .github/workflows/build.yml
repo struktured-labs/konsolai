@@ -19,21 +19,18 @@ jobs:
 
       - name: Add KDE Neon repository (provides KF6 for Ubuntu 24.04)
         run: |
+          # Ensure universe repo is enabled (needed for some KF6 packages)
+          sudo add-apt-repository -y universe
           # Add KDE Neon signing key
           wget -qO - https://archive.neon.kde.org/public.key | sudo gpg --dearmor -o /etc/apt/keyrings/kde-neon.gpg
-          # Add KDE Neon unstable repository for KF6 packages
-          echo "deb [signed-by=/etc/apt/keyrings/kde-neon.gpg] https://archive.neon.kde.org/unstable noble main" | \
+          # Add KDE Neon user repository for KF6 packages
+          echo "deb [signed-by=/etc/apt/keyrings/kde-neon.gpg] https://archive.neon.kde.org/user noble main" | \
             sudo tee /etc/apt/sources.list.d/kde-neon.list
-          # Pin KDE Neon packages to prefer them over Ubuntu's
-          cat <<'PINEOF' | sudo tee /etc/apt/preferences.d/kde-neon
-          Package: *
-          Pin: origin archive.neon.kde.org
-          Pin-Priority: 750
-          PINEOF
 
       - name: Install dependencies
         run: |
           sudo apt-get update
+          # Install KDE Neon packages first
           sudo apt-get install -y \
             cmake \
             extra-cmake-modules \
@@ -56,7 +53,6 @@ jobs:
             libkf6parts-dev \
             libkf6pty-dev \
             libkf6service-dev \
-            libkf6statusnotifieritem-dev \
             libkf6textwidgets-dev \
             libkf6widgetsaddons-dev \
             libkf6windowsystem-dev \
@@ -66,6 +62,10 @@ jobs:
             qt6-5compat-dev \
             libicu-dev \
             zlib1g-dev
+          # KStatusNotifierItem - try multiple package name variants
+          sudo apt-get install -y libkf6statusnotifieritem-dev 2>/dev/null || \
+            sudo apt-get install -y kstatusnotifieritem-dev 2>/dev/null || \
+            echo "Warning: KStatusNotifierItem dev package not found, will try to build without it"
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INSTALL_PREFIX=/usr
