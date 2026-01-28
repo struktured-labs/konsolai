@@ -86,8 +86,63 @@ jobs:
           name: konsolai-linux-x86_64
           path: build/konsolai-linux-x86_64.tar.gz
 
+  build-windows:
+    runs-on: windows-latest
+    env:
+      CRAFT_ROOT: C:/CraftRoot
+      CRAFT_ABI: windows-msvc2022_64-cl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Craft via CraftMaster
+        shell: bash
+        run: |
+          git clone --depth=1 https://invent.kde.org/packaging/craftmaster.git "$CRAFT_ROOT/CraftMaster"
+          python "$CRAFT_ROOT/CraftMaster/CraftMaster.py" \
+            --config "$GITHUB_WORKSPACE/.craftsettings.ini" \
+            --variables "WORKSPACE=$GITHUB_WORKSPACE"
+
+      - name: Install KDE dependencies
+        shell: bash
+        run: |
+          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" \
+            --install-deps kde/applications/konsole
+
+      - name: Build konsolai
+        shell: pwsh
+        run: |
+          $craftPrefix = "$env:CRAFT_ROOT/$env:CRAFT_ABI"
+          # Initialize Craft environment (sets PATH, compiler vars, etc.)
+          & "$craftPrefix/craft/craftenv.ps1"
+          # Configure with CMake using Craft-installed dependencies
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_PREFIX_PATH="$craftPrefix" `
+            -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE/install"
+          # Build
+          cmake --build build
+
+      - name: Package
+        shell: pwsh
+        run: |
+          cmake --install build
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\install\*" `
+            -DestinationPath "$env:GITHUB_WORKSPACE\konsolai-windows-x86_64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: konsolai-windows-x86_64
+          path: konsolai-windows-x86_64.zip
+          if-no-files-found: warn
+
   release:
-    needs: [build-linux]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -98,11 +153,18 @@ jobs:
         with:
           name: konsolai-linux-x86_64
 
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: konsolai-windows-x86_64
+        continue-on-error: true
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             konsolai-linux-x86_64.tar.gz
+            konsolai-windows-x86_64.zip
           draft: false
           prerelease: false
           generate_release_notes: true
