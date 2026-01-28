@@ -86,8 +86,68 @@ jobs:
           name: konsolai-linux-x86_64
           path: build/konsolai-linux-x86_64.tar.gz
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Craft
+        shell: pwsh
+        run: |
+          # Download and install KDE Craft
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/KDE/craft/master/setup/install_craft.ps1" -OutFile "install_craft.ps1"
+          # Set Craft root
+          $env:CraftRoot = "C:\CraftRoot"
+          # Run installer in non-interactive mode
+          .\install_craft.ps1 --root $env:CraftRoot --branch master --platform windows-msvc2022-cl --auto
+
+      - name: Build with Craft
+        shell: pwsh
+        run: |
+          $env:CraftRoot = "C:\CraftRoot"
+          # Initialize Craft environment
+          & "$env:CraftRoot\craft\craftenv.ps1"
+          # Install build dependencies
+          craft --install-deps kde/applications/konsole
+          # Build konsolai (using konsole blueprint as base)
+          # Copy our source to the Craft build location
+          $sourcePath = "$env:GITHUB_WORKSPACE"
+          $craftSourcePath = "$env:CraftRoot\download\git\kde\applications\konsolai"
+          New-Item -ItemType Directory -Force -Path $craftSourcePath
+          Copy-Item -Path "$sourcePath\*" -Destination $craftSourcePath -Recurse -Force
+          # Build using Craft
+          craft --src-dir "$craftSourcePath" kde/applications/konsolai
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $env:CraftRoot = "C:\CraftRoot"
+          & "$env:CraftRoot\craft\craftenv.ps1"
+          # Create installer package
+          craft --package kde/applications/konsolai
+          # Find and move the package
+          $packagePath = Get-ChildItem -Path "$env:CraftRoot\tmp" -Filter "konsolai*.exe" -Recurse | Select-Object -First 1
+          if ($packagePath) {
+            Copy-Item $packagePath.FullName -Destination "$env:GITHUB_WORKSPACE\konsolai-windows-x86_64.exe"
+          } else {
+            # Fallback: create a zip of the installed files
+            $installPath = "$env:CraftRoot\build\kde\applications\konsolai\image-RelWithDebInfo"
+            if (Test-Path $installPath) {
+              Compress-Archive -Path "$installPath\*" -DestinationPath "$env:GITHUB_WORKSPACE\konsolai-windows-x86_64.zip"
+            }
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: konsolai-windows-x86_64
+          path: |
+            konsolai-windows-x86_64.exe
+            konsolai-windows-x86_64.zip
+          if-no-files-found: warn
+
   release:
-    needs: [build-linux]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -98,11 +158,19 @@ jobs:
         with:
           name: konsolai-linux-x86_64
 
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: konsolai-windows-x86_64
+        continue-on-error: true
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             konsolai-linux-x86_64.tar.gz
+            konsolai-windows-x86_64.exe
+            konsolai-windows-x86_64.zip
           draft: false
           prerelease: false
           generate_release_notes: true
