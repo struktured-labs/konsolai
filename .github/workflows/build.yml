@@ -107,25 +107,26 @@ jobs:
             --config "$GITHUB_WORKSPACE/.craftsettings.ini" \
             --variables "WORKSPACE=$GITHUB_WORKSPACE"
 
-      - name: List available Craft packages
+      - name: Update Craft blueprints
         shell: bash
         run: |
-          # Search for available packages to find correct names
-          echo "=== Searching for Qt packages ==="
-          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" --search qt6 | head -30
+          # Update blueprint repositories to get package definitions
+          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" --update || true
+          # List available packages
+          echo "=== Searching for konsole ==="
+          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" --search konsole | head -20
           echo "=== Searching for ECM ==="
-          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" --search extra-cmake
-          echo "=== Searching for KDE frameworks ==="
-          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" --search kconfig | head -10
+          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" --search ecm | head -10
 
       - name: Install KDE dependencies
         shell: bash
         run: |
-          # Install based on actual Craft package names
-          # Note: These are placeholders until we find correct names
+          # Try to install konsole dependencies
           python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" \
-            qt-apps/konsole || echo "Trying alternative approach..."
-          # If konsole package exists, it will pull in all dependencies
+            --install-deps kde/applications/konsole || \
+          python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" \
+            extragear/utils/konsole || \
+          echo "Could not find konsole package"
 
       - name: Debug Craft installation
         shell: bash
