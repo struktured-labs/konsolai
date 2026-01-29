@@ -141,20 +141,13 @@ jobs:
             kde/frameworks/tier1/kpty || echo "Some packages may have failed, continuing..."
 
       - name: Build konsolai
-        shell: bash
+        shell: cmd
         run: |
-          CRAFT_PREFIX="$CRAFT_ROOT/$CRAFT_ABI"
-          # Add Craft paths
-          export PATH="$CRAFT_PREFIX/bin:$CRAFT_PREFIX/dev-utils/bin:$PATH"
-          export CMAKE_PREFIX_PATH="$CRAFT_PREFIX"
-          # Debug: show where cmake is
-          which cmake || echo "cmake not in PATH"
-          ls -la "$CRAFT_PREFIX/dev-utils/bin/" | head -20 || echo "dev-utils/bin not found"
-          # Configure and build
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH="$CRAFT_PREFIX" \
-            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install"
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          set CRAFT_PREFIX=%CRAFT_ROOT%\%CRAFT_ABI%
+          set CMAKE_PREFIX_PATH=%CRAFT_PREFIX%
+          set PATH=%CRAFT_PREFIX%\bin;%PATH%
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=%CRAFT_PREFIX% -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\install
           cmake --build build
 
       - name: Package
