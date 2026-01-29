@@ -448,15 +448,93 @@ void ClaudeSession::setYoloMode(bool enabled)
         qDebug() << "ClaudeSession::setYoloMode:" << enabled << "current state:" << static_cast<int>(claudeState());
         Q_EMIT yoloModeChanged(enabled);
 
-        // If enabling yolo and currently waiting for permission, approve immediately
-        if (enabled && claudeState() == ClaudeProcess::State::WaitingInput) {
-            qDebug() << "ClaudeSession: Yolo mode enabled while waiting - auto-approving now";
-            QTimer::singleShot(100, this, [this]() {
-                approvePermission();
-                incrementYoloApproval();
-            });
+        if (enabled) {
+            // Start polling for permission prompts
+            startPermissionPolling();
+        } else {
+            stopPermissionPolling();
         }
     }
+}
+
+void ClaudeSession::startPermissionPolling()
+{
+    if (!m_permissionPollTimer) {
+        m_permissionPollTimer = new QTimer(this);
+        connect(m_permissionPollTimer, &QTimer::timeout, this, &ClaudeSession::pollForPermissionPrompt);
+    }
+
+    if (!m_permissionPollTimer->isActive()) {
+        qDebug() << "ClaudeSession: Starting permission polling for yolo mode";
+        m_permissionPollTimer->start(300); // Poll every 300ms
+    }
+}
+
+void ClaudeSession::stopPermissionPolling()
+{
+    if (m_permissionPollTimer && m_permissionPollTimer->isActive()) {
+        qDebug() << "ClaudeSession: Stopping permission polling";
+        m_permissionPollTimer->stop();
+    }
+    m_permissionPromptDetected = false;
+}
+
+void ClaudeSession::pollForPermissionPrompt()
+{
+    if (!m_yoloMode || !m_tmuxManager) {
+        return;
+    }
+
+    // Capture last 20 lines of terminal output
+    QString output = m_tmuxManager->capturePane(m_sessionName, -20, 0);
+
+    if (detectPermissionPrompt(output)) {
+        if (!m_permissionPromptDetected) {
+            m_permissionPromptDetected = true;
+            qDebug() << "ClaudeSession: Permission prompt detected - auto-approving (yolo mode)";
+
+            // Send approval with small delay to ensure prompt is ready
+            QTimer::singleShot(50, this, [this]() {
+                approvePermission();
+                incrementYoloApproval();
+
+                // Reset detection flag after a delay to allow re-detection
+                QTimer::singleShot(500, this, [this]() {
+                    m_permissionPromptDetected = false;
+                });
+            });
+        }
+    } else {
+        m_permissionPromptDetected = false;
+    }
+}
+
+bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
+{
+    // Look for Claude Code permission prompt patterns
+    // These patterns match the interactive permission UI
+
+    // Pattern 1: "Do you want to proceed?"
+    if (terminalOutput.contains(QStringLiteral("Do you want to proceed?"))) {
+        return true;
+    }
+
+    // Pattern 2: Arrow pointing to "Yes" option (❯ followed by number and Yes)
+    if (terminalOutput.contains(QStringLiteral("❯")) && (terminalOutput.contains(QStringLiteral("Yes")) || terminalOutput.contains(QStringLiteral("yes")))) {
+        return true;
+    }
+
+    // Pattern 3: Allow this action patterns
+    if (terminalOutput.contains(QStringLiteral("Allow this")) || terminalOutput.contains(QStringLiteral("Allow command"))) {
+        return true;
+    }
+
+    // Pattern 4: Permission request header
+    if (terminalOutput.contains(QStringLiteral("Permission Request")) || terminalOutput.contains(QStringLiteral("permission request"))) {
+        return true;
+    }
+
+    return false;
 }
 
 void ClaudeSession::setDoubleYoloMode(bool enabled)

@@ -13,8 +13,9 @@
 #include "config-konsole.h"
 
 #include <QObject>
-#include <QString>
 #include <QPointer>
+#include <QString>
+#include <QTimer>
 
 // Konsole includes
 #include "../session/Session.h"
@@ -373,6 +374,14 @@ private:
     int m_yoloApprovalCount = 0;
     int m_doubleYoloApprovalCount = 0;
     int m_tripleYoloApprovalCount = 0;
+
+    // Permission prompt polling for yolo mode
+    QTimer *m_permissionPollTimer = nullptr;
+    bool m_permissionPromptDetected = false;
+    void startPermissionPolling();
+    void stopPermissionPolling();
+    void pollForPermissionPrompt();
+    bool detectPermissionPrompt(const QString &terminalOutput);
 };
 
 } // namespace Konsolai
