@@ -142,7 +142,7 @@ jobs:
           if-no-files-found: warn
 
   release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux]  # Windows build is optional for now
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
