@@ -140,6 +140,20 @@ jobs:
             kde/frameworks/tier3/kxmlgui \
             kde/frameworks/tier1/kpty || echo "Some packages may have failed, continuing..."
 
+      - name: Debug Craft installation
+        shell: bash
+        run: |
+          CRAFT_PREFIX="C:/CraftRoot/windows-msvc2022_64-cl"
+          echo "=== Craft prefix contents ==="
+          ls -la "$CRAFT_PREFIX/" || echo "Craft prefix not found"
+          echo "=== Looking for ECM ==="
+          find "$CRAFT_PREFIX" -name "ECMConfig.cmake" 2>/dev/null || echo "ECMConfig.cmake not found"
+          find "$CRAFT_PREFIX" -name "ecm-config.cmake" 2>/dev/null || echo "ecm-config.cmake not found"
+          echo "=== share/cmake contents ==="
+          ls -la "$CRAFT_PREFIX/share/cmake/" 2>/dev/null || echo "share/cmake not found"
+          echo "=== lib/cmake contents ==="
+          ls -la "$CRAFT_PREFIX/lib/cmake/" 2>/dev/null || echo "lib/cmake not found"
+
       - name: Build konsolai
         shell: cmd
         run: |
@@ -147,8 +161,6 @@ jobs:
           set CRAFT_PREFIX=C:\CraftRoot\windows-msvc2022_64-cl
           set CMAKE_PREFIX_PATH=%CRAFT_PREFIX%
           set PATH=%CRAFT_PREFIX%\bin;%PATH%
-          echo "CMAKE_PREFIX_PATH=%CMAKE_PREFIX_PATH%"
-          dir %CRAFT_PREFIX%\share\ECM\cmake 2>nul || echo "ECM cmake dir not found"
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=%CRAFT_PREFIX% -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\install
           cmake --build build
 
