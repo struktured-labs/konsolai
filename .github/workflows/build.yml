@@ -110,9 +110,10 @@ jobs:
       - name: Install KDE dependencies
         shell: bash
         run: |
-          # Install individual KF6 frameworks that konsolai needs
-          # Can't use --install-deps konsole since konsole isn't packaged for Windows in Craft
+          # Install build tools and KF6 frameworks
           python "$CRAFT_ROOT/$CRAFT_ABI/craft/bin/craft.py" \
+            dev-utils/cmake \
+            dev-utils/ninja \
             libs/qt6/qtbase \
             libs/qt6/qtmultimedia \
             libs/qt6/qt5compat \
@@ -143,20 +144,18 @@ jobs:
         shell: bash
         run: |
           CRAFT_PREFIX="$CRAFT_ROOT/$CRAFT_ABI"
-          # Set up paths manually since craftenv scripts have issues in CI
+          # Add Craft paths
           export PATH="$CRAFT_PREFIX/bin:$CRAFT_PREFIX/dev-utils/bin:$PATH"
           export CMAKE_PREFIX_PATH="$CRAFT_PREFIX"
-          # Use Craft's cmake and ninja
-          CMAKE="$CRAFT_PREFIX/dev-utils/bin/cmake.exe"
-          NINJA="$CRAFT_PREFIX/dev-utils/bin/ninja.exe"
-          # Configure
-          "$CMAKE" -B build -G Ninja \
-            -DCMAKE_MAKE_PROGRAM="$NINJA" \
+          # Debug: show where cmake is
+          which cmake || echo "cmake not in PATH"
+          ls -la "$CRAFT_PREFIX/dev-utils/bin/" | head -20 || echo "dev-utils/bin not found"
+          # Configure and build
+          cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH="$CRAFT_PREFIX" \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install"
-          # Build
-          "$CMAKE" --build build
+          cmake --build build
 
       - name: Package
         shell: pwsh
