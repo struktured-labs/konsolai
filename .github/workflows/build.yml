@@ -142,15 +142,21 @@ jobs:
       - name: Build konsolai
         shell: bash
         run: |
-          # Source Craft environment using bash script
-          source "$CRAFT_ROOT/$CRAFT_ABI/craft/craftenv.sh" 2>/dev/null || true
-          # Configure with CMake
-          cmake -B build -G Ninja \
+          CRAFT_PREFIX="$CRAFT_ROOT/$CRAFT_ABI"
+          # Set up paths manually since craftenv scripts have issues in CI
+          export PATH="$CRAFT_PREFIX/bin:$CRAFT_PREFIX/dev-utils/bin:$PATH"
+          export CMAKE_PREFIX_PATH="$CRAFT_PREFIX"
+          # Use Craft's cmake and ninja
+          CMAKE="$CRAFT_PREFIX/dev-utils/bin/cmake.exe"
+          NINJA="$CRAFT_PREFIX/dev-utils/bin/ninja.exe"
+          # Configure
+          "$CMAKE" -B build -G Ninja \
+            -DCMAKE_MAKE_PROGRAM="$NINJA" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH="$CRAFT_ROOT/$CRAFT_ABI" \
+            -DCMAKE_PREFIX_PATH="$CRAFT_PREFIX" \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install"
           # Build
-          cmake --build build
+          "$CMAKE" --build build
 
       - name: Package
         shell: pwsh
