@@ -262,6 +262,7 @@ QString ClaudeHookHandler::generateHooksConfig() const
     hooks[QStringLiteral("Stop")] = makeHookEntry(QStringLiteral("Stop"));
     hooks[QStringLiteral("PreToolUse")] = makeHookEntry(QStringLiteral("PreToolUse"));
     hooks[QStringLiteral("PostToolUse")] = makeHookEntry(QStringLiteral("PostToolUse"));
+    hooks[QStringLiteral("PermissionRequest")] = makeHookEntry(QStringLiteral("PermissionRequest"));
 
     // Wrap in "hooks" key as expected by Claude Code
     QJsonObject root;

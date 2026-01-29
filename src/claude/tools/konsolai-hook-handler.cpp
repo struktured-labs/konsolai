@@ -7,20 +7,53 @@
     This small binary is called by Claude hooks to send events back to Konsolai.
     It reads event data from stdin (JSON) and sends it to the Konsolai socket.
 
+    For PermissionRequest events, it can auto-approve if yolo mode is enabled.
+
     Usage:
         konsolai-hook-handler --socket <path> --event <type>
 
     The event data is read from stdin as JSON.
 */
 
-#include <QCoreApplication>
 #include <QCommandLineParser>
-#include <QLocalSocket>
+#include <QCoreApplication>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocalSocket>
 #include <QTextStream>
-#include <QFile>
 #include <QTimer>
+
+// Check if yolo mode is enabled for this session
+// Yolo state is stored in: ~/.local/share/konsolai/sessions/{session-id}.yolo
+bool isYoloEnabled(const QString &socketPath)
+{
+    // Derive yolo file path from socket path
+    // Socket: /path/to/sessions/{session-id}.sock
+    // Yolo:   /path/to/sessions/{session-id}.yolo
+    QString yoloPath = socketPath;
+    yoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo"));
+
+    return QFileInfo::exists(yoloPath);
+}
+
+// Output JSON to auto-approve a PermissionRequest
+void outputApprovalJson()
+{
+    QJsonObject decision;
+    decision[QStringLiteral("behavior")] = QStringLiteral("allow");
+
+    QJsonObject hookOutput;
+    hookOutput[QStringLiteral("hookEventName")] = QStringLiteral("PermissionRequest");
+    hookOutput[QStringLiteral("decision")] = decision;
+
+    QJsonObject output;
+    output[QStringLiteral("hookSpecificOutput")] = hookOutput;
+
+    QTextStream out(stdout);
+    out << QJsonDocument(output).toJson(QJsonDocument::Compact) << "\n";
+}
 
 int main(int argc, char *argv[])
 {
@@ -40,11 +73,9 @@ int main(int argc, char *argv[])
     );
     parser.addOption(socketOption);
 
-    QCommandLineOption eventOption(
-        QStringList() << QStringLiteral("e") << QStringLiteral("event"),
-        QStringLiteral("Event type (Stop, Notification, PreToolUse, PostToolUse)"),
-        QStringLiteral("type")
-    );
+    QCommandLineOption eventOption(QStringList() << QStringLiteral("e") << QStringLiteral("event"),
+                                   QStringLiteral("Event type (Stop, Notification, PreToolUse, PostToolUse, PermissionRequest)"),
+                                   QStringLiteral("type"));
     parser.addOption(eventOption);
 
     QCommandLineOption timeoutOption(
@@ -90,15 +121,28 @@ int main(int argc, char *argv[])
         }
     }
 
+    // For PermissionRequest events, check yolo mode and auto-approve if enabled
+    bool yoloApproved = false;
+    if (eventType == QStringLiteral("PermissionRequest") && isYoloEnabled(socketPath)) {
+        outputApprovalJson();
+        yoloApproved = true;
+        // Mark in event data that we auto-approved
+        eventData[QStringLiteral("yolo_approved")] = true;
+    }
+
     // Add environment variables that might be useful
     eventData[QStringLiteral("session_id")] = QString::fromLocal8Bit(qgetenv("KONSOLAI_SESSION_ID"));
     eventData[QStringLiteral("working_dir")] = QString::fromLocal8Bit(qgetenv("PWD"));
 
-    // Connect to socket and send event
+    // Connect to socket and send event to Konsolai (for tracking/notifications)
     QLocalSocket socket;
     socket.connectToServer(socketPath);
 
     if (!socket.waitForConnected(timeout)) {
+        // If we already approved via yolo, exit success even if socket fails
+        if (yoloApproved) {
+            return 0;
+        }
         QTextStream err(stderr);
         err << "Error: Failed to connect to Konsolai socket: " << socket.errorString() << "\n";
         return 2;
@@ -114,6 +158,10 @@ int main(int argc, char *argv[])
 
     socket.write(data);
     if (!socket.waitForBytesWritten(timeout)) {
+        // If we already approved via yolo, exit success even if socket fails
+        if (yoloApproved) {
+            return 0;
+        }
         QTextStream err(stderr);
         err << "Error: Failed to write to Konsolai socket: " << socket.errorString() << "\n";
         return 3;

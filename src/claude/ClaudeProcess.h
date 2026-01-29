@@ -130,6 +130,11 @@ Q_SIGNALS:
      */
     void notificationReceived(const QString &type, const QString &message);
 
+    /**
+     * Emitted when yolo mode auto-approved a permission
+     */
+    void yoloApprovalOccurred(const QString &toolName);
+
 public Q_SLOTS:
     /**
      * Update state based on hook event

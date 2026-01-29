@@ -303,6 +303,12 @@ void ClaudeSession::connectSignals()
             });
         }
     });
+
+    // Handle yolo auto-approvals from hook handler
+    connect(m_claudeProcess, &ClaudeProcess::yoloApprovalOccurred, this, [this](const QString &toolName) {
+        qDebug() << "ClaudeSession: Yolo hook auto-approved:" << toolName;
+        incrementYoloApproval();
+    });
 }
 
 ClaudeProcess::State ClaudeSession::claudeState() const
@@ -448,11 +454,30 @@ void ClaudeSession::setYoloMode(bool enabled)
         qDebug() << "ClaudeSession::setYoloMode:" << enabled << "current state:" << static_cast<int>(claudeState());
         Q_EMIT yoloModeChanged(enabled);
 
-        if (enabled) {
-            // Start polling for permission prompts
-            startPermissionPolling();
-        } else {
-            stopPermissionPolling();
+        // Write yolo state file for hook handler to read
+        // File location: same as socket but with .yolo extension
+        if (m_hookHandler) {
+            QString yoloPath = m_hookHandler->socketPath();
+            yoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo"));
+
+            if (enabled) {
+                // Create the yolo file
+                QFile yoloFile(yoloPath);
+                if (yoloFile.open(QIODevice::WriteOnly)) {
+                    yoloFile.write("1");
+                    yoloFile.close();
+                    qDebug() << "ClaudeSession: Created yolo state file:" << yoloPath;
+                }
+                // Also start terminal polling as a fallback
+                startPermissionPolling();
+            } else {
+                // Remove the yolo file
+                if (QFile::exists(yoloPath)) {
+                    QFile::remove(yoloPath);
+                    qDebug() << "ClaudeSession: Removed yolo state file:" << yoloPath;
+                }
+                stopPermissionPolling();
+            }
         }
     }
 }

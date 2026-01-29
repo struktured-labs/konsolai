@@ -108,18 +108,30 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         // Claude finished responding
         setState(State::Idle);
         Q_EMIT taskFinished();
-    }
-    else if (eventType == QStringLiteral("PreToolUse")) {
+    } else if (eventType == QStringLiteral("PreToolUse")) {
         // Claude is about to use a tool
         setState(State::Working);
         QString toolName = obj.value(QStringLiteral("tool_name")).toString();
         setCurrentTask(QStringLiteral("Using tool: %1").arg(toolName));
-    }
-    else if (eventType == QStringLiteral("PostToolUse")) {
+    } else if (eventType == QStringLiteral("PostToolUse")) {
         // Claude finished using a tool
         // Stay in Working state, tool completed
-    }
-    else if (eventType == QStringLiteral("Notification")) {
+    } else if (eventType == QStringLiteral("PermissionRequest")) {
+        // Permission dialog appeared
+        QString toolName = obj.value(QStringLiteral("tool_name")).toString();
+        QString toolInput = obj.value(QStringLiteral("tool_input")).toString();
+        bool yoloApproved = obj.value(QStringLiteral("yolo_approved")).toBool();
+
+        if (yoloApproved) {
+            // Hook handler auto-approved this via yolo mode
+            qDebug() << "ClaudeProcess: Permission auto-approved by yolo mode for:" << toolName;
+            Q_EMIT yoloApprovalOccurred(toolName);
+        } else {
+            // Need user approval
+            setState(State::WaitingInput);
+            Q_EMIT permissionRequested(toolName, toolInput);
+        }
+    } else if (eventType == QStringLiteral("Notification")) {
         QString notificationType = obj.value(QStringLiteral("type")).toString();
         QString message = obj.value(QStringLiteral("message")).toString();
 
