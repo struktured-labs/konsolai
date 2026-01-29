@@ -41,6 +41,18 @@ void ClaudeTabIndicator::setSession(ClaudeSession *session)
     if (m_session) {
         connect(m_session, &ClaudeSession::stateChanged, this, &ClaudeTabIndicator::updateState);
         connect(m_session, &QObject::destroyed, this, &ClaudeTabIndicator::onSessionDestroyed);
+        connect(m_session, &ClaudeSession::yoloModeChanged, this, [this](bool) {
+            update();
+        });
+        connect(m_session, &ClaudeSession::doubleYoloModeChanged, this, [this](bool) {
+            update();
+        });
+        connect(m_session, &ClaudeSession::tripleYoloModeChanged, this, [this](bool) {
+            update();
+        });
+        connect(m_session, &ClaudeSession::approvalCountChanged, this, [this]() {
+            update();
+        });
 
         updateState(m_session->claudeState());
     } else {
@@ -67,6 +79,18 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
+    // Determine yolo level for border color
+    int yoloLevel = 0;
+    if (m_session) {
+        if (m_session->tripleYoloMode()) {
+            yoloLevel = 3;
+        } else if (m_session->doubleYoloMode()) {
+            yoloLevel = 2;
+        } else if (m_session->yoloMode()) {
+            yoloLevel = 1;
+        }
+    }
+
     // Draw colored dot
     QColor color = stateColor(m_currentState);
     painter.setBrush(color);
@@ -90,6 +114,33 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
     } else {
         // Draw solid dot
         painter.drawEllipse(centerX - DOT_SIZE / 2, centerY - DOT_SIZE / 2, DOT_SIZE, DOT_SIZE);
+    }
+
+    // Draw yolo mode border ring
+    if (yoloLevel > 0) {
+        QColor yoloColor;
+        if (yoloLevel == 3) {
+            yoloColor = QColor(255, 0, 255); // Purple for triple
+        } else if (yoloLevel == 2) {
+            yoloColor = QColor(255, 165, 0); // Orange for double
+        } else {
+            yoloColor = QColor(255, 215, 0); // Gold for single
+        }
+
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(yoloColor, 1.5));
+        int ringSize = DOT_SIZE + 4;
+        painter.drawEllipse(centerX - ringSize / 2, centerY - ringSize / 2, ringSize, ringSize);
+
+        // Draw lightning bolt count at bottom
+        if (yoloLevel > 1) {
+            QFont font = painter.font();
+            font.setPixelSize(6);
+            font.setBold(true);
+            painter.setFont(font);
+            painter.setPen(yoloColor);
+            painter.drawText(rect(), Qt::AlignBottom | Qt::AlignHCenter, QString::number(yoloLevel));
+        }
     }
 }
 

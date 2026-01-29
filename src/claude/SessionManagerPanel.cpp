@@ -169,6 +169,26 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         m_activeSessions.remove(sessionId);
         updateTreeWidget();
     });
+
+    // Connect to working directory changes (after run() gets real path from tmux)
+    connect(session, &ClaudeSession::workingDirectoryChanged, this, [this, sessionId](const QString &newPath) {
+        if (m_metadata.contains(sessionId) && !newPath.isEmpty()) {
+            m_metadata[sessionId].workingDirectory = newPath;
+            saveMetadata();
+            updateTreeWidget();
+            qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;
+        }
+    });
+
+    // Connect to approval count changes to update display
+    connect(session, &ClaudeSession::approvalCountChanged, this, [this]() {
+        updateTreeWidget();
+    });
+
+    // Connect to yolo mode changes to update display
+    connect(session, &ClaudeSession::yoloModeChanged, this, [this](bool) {
+        updateTreeWidget();
+    });
 }
 
 void SessionManagerPanel::unregisterSession(ClaudeSession *session)
@@ -448,8 +468,12 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     auto *item = new QTreeWidgetItem(parent);
 
     // Display name: project directory or session name
-    QString displayName = QDir(meta.workingDirectory).dirName();
-    if (displayName.isEmpty()) {
+    QString displayName;
+    if (!meta.workingDirectory.isEmpty() && meta.workingDirectory != QStringLiteral(".")) {
+        displayName = QDir(meta.workingDirectory).dirName();
+    }
+    // Fallback to session name if display name is empty or just "." or "build" (which is misleading)
+    if (displayName.isEmpty() || displayName == QStringLiteral(".") || displayName == QStringLiteral("build")) {
         displayName = meta.sessionName;
     }
 

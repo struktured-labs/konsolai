@@ -12,10 +12,12 @@
 
 #include "config-konsole.h"
 
+#include <QDateTime>
 #include <QObject>
 #include <QPointer>
 #include <QString>
 #include <QTimer>
+#include <QVector>
 
 // Konsole includes
 #include "../session/Session.h"
@@ -23,6 +25,16 @@
 
 namespace Konsolai
 {
+
+/**
+ * Log entry for auto-approved actions
+ */
+struct ApprovalLogEntry {
+    QDateTime timestamp;
+    QString toolName;
+    QString action;
+    int yoloLevel; // 1=yolo, 2=double, 3=triple
+};
 
 /**
  * ClaudeSession manages a Claude-enabled terminal session.
@@ -173,22 +185,53 @@ public:
     }
 
     /**
+     * Get the approval log
+     */
+    const QVector<ApprovalLogEntry> &approvalLog() const
+    {
+        return m_approvalLog;
+    }
+
+    /**
+     * Log an approval (called when auto-approving)
+     */
+    void logApproval(const QString &toolName, const QString &action, int yoloLevel)
+    {
+        ApprovalLogEntry entry;
+        entry.timestamp = QDateTime::currentDateTime();
+        entry.toolName = toolName;
+        entry.action = action;
+        entry.yoloLevel = yoloLevel;
+        m_approvalLog.append(entry);
+
+        if (yoloLevel == 1) {
+            m_yoloApprovalCount++;
+        } else if (yoloLevel == 2) {
+            m_doubleYoloApprovalCount++;
+        } else if (yoloLevel == 3) {
+            m_tripleYoloApprovalCount++;
+        }
+
+        qDebug() << "ClaudeSession: Logged approval -" << toolName << action << "level:" << yoloLevel << "total:" << totalApprovalCount();
+        Q_EMIT approvalCountChanged();
+        Q_EMIT approvalLogged(entry);
+    }
+
+    /**
      * Increment approval counts (called when auto-approving)
+     * @deprecated Use logApproval() instead for detailed tracking
      */
     void incrementYoloApproval()
     {
-        m_yoloApprovalCount++;
-        Q_EMIT approvalCountChanged();
+        logApproval(QStringLiteral("unknown"), QStringLiteral("auto-approved"), 1);
     }
     void incrementDoubleYoloApproval()
     {
-        m_doubleYoloApprovalCount++;
-        Q_EMIT approvalCountChanged();
+        logApproval(QStringLiteral("unknown"), QStringLiteral("auto-accepted"), 2);
     }
     void incrementTripleYoloApproval()
     {
-        m_tripleYoloApprovalCount++;
-        Q_EMIT approvalCountChanged();
+        logApproval(QStringLiteral("unknown"), QStringLiteral("auto-continued"), 3);
     }
 
     /**
@@ -346,6 +389,16 @@ Q_SIGNALS:
      */
     void approvalCountChanged();
 
+    /**
+     * Emitted when an approval is logged
+     */
+    void approvalLogged(const ApprovalLogEntry &entry);
+
+    /**
+     * Emitted when working directory is determined (after run())
+     */
+    void workingDirectoryChanged(const QString &newPath);
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -374,6 +427,9 @@ private:
     int m_yoloApprovalCount = 0;
     int m_doubleYoloApprovalCount = 0;
     int m_tripleYoloApprovalCount = 0;
+
+    // Approval log
+    QVector<ApprovalLogEntry> m_approvalLog;
 
     // Permission prompt polling for yolo mode
     QTimer *m_permissionPollTimer = nullptr;

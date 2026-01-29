@@ -101,7 +101,9 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
         m_sessionId = QString();
     }
 
-    m_workingDir = QDir::currentPath();
+    // Leave working dir empty for reattach - it will be populated from tmux in run()
+    // Don't use QDir::currentPath() as that gives the build directory, not the project directory
+    m_workingDir = QString();
 
     // Create managers
     m_tmuxManager = new TmuxManager(this);
@@ -193,13 +195,16 @@ void ClaudeSession::run()
 
     // Update tab title based on final working directory
     QString projectName = QDir(m_workingDir).dirName();
-    if (!projectName.isEmpty()) {
+    if (!projectName.isEmpty() && projectName != QStringLiteral(".")) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
         // Use %d (directory name) instead of %n (process name) to show project folder
         setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%d"));
         setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%d"));
     }
+
+    // Emit signal so session panel can update metadata with correct working directory
+    Q_EMIT workingDirectoryChanged(m_workingDir);
 
     // Start the hook handler to receive Claude events
     if (m_hookHandler) {
