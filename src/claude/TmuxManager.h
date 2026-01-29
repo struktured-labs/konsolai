@@ -134,6 +134,11 @@ public:
      */
     QString capturePane(const QString &sessionName, int startLine = -100, int endLine = 100);
 
+    /**
+     * Get the current working directory of a tmux session's pane
+     */
+    QString getPaneWorkingDirectory(const QString &sessionName) const;
+
 Q_SIGNALS:
     /**
      * Emitted when an error occurs during tmux operations

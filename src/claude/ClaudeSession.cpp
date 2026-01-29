@@ -171,6 +171,16 @@ void ClaudeSession::run()
         m_workingDir = workDir;
     }
 
+    // For reattached sessions, get the actual working directory from tmux
+    // This is where Claude is actually running, which may differ from where konsolai started
+    if (m_isReattach && m_tmuxManager && m_tmuxManager->sessionExists(m_sessionName)) {
+        QString tmuxWorkDir = m_tmuxManager->getPaneWorkingDirectory(m_sessionName);
+        if (!tmuxWorkDir.isEmpty() && QDir(tmuxWorkDir).exists()) {
+            m_workingDir = tmuxWorkDir;
+            qDebug() << "ClaudeSession::run() - Got working dir from tmux:" << m_workingDir;
+        }
+    }
+
     // Validate working directory
     if (!m_workingDir.isEmpty() && !QDir(m_workingDir).exists()) {
         QMessageBox::warning(nullptr,

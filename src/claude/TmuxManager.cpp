@@ -204,6 +204,16 @@ QString TmuxManager::capturePane(const QString &sessionName, int startLine, int 
     return ok ? output : QString();
 }
 
+QString TmuxManager::getPaneWorkingDirectory(const QString &sessionName) const
+{
+    bool ok = false;
+    QString output =
+        executeCommand({QStringLiteral("display-message"), QStringLiteral("-p"), QStringLiteral("-t"), sessionName, QStringLiteral("#{pane_current_path}")},
+                       &ok);
+
+    return ok ? output.trimmed() : QString();
+}
+
 QString TmuxManager::executeCommand(const QStringList &args, bool *ok) const
 {
     QProcess process;
