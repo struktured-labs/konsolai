@@ -430,8 +430,9 @@ void ClaudeSession::sendPrompt(const QString &prompt)
 
 void ClaudeSession::approvePermission()
 {
-    // Send 'y' followed by Enter to approve
-    sendText(QStringLiteral("y\n"));
+    // Claude Code uses a selection UI where option 1 (Yes) is pre-selected
+    // Just send Enter to confirm the selection
+    sendText(QStringLiteral("\n"));
 }
 
 void ClaudeSession::denyPermission()
