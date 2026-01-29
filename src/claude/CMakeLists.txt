@@ -44,9 +44,12 @@ target_link_libraries(konsolai_claude
     KF6::CoreAddons
     KF6::ConfigCore
     KF6::Notifications
-    KF6::StatusNotifierItem
     KF6::I18n
 )
+
+if(HAVE_KSTATUSNOTIFIERITEM)
+    target_link_libraries(konsolai_claude PUBLIC KF6::StatusNotifierItem)
+endif()
 
 if(HAVE_DBUS)
     target_link_libraries(konsolai_claude

@@ -6,12 +6,15 @@
 #ifndef NOTIFICATIONMANAGER_H
 #define NOTIFICATIONMANAGER_H
 
+#include "config-konsole.h"
 #include "konsoleprivate_export.h"
 #include <QObject>
 #include <QString>
 #include <QUrl>
 
+#if HAVE_KSTATUSNOTIFIERITEM
 class KStatusNotifierItem;
+#endif
 
 namespace Konsolai
 {
@@ -155,7 +158,9 @@ private:
 
     static NotificationManager *s_instance;
 
+#if HAVE_KSTATUSNOTIFIERITEM
     KStatusNotifierItem *m_systemTray = nullptr;
+#endif
     Channels m_enabledChannels = Channel::All;
     qreal m_audioVolume = 0.7;
     NotificationType m_currentTrayStatus = NotificationType::Info;

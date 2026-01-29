@@ -61,12 +61,21 @@ find_package(KF6 ${KF6_DEP_VERSION} REQUIRED
     NotifyConfig
     Parts
     Service
-    StatusNotifierItem
     TextWidgets
     WidgetsAddons
     WindowSystem
     XmlGui
 )
+
+# KStatusNotifierItem is optional - may not be available on all distros
+find_package(KF6StatusNotifierItem ${KF6_DEP_VERSION} QUIET)
+if(KF6StatusNotifierItem_FOUND)
+    set(HAVE_KSTATUSNOTIFIERITEM TRUE)
+    message(STATUS "Found KF6::StatusNotifierItem - system tray support enabled")
+else()
+    set(HAVE_KSTATUSNOTIFIERITEM FALSE)
+    message(STATUS "KF6::StatusNotifierItem not found - system tray support disabled")
+endif()
 
 if(NOT WIN32)
     find_package(KF6 ${KF6_DEP_VERSION} REQUIRED

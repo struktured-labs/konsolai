@@ -6,13 +6,16 @@
 #include "NotificationManager.h"
 #include "ClaudeSession.h"
 
-#include <KNotification>
-#include <KStatusNotifierItem>
 #include <KLocalizedString>
+#include <KNotification>
 
+#if HAVE_KSTATUSNOTIFIERITEM
+#include <KStatusNotifierItem>
+#endif
+
+#include <QDir>
 #include <QSoundEffect>
 #include <QStandardPaths>
-#include <QDir>
 
 namespace Konsolai
 {
@@ -36,26 +39,24 @@ NotificationManager::~NotificationManager()
     }
 }
 
-NotificationManager* NotificationManager::instance()
+NotificationManager *NotificationManager::instance()
 {
     return s_instance;
 }
 
 void NotificationManager::initSystemTray()
 {
+#if HAVE_KSTATUSNOTIFIERITEM
     m_systemTray = new KStatusNotifierItem(this);
     m_systemTray->setCategory(KStatusNotifierItem::ApplicationStatus);
     m_systemTray->setIconByName(QStringLiteral("utilities-terminal"));
     m_systemTray->setStatus(KStatusNotifierItem::Passive);
     m_systemTray->setToolTipTitle(i18n("Konsolai"));
     m_systemTray->setToolTipSubTitle(i18n("Claude-native terminal"));
+#endif
 }
 
-void NotificationManager::notify(NotificationType type,
-                                  const QString &title,
-                                  const QString &message,
-                                  ClaudeSession *session,
-                                  Channels channels)
+void NotificationManager::notify(NotificationType type, const QString &title, const QString &message, ClaudeSession *session, Channels channels)
 {
     // Apply enabled channel filter
     channels &= m_enabledChannels;
@@ -81,8 +82,13 @@ void NotificationManager::updateSystemTray(NotificationType type, const QString 
 {
     m_currentTrayStatus = type;
 
-    QString iconName = NotificationManager::iconName(type);
-    m_systemTray->setIconByName(iconName);
+#if HAVE_KSTATUSNOTIFIERITEM
+    if (!m_systemTray) {
+        return;
+    }
+
+    QString iconStr = NotificationManager::iconName(type);
+    m_systemTray->setIconByName(iconStr);
 
     KStatusNotifierItem::ItemStatus status;
     switch (type) {
@@ -102,13 +108,14 @@ void NotificationManager::updateSystemTray(NotificationType type, const QString 
 
     m_systemTray->setStatus(status);
     m_systemTray->setToolTipSubTitle(statusMessage);
+#else
+    Q_UNUSED(statusMessage);
+#endif
 
     Q_EMIT systemTrayStatusChanged(type, statusMessage);
 }
 
-void NotificationManager::showDesktopNotification(NotificationType type,
-                                                   const QString &title,
-                                                   const QString &message)
+void NotificationManager::showDesktopNotification(NotificationType type, const QString &title, const QString &message)
 {
     // Map type to KNotification urgency
     QString eventName;
@@ -207,10 +214,8 @@ QString NotificationManager::soundPath(NotificationType type)
 
     // Look for sound files in standard locations
     const QStringList searchPaths = {
-        QStandardPaths::locate(QStandardPaths::GenericDataLocation,
-                               QStringLiteral("konsolai/sounds/%1.wav").arg(soundName)),
-        QStandardPaths::locate(QStandardPaths::AppDataLocation,
-                               QStringLiteral("sounds/%1.wav").arg(soundName)),
+        QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("konsolai/sounds/%1.wav").arg(soundName)),
+        QStandardPaths::locate(QStandardPaths::AppDataLocation, QStringLiteral("sounds/%1.wav").arg(soundName)),
     };
 
     for (const QString &path : searchPaths) {

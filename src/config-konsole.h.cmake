@@ -14,3 +14,6 @@
 
 /* Defined if system has the malloc_trim function, which is a GNU extension */
 #cmakedefine01 HAVE_MALLOC_TRIM
+
+/* Defined if KF6::StatusNotifierItem is available */
+#cmakedefine01 HAVE_KSTATUSNOTIFIERITEM
