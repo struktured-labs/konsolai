@@ -144,7 +144,15 @@ jobs:
         run: |
           $craftPrefix = "$env:CRAFT_ROOT/$env:CRAFT_ABI"
           # Initialize Craft environment (sets PATH, compiler vars, etc.)
-          & "$craftPrefix/craft/craftenv.ps1"
+          # Suppress errors from craftenv.ps1 console operations in CI
+          try {
+            & "$craftPrefix/craft/craftenv.ps1" -ErrorAction SilentlyContinue
+          } catch {
+            Write-Host "Note: Some craftenv.ps1 console operations failed (expected in CI)"
+          }
+          # Manually set up essential paths
+          $env:PATH = "$craftPrefix/bin;$craftPrefix/dev-utils/bin;$env:PATH"
+          $env:CMAKE_PREFIX_PATH = "$craftPrefix"
           # Configure with CMake using Craft-installed dependencies
           cmake -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
