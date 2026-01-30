@@ -6,7 +6,6 @@
 #ifndef CLAUDEPROCESS_H
 #define CLAUDEPROCESS_H
 
-#include "konsoleprivate_export.h"
 #include <QObject>
 #include <QProcess>
 #include <QString>
@@ -21,7 +20,7 @@ namespace Konsolai
  * This class handles spawning, monitoring, and controlling the claude CLI
  * process, tracking its state and emitting signals when state changes occur.
  */
-class KONSOLEPRIVATE_EXPORT ClaudeProcess : public QObject
+class ClaudeProcess : public QObject
 {
     Q_OBJECT
 

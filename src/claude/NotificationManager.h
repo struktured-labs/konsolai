@@ -7,7 +7,6 @@
 #define NOTIFICATIONMANAGER_H
 
 #include "config-konsole.h"
-#include "konsoleprivate_export.h"
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -36,7 +35,7 @@ class ClaudeSession;
  * - Waiting for input (yellow, sound)
  * - Error (red, sound)
  */
-class KONSOLEPRIVATE_EXPORT NotificationManager : public QObject
+class NotificationManager : public QObject
 {
     Q_OBJECT
 

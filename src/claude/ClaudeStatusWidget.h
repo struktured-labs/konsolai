@@ -8,7 +8,6 @@
 
 #include "ClaudeProcess.h"
 
-#include "konsoleprivate_export.h"
 #include <QLabel>
 #include <QTimer>
 #include <QWidget>
@@ -28,7 +27,7 @@ class ClaudeSession;
  *
  * Format: "[Claude: Working] [Task: Writing code...]"
  */
-class KONSOLEPRIVATE_EXPORT ClaudeStatusWidget : public QWidget
+class ClaudeStatusWidget : public QWidget
 {
     Q_OBJECT
 

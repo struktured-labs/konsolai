@@ -11,7 +11,6 @@
 #include <QDir>
 #include <QStringList>
 
-#include "konsoleprivate_export.h"
 #include "profile/Profile.h"
 
 class QLineEdit;
@@ -37,7 +36,7 @@ namespace Konsolai
  *
  * Tab order: prompt -> folder name -> git options -> model
  */
-class KONSOLEPRIVATE_EXPORT ClaudeSessionWizard : public QDialog
+class ClaudeSessionWizard : public QDialog
 {
     Q_OBJECT
 

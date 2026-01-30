@@ -8,7 +8,6 @@
 #ifndef CLAUDEHOOKHANDLER_H
 #define CLAUDEHOOKHANDLER_H
 
-#include "konsoleprivate_export.h"
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -36,7 +35,7 @@ class ClaudeSession;
  *
  * Socket path: ~/.konsolai/sessions/{session-id}.sock
  */
-class KONSOLEPRIVATE_EXPORT ClaudeHookHandler : public QObject
+class ClaudeHookHandler : public QObject
 {
     Q_OBJECT
 

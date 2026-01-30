@@ -6,7 +6,6 @@
 #ifndef SESSIONMANAGERPANEL_H
 #define SESSIONMANAGERPANEL_H
 
-#include "konsoleprivate_export.h"
 #include <QDateTime>
 #include <QDir>
 #include <QLabel>
@@ -47,7 +46,7 @@ struct SessionMetadata {
  * - Only active sessions appear as tabs
  * - Double-click to attach/open a session
  */
-class KONSOLEPRIVATE_EXPORT SessionManagerPanel : public QWidget
+class SessionManagerPanel : public QWidget
 {
     Q_OBJECT
 

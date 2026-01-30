@@ -21,7 +21,6 @@
 
 // Konsole includes
 #include "../session/Session.h"
-#include "konsoleprivate_export.h"
 
 namespace Konsolai
 {
@@ -54,7 +53,7 @@ struct ApprovalLogEntry {
  *
  * Note: Inherits QDBusContext from parent Session class
  */
-class KONSOLEPRIVATE_EXPORT ClaudeSession : public Konsole::Session
+class ClaudeSession : public Konsole::Session
 {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.konsolai.Claude")
