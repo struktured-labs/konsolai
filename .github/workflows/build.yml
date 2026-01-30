@@ -88,62 +88,85 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    # Windows build is experimental - KDE apps aren't well supported on Windows via Craft
-    continue-on-error: true
-    env:
-      CRAFT_ROOT: C:/CraftRoot
-      CRAFT_ABI: windows-msvc2022_64-cl
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
         with:
-          python-version: '3.12'
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            extra-cmake-modules:p
+            qt6-base:p
+            qt6-multimedia:p
+            qt6-5compat:p
+            qt6-tools:p
+            icu:p
+            zlib:p
+            kbookmarks:p
+            kconfig:p
+            kconfigwidgets:p
+            kcoreaddons:p
+            kcrash:p
+            kguiaddons:p
+            ki18n:p
+            kiconthemes:p
+            kio:p
+            knewstuff:p
+            knotifications:p
+            knotifyconfig:p
+            kparts:p
+            kservice:p
+            ktextwidgets:p
+            kwidgetsaddons:p
+            kwindowsystem:p
+            kxmlgui:p
+            kstatusnotifieritem:p
+            kdbusaddons:p
+            gettext-tools:p
+            kdoctools:p
 
-      - name: Set up Craft via CraftMaster
-        shell: bash
+      - name: Configure CMake
         run: |
-          git clone --depth=1 https://invent.kde.org/packaging/craftmaster.git "$CRAFT_ROOT/CraftMaster"
-          python "$CRAFT_ROOT/CraftMaster/CraftMaster.py" \
-            --config "$GITHUB_WORKSPACE/.craftsettings.ini" \
-            --variables "WORKSPACE=$GITHUB_WORKSPACE"
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${MINGW_PREFIX}" \
+            -DKDE_INSTALL_LIBDIR=lib \
+            -DKDE_INSTALL_QMLDIR=share/qt6/qml \
+            -DKDE_INSTALL_QTPLUGINDIR=share/qt6/plugins \
+            -DKDE_INSTALL_DBUSDIR=share/dbus-1 \
+            -DKDE_INSTALL_MANDIR=share/man \
+            -DKDE_INSTALL_APPDIR=share/applications \
+            -DKDE_INSTALL_MIMEDIR=share/mime/packages \
+            -DBUILD_TESTING=OFF
 
-      - name: Windows build status
-        shell: bash
-        run: |
-          echo "========================================"
-          echo "Windows build is currently EXPERIMENTAL"
-          echo "========================================"
-          echo ""
-          echo "KDE applications like Konsole are primarily Linux-focused."
-          echo "The Craft packaging system doesn't have full support for"
-          echo "building KDE desktop apps on Windows."
-          echo ""
-          echo "For Windows users who want to try Konsolai:"
-          echo "1. Use WSL2 with a Linux distribution"
-          echo "2. Build from source using MSYS2/MinGW (advanced)"
-          echo "3. Wait for future Windows support improvements"
-          echo ""
-          echo "Linux builds work and are available in the releases."
-          exit 0
+      - name: Build
+        run: cmake --build build
 
       - name: Package
-        shell: pwsh
         run: |
-          cmake --install build
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\install\*" `
-            -DestinationPath "$env:GITHUB_WORKSPACE\konsolai-windows-x86_64.zip"
+          DESTDIR="${GITHUB_WORKSPACE}/install" cmake --install build
+          cd "${GITHUB_WORKSPACE}"
+          tar -czvf konsolai-windows-x86_64.tar.gz -C install .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: konsolai-windows-x86_64
-          path: konsolai-windows-x86_64.zip
-          if-no-files-found: warn
+          path: konsolai-windows-x86_64.tar.gz
 
   release:
-    needs: [build-linux]  # Windows build is optional for now
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -165,7 +188,7 @@ jobs:
         with:
           files: |
             konsolai-linux-x86_64.tar.gz
-            konsolai-windows-x86_64.zip
+            konsolai-windows-x86_64.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
