@@ -26,12 +26,20 @@ doxydoc/
 *.srctrlbm
 *.srctrldb
 *.srctrlprj
-.clang-format
 /compile_commands.json
 .clangd
 .cache
 .idea
 /cmake-build*
+
+# OCaml / dune
+_build/
+*.install
+*.merlin
+.merlin
+_opam/
+tmp/
+setenv.sh
 
 !/tests/Makefile
 !/tests/*/Makefile

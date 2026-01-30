@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (libraries core core_unix core_unix.command_unix prime_factors zarith)
+ (preprocess
+  (pps ppx_jane)))

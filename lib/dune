@@ -1,0 +1,5 @@
+(library
+ (name prime_factors)
+ (libraries core zarith)
+ (preprocess
+  (pps ppx_jane)))
