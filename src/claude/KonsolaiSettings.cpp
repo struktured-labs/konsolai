@@ -12,18 +12,18 @@
 namespace Konsolai
 {
 
-KonsolaiSettings *KonsolaiSettings::s_instance = nullptr;
+KonsolaiSettings *s_settingsInstance = nullptr;
 
 KonsolaiSettings *KonsolaiSettings::instance()
 {
-    return s_instance;
+    return s_settingsInstance;
 }
 
 KonsolaiSettings::KonsolaiSettings(QObject *parent)
     : QObject(parent)
 {
-    if (!s_instance) {
-        s_instance = this;
+    if (!s_settingsInstance) {
+        s_settingsInstance = this;
     }
 
     // Load config from ~/.config/konsolai/konsolairc
@@ -33,8 +33,8 @@ KonsolaiSettings::KonsolaiSettings(QObject *parent)
 KonsolaiSettings::~KonsolaiSettings()
 {
     save();
-    if (s_instance == this) {
-        s_instance = nullptr;
+    if (s_settingsInstance == this) {
+        s_settingsInstance = nullptr;
     }
 }
 

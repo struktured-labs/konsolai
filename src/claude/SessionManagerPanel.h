@@ -166,8 +166,6 @@ private:
     QMap<QString, ClaudeSession *> m_activeSessions;
     ClaudeSessionRegistry *m_registry = nullptr;
     bool m_collapsed = false;
-
-    static const QString SETTINGS_GROUP;
 };
 
 } // namespace Konsolai

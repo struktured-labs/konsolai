@@ -87,7 +87,6 @@ Q_SIGNALS:
     void settingsChanged();
 
 private:
-    static KonsolaiSettings *s_instance;
     KSharedConfig::Ptr m_config;
 };
 

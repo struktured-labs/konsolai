@@ -20,7 +20,7 @@
 namespace Konsolai
 {
 
-const QString SessionManagerPanel::SETTINGS_GROUP = QStringLiteral("SessionManager");
+static const QString SETTINGS_GROUP = QStringLiteral("SessionManager");
 
 SessionManagerPanel::SessionManagerPanel(QWidget *parent)
     : QWidget(parent)

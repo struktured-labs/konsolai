@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDebug>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -18,7 +19,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -30,20 +30,13 @@ namespace Konsolai
 {
 
 ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
-    : QWizard(parent)
+    : QDialog(parent)
 {
     setWindowTitle(i18n("New Claude Session"));
-    setWizardStyle(QWizard::ModernStyle);
-    setMinimumSize(650, 550);
-    resize(700, 600);
+    setMinimumSize(600, 480);
+    resize(650, 520);
 
-    // Setup widgets before creating pages
-    setupPromptPage();
-    setupConfirmPage();
-
-    // Add pages
-    setPage(PromptPageId, new PromptPage(this));
-    setPage(ConfirmPageId, new ConfirmPage(this));
+    setupUi();
 
     // Load defaults from settings
     if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
@@ -51,14 +44,12 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
         m_gitRemoteEdit->setText(settings->gitRemoteRoot());
         m_initGitCheck->setChecked(settings->autoInitGit());
 
-        // Worktree settings
         QString sourceRepo = settings->worktreeSourceRepo();
         if (!sourceRepo.isEmpty()) {
             m_sourceRepoEdit->setText(sourceRepo);
         }
         bool useWorktrees = settings->useWorktrees();
         m_createWorktreeCheck->setChecked(useWorktrees);
-        // Manually trigger the toggle to update enabled states
         m_sourceRepoEdit->setEnabled(useWorktrees);
         m_browseRepoButton->setEnabled(useWorktrees);
         m_worktreeNameEdit->setEnabled(useWorktrees);
@@ -73,6 +64,9 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
             m_modelCombo->setCurrentIndex(idx);
         }
     }
+
+    // Focus the prompt field
+    m_promptEdit->setFocus();
 }
 
 ClaudeSessionWizard::~ClaudeSessionWizard() = default;
@@ -84,11 +78,7 @@ void ClaudeSessionWizard::setProfile(const Konsole::Profile::Ptr &profile)
 
 void ClaudeSessionWizard::setDefaultDirectory(const QString &path)
 {
-    // For the prompt-centric wizard, we don't use the default directory
-    // to lock fields - the user enters a prompt and folder name is auto-generated.
-    // We just store it in case it's needed later.
     m_defaultDirectory = path;
-    // Don't set m_useExistingDir = true - we want the prompt-centric flow
 }
 
 QString ClaudeSessionWizard::selectedDirectory() const
@@ -109,7 +99,6 @@ QString ClaudeSessionWizard::selectedDirectory() const
 
 bool ClaudeSessionWizard::shouldInitGit() const
 {
-    // Don't init git if creating a worktree (it's already a git repo)
     if (m_createWorktreeCheck && m_createWorktreeCheck->isChecked()) {
         return false;
     }
@@ -118,7 +107,6 @@ bool ClaudeSessionWizard::shouldInitGit() const
 
 QString ClaudeSessionWizard::worktreeBranch() const
 {
-    // Only return worktree branch if worktree mode is enabled
     if (!m_createWorktreeCheck || !m_createWorktreeCheck->isChecked()) {
         return QString();
     }
@@ -130,7 +118,6 @@ QString ClaudeSessionWizard::worktreeBranch() const
 
 QString ClaudeSessionWizard::repoRoot() const
 {
-    // Return the source repo path when worktree mode is enabled
     if (m_createWorktreeCheck && m_createWorktreeCheck->isChecked() && m_sourceRepoEdit) {
         return m_sourceRepoEdit->text();
     }
@@ -160,20 +147,17 @@ QString ClaudeSessionWizard::taskPrompt() const
     return m_taskPrompt;
 }
 
-void ClaudeSessionWizard::setupPromptPage()
+void ClaudeSessionWizard::setupUi()
 {
-    // Prompt input
-    m_promptEdit = new QPlainTextEdit(this);
-    m_promptEdit->setPlaceholderText(i18n("Describe what you want to build...\n\nExample: A REST API for managing todo items with user authentication"));
-    m_promptEdit->setMaximumHeight(100);
-    connect(m_promptEdit, &QPlainTextEdit::textChanged, this, &ClaudeSessionWizard::onPromptChanged);
+    auto *mainLayout = new QVBoxLayout(this);
 
-    // Project root (workspace directory, e.g., ~/projects)
+    // --- Workspace root (top) ---
+    auto *rootRow = new QHBoxLayout();
+    rootRow->addWidget(new QLabel(i18n("Workspace root:"), this));
     m_projectRootEdit = new QLineEdit(this);
     m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
     connect(m_projectRootEdit, &QLineEdit::textChanged, this, &ClaudeSessionWizard::onProjectRootChanged);
-
-    // Browse button for project root
+    rootRow->addWidget(m_projectRootEdit);
     m_browseRootButton = new QPushButton(i18n("Browse..."), this);
     connect(m_browseRootButton, &QPushButton::clicked, this, [this]() {
         QString dir = QFileDialog::getExistingDirectory(this, i18n("Select Workspace Root"), m_projectRootEdit->text());
@@ -181,38 +165,106 @@ void ClaudeSessionWizard::setupPromptPage()
             m_projectRootEdit->setText(dir);
         }
     });
+    rootRow->addWidget(m_browseRootButton);
+    mainLayout->addLayout(rootRow);
 
-    // Folder name (auto-generated from prompt)
+    mainLayout->addSpacing(8);
+
+    // --- Task prompt (center, gets focus) ---
+    auto *promptGroup = new QGroupBox(i18n("Task Description"), this);
+    auto *promptLayout = new QVBoxLayout(promptGroup);
+    m_promptEdit = new QLineEdit(this);
+    m_promptEdit->setPlaceholderText(i18n("Describe what you want to build..."));
+    connect(m_promptEdit, &QLineEdit::textChanged, this, [this]() {
+        onPromptChanged();
+    });
+    promptLayout->addWidget(m_promptEdit);
+    mainLayout->addWidget(promptGroup);
+
+    // --- Folder name (right after prompt) ---
+    auto *folderRow = new QHBoxLayout();
+    folderRow->addWidget(new QLabel(i18n("Folder name:"), this));
     m_folderNameEdit = new QLineEdit(this);
     m_folderNameEdit->setPlaceholderText(i18n("my-project-name"));
     connect(m_folderNameEdit, &QLineEdit::textChanged, this, &ClaudeSessionWizard::onFolderNameChanged);
+    folderRow->addWidget(m_folderNameEdit);
+    m_browseFolderButton = new QPushButton(i18n("Browse..."), this);
+    connect(m_browseFolderButton, &QPushButton::clicked, this, [this]() {
+        // Open file dialog starting at workspace root
+        QString startDir = m_projectRootEdit->text();
+        if (startDir.isEmpty() || !QDir(startDir).exists()) {
+            startDir = QDir::homePath();
+        }
+        QString dir = QFileDialog::getExistingDirectory(this, i18n("Select Project Folder"), startDir);
+        if (!dir.isEmpty()) {
+            // If selected dir is under workspace root, just use the relative name
+            QString root = m_projectRootEdit->text();
+            if (!root.isEmpty() && dir.startsWith(root)) {
+                QString relative = dir.mid(root.length());
+                if (relative.startsWith(QLatin1Char('/'))) {
+                    relative = relative.mid(1);
+                }
+                m_folderNameEdit->setText(relative);
+            } else {
+                // Selected outside workspace root - update both
+                QDir d(dir);
+                m_folderNameEdit->setText(d.dirName());
+                m_projectRootEdit->setText(QDir(dir).filePath(QStringLiteral("..")));
+            }
+            m_useExistingDir = true;
+        }
+    });
+    folderRow->addWidget(m_browseFolderButton);
+    mainLayout->addLayout(folderRow);
 
-    // Create as worktree checkbox
+    mainLayout->addSpacing(4);
+
+    // --- Git (Optional) panel ---
+    m_gitGroup = new QGroupBox(i18n("Git (Optional)"), this);
+    auto *gitLayout = new QGridLayout(m_gitGroup);
+
+    // Git init
+    m_initGitCheck = new QCheckBox(i18n("Initialize git repository"), this);
+    m_initGitCheck->setChecked(true);
+    gitLayout->addWidget(m_initGitCheck, 0, 0, 1, 2);
+
+    // Remote URL
+    gitLayout->addWidget(new QLabel(i18n("Remote prefix:"), this), 1, 0);
+    m_gitRemoteEdit = new QLineEdit(this);
+    m_gitRemoteEdit->setPlaceholderText(i18n("git@github.com:username/"));
+    gitLayout->addWidget(m_gitRemoteEdit, 1, 1);
+
+    // Separator line via spacing
+    auto *worktreeSep = new QLabel(this);
+    worktreeSep->setFrameStyle(QFrame::HLine | QFrame::Sunken);
+    gitLayout->addWidget(worktreeSep, 2, 0, 1, 2);
+
+    // Worktree option
     m_createWorktreeCheck = new QCheckBox(i18n("Create as git worktree"), this);
     connect(m_createWorktreeCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_sourceRepoEdit->setEnabled(checked);
         m_browseRepoButton->setEnabled(checked);
         m_worktreeNameEdit->setEnabled(checked);
-        // When worktree is enabled, disable git init (worktree is already a git repo)
         m_initGitCheck->setEnabled(!checked);
         if (checked) {
             m_initGitCheck->setChecked(false);
         } else {
-            // Re-enable git init when worktree is unchecked
             m_initGitCheck->setChecked(true);
         }
         updatePreview();
     });
+    gitLayout->addWidget(m_createWorktreeCheck, 3, 0, 1, 2);
 
-    // Source repo for worktree (the main repo to create worktree from)
+    // Source repo
+    gitLayout->addWidget(new QLabel(i18n("Source repo:"), this), 4, 0);
+    auto *repoRow = new QHBoxLayout();
     m_sourceRepoEdit = new QLineEdit(this);
     m_sourceRepoEdit->setPlaceholderText(i18n("/path/to/main/repo"));
     m_sourceRepoEdit->setEnabled(false);
     connect(m_sourceRepoEdit, &QLineEdit::textChanged, this, [this]() {
         updatePreview();
     });
-
-    // Browse button for source repo
+    repoRow->addWidget(m_sourceRepoEdit);
     m_browseRepoButton = new QPushButton(i18n("Browse..."), this);
     m_browseRepoButton->setEnabled(false);
     connect(m_browseRepoButton, &QPushButton::clicked, this, [this]() {
@@ -221,55 +273,70 @@ void ClaudeSessionWizard::setupPromptPage()
             m_sourceRepoEdit->setText(dir);
         }
     });
+    repoRow->addWidget(m_browseRepoButton);
+    gitLayout->addLayout(repoRow, 4, 1);
 
-    // Worktree/branch name (auto-generated, fuller version)
+    // Branch name
+    gitLayout->addWidget(new QLabel(i18n("Branch name:"), this), 5, 0);
     m_worktreeNameEdit = new QLineEdit(this);
-    m_worktreeNameEdit->setPlaceholderText(i18n("feature/project-name-description"));
+    m_worktreeNameEdit->setPlaceholderText(i18n("feature/project-name"));
     m_worktreeNameEdit->setEnabled(false);
+    gitLayout->addWidget(m_worktreeNameEdit, 5, 1);
 
-    // Preview label
-    m_previewLabel = new QLabel(this);
-    m_previewLabel->setWordWrap(true);
-    m_previewLabel->setStyleSheet(QStringLiteral("color: gray; font-style: italic;"));
-}
+    mainLayout->addWidget(m_gitGroup);
 
-void ClaudeSessionWizard::setupConfirmPage()
-{
-    // Model selection
+    // --- Model + options row ---
+    auto *optionsRow = new QHBoxLayout();
+    optionsRow->addWidget(new QLabel(i18n("Model:"), this));
     m_modelCombo = new QComboBox(this);
     m_modelCombo->addItem(QStringLiteral("claude-sonnet-4"));
     m_modelCombo->addItem(QStringLiteral("claude-opus-4"));
     m_modelCombo->addItem(QStringLiteral("claude-haiku"));
+    optionsRow->addWidget(m_modelCombo);
+    optionsRow->addSpacing(16);
+    m_autoApproveReadCheck = new QCheckBox(i18n("Auto-approve Read"), this);
+    optionsRow->addWidget(m_autoApproveReadCheck);
+    optionsRow->addStretch();
+    mainLayout->addLayout(optionsRow);
 
-    // Auto-approve read
-    m_autoApproveReadCheck = new QCheckBox(i18n("Auto-approve Read permissions"), this);
+    mainLayout->addSpacing(4);
 
-    // Git init checkbox
-    m_initGitCheck = new QCheckBox(i18n("Initialize git repository"), this);
-    m_initGitCheck->setChecked(true);
+    // --- Preview ---
+    m_previewLabel = new QLabel(this);
+    m_previewLabel->setWordWrap(true);
+    m_previewLabel->setStyleSheet(QStringLiteral("color: gray; font-style: italic;"));
+    mainLayout->addWidget(m_previewLabel);
 
-    // Git remote
-    m_gitRemoteEdit = new QLineEdit(this);
-    m_gitRemoteEdit->setPlaceholderText(i18n("git@github.com:username/"));
+    mainLayout->addStretch();
 
-    // Summary label
-    m_summaryLabel = new QLabel(this);
-    m_summaryLabel->setWordWrap(true);
+    // --- Buttons ---
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
+    auto *createButton = buttons->addButton(i18n("Create Session"), QDialogButtonBox::AcceptRole);
+    createButton->setDefault(true);
+    connect(buttons, &QDialogButtonBox::accepted, this, &ClaudeSessionWizard::onCreatePressed);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    mainLayout->addWidget(buttons);
+
+    // --- Tab order: prompt -> folder name -> git options -> model ---
+    setTabOrder(m_promptEdit, m_folderNameEdit);
+    setTabOrder(m_folderNameEdit, m_browseFolderButton);
+    setTabOrder(m_browseFolderButton, m_initGitCheck);
+    setTabOrder(m_initGitCheck, m_gitRemoteEdit);
+    setTabOrder(m_gitRemoteEdit, m_createWorktreeCheck);
+    setTabOrder(m_createWorktreeCheck, m_sourceRepoEdit);
+    setTabOrder(m_sourceRepoEdit, m_worktreeNameEdit);
+    setTabOrder(m_worktreeNameEdit, m_modelCombo);
+    setTabOrder(m_modelCombo, m_autoApproveReadCheck);
 }
 
 void ClaudeSessionWizard::onPromptChanged()
 {
-    QString prompt = m_promptEdit->toPlainText();
+    QString prompt = m_promptEdit->text();
     m_taskPrompt = prompt;
 
     if (!m_useExistingDir) {
-        // Generate folder name from prompt
-        QString folderName = generateFolderName(prompt);
-        m_folderNameEdit->setText(folderName);
-
-        // Generate worktree name (fuller version)
-        QString worktreeName = generateWorktreeName(prompt);
-        m_worktreeNameEdit->setText(worktreeName);
+        m_folderNameEdit->setText(generateFolderName(prompt));
+        m_worktreeNameEdit->setText(generateWorktreeName(prompt));
     }
 
     updatePreview();
@@ -287,20 +354,88 @@ void ClaudeSessionWizard::onProjectRootChanged(const QString &path)
     updatePreview();
 }
 
+void ClaudeSessionWizard::onCreatePressed()
+{
+    QString dir = selectedDirectory();
+
+    if (dir.isEmpty()) {
+        QMessageBox::warning(this, i18n("Error"), i18n("Please enter a project name."));
+        return;
+    }
+
+    // Check if directory already exists
+    if (QDir(dir).exists() && !m_useExistingDir) {
+        auto result = QMessageBox::question(this,
+                                            i18n("Directory Exists"),
+                                            i18n("The directory '%1' already exists. Use it anyway?", dir),
+                                            QMessageBox::Yes | QMessageBox::No);
+        if (result != QMessageBox::Yes) {
+            return;
+        }
+        m_useExistingDir = true;
+    }
+
+    // Check if parent directory exists
+    QString parentDir = m_projectRootEdit->text();
+    if (!QDir(parentDir).exists()) {
+        auto result = QMessageBox::question(this,
+                                            i18n("Create Directory"),
+                                            i18n("The project root '%1' does not exist. Create it?", parentDir),
+                                            QMessageBox::Yes | QMessageBox::No);
+        if (result != QMessageBox::Yes) {
+            return;
+        }
+        QDir().mkpath(parentDir);
+    }
+
+    // Create project directory if needed
+    if (!QDir(dir).exists()) {
+        if (!QDir().mkpath(dir)) {
+            QMessageBox::warning(this, i18n("Error"), i18n("Failed to create directory: %1", dir));
+            return;
+        }
+    }
+
+    // Init git if requested
+    if (shouldInitGit()) {
+        QProcess git;
+        git.setWorkingDirectory(dir);
+        git.start(QStringLiteral("git"), {QStringLiteral("init")});
+        git.waitForFinished(5000);
+
+        if (git.exitCode() == 0) {
+            qDebug() << "ClaudeSessionWizard: Initialized git repo in:" << dir;
+
+            // Set up remote if configured
+            QString remoteRoot = m_gitRemoteEdit->text();
+            if (!remoteRoot.isEmpty()) {
+                QString repoName = QDir(dir).dirName();
+                QString remoteUrl = remoteRoot + repoName + QStringLiteral(".git");
+
+                QProcess gitRemote;
+                gitRemote.setWorkingDirectory(dir);
+                gitRemote.start(QStringLiteral("git"), {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), remoteUrl});
+                gitRemote.waitForFinished(5000);
+            }
+        }
+    }
+
+    m_selectedDirectory = dir;
+    accept();
+}
+
 QString ClaudeSessionWizard::generateFolderName(const QString &prompt) const
 {
     if (prompt.isEmpty()) {
         return QString();
     }
 
-    // Take first few words and convert to kebab-case
     static QRegularExpression wordSplit(QStringLiteral("[\\s_]+"));
     static QRegularExpression nonAlnum(QStringLiteral("[^a-z0-9-]"));
 
     QString lower = prompt.toLower();
     QStringList words = lower.split(wordSplit, Qt::SkipEmptyParts);
 
-    // Take first 3-4 words
     int maxWords = qMin(4, words.size());
     QString result;
     for (int i = 0; i < maxWords; ++i) {
@@ -314,10 +449,8 @@ QString ClaudeSessionWizard::generateFolderName(const QString &prompt) const
         }
     }
 
-    // Limit length
     if (result.length() > 30) {
         result = result.left(30);
-        // Remove trailing dash
         while (result.endsWith(QLatin1Char('-'))) {
             result.chop(1);
         }
@@ -332,28 +465,25 @@ QString ClaudeSessionWizard::generateWorktreeName(const QString &prompt) const
         return QString();
     }
 
-    // Generate a fuller branch-style name
     static QRegularExpression wordSplit(QStringLiteral("[\\s_]+"));
     static QRegularExpression nonAlnum(QStringLiteral("[^a-z0-9-]"));
 
     QString lower = prompt.toLower();
     QStringList words = lower.split(wordSplit, Qt::SkipEmptyParts);
 
-    // Take more words for the branch name
     int maxWords = qMin(8, words.size());
     QString result = QStringLiteral("feature/");
     for (int i = 0; i < maxWords; ++i) {
         QString word = words[i];
         word.remove(nonAlnum);
         if (!word.isEmpty()) {
-            if (result.length() > 8) { // After "feature/"
+            if (result.length() > 8) {
                 result += QLatin1Char('-');
             }
             result += word;
         }
     }
 
-    // Limit length
     if (result.length() > 50) {
         result = result.left(50);
         while (result.endsWith(QLatin1Char('-'))) {
@@ -445,229 +575,14 @@ void ClaudeSessionWizard::updatePreview()
             preview = i18n("Will create worktree: %1\n(Select source repo and branch)", dir);
         }
     } else {
-        preview = i18n("Will create folder: %1", dir);
+        preview = i18n("Will create: %1", dir);
         if (m_initGitCheck && m_initGitCheck->isChecked()) {
-            preview += i18n("\nWith git repository initialized");
+            preview += i18n(" (git init)");
         }
     }
     m_previewLabel->setText(preview);
 }
 
-// ============================================================================
-// PromptPage
-// ============================================================================
-
-PromptPage::PromptPage(ClaudeSessionWizard *wizard)
-    : QWizardPage(wizard)
-    , m_wizard(wizard)
-{
-    setTitle(i18n("What do you want to build?"));
-    setSubTitle(i18n("Describe your project and we'll set everything up."));
-
-    auto *layout = new QVBoxLayout(this);
-
-    // Prompt section
-    auto *promptGroup = new QGroupBox(i18n("Task Description"), this);
-    auto *promptLayout = new QVBoxLayout(promptGroup);
-    promptLayout->addWidget(wizard->m_promptEdit);
-    layout->addWidget(promptGroup);
-
-    // Project location section
-    auto *locationGroup = new QGroupBox(i18n("Project Location"), this);
-    auto *locationLayout = new QGridLayout(locationGroup);
-
-    locationLayout->addWidget(new QLabel(i18n("Workspace root:"), this), 0, 0);
-    auto *rootLayout = new QHBoxLayout();
-    rootLayout->addWidget(wizard->m_projectRootEdit);
-    rootLayout->addWidget(wizard->m_browseRootButton);
-    locationLayout->addLayout(rootLayout, 0, 1);
-
-    locationLayout->addWidget(new QLabel(i18n("Folder name:"), this), 1, 0);
-    locationLayout->addWidget(wizard->m_folderNameEdit, 1, 1);
-
-    layout->addWidget(locationGroup);
-
-    // Git worktree section
-    auto *worktreeGroup = new QGroupBox(i18n("Git Worktree (Optional)"), this);
-    auto *worktreeLayout = new QGridLayout(worktreeGroup);
-
-    worktreeLayout->addWidget(wizard->m_createWorktreeCheck, 0, 0, 1, 2);
-
-    worktreeLayout->addWidget(new QLabel(i18n("Source repo:"), this), 1, 0);
-    auto *repoLayout = new QHBoxLayout();
-    repoLayout->addWidget(wizard->m_sourceRepoEdit);
-    repoLayout->addWidget(wizard->m_browseRepoButton);
-    worktreeLayout->addLayout(repoLayout, 1, 1);
-
-    worktreeLayout->addWidget(new QLabel(i18n("Branch name:"), this), 2, 0);
-    worktreeLayout->addWidget(wizard->m_worktreeNameEdit, 2, 1);
-
-    layout->addWidget(worktreeGroup);
-
-    // Preview
-    layout->addWidget(wizard->m_previewLabel);
-    layout->addStretch();
-
-    // Register field for validation
-    registerField(QStringLiteral("folderName*"), wizard->m_folderNameEdit);
-}
-
-bool PromptPage::isComplete() const
-{
-    return !m_wizard->m_folderNameEdit->text().isEmpty() && !m_wizard->m_projectRootEdit->text().isEmpty();
-}
-
-bool PromptPage::validatePage()
-{
-    QString dir = m_wizard->selectedDirectory();
-    qDebug() << "PromptPage::validatePage() - dir:" << dir;
-
-    if (dir.isEmpty()) {
-        QMessageBox::warning(const_cast<PromptPage *>(this), i18n("Error"), i18n("Please enter a project name."));
-        return false;
-    }
-
-    // Check if directory already exists
-    if (QDir(dir).exists() && !m_wizard->m_useExistingDir) {
-        auto result = QMessageBox::question(const_cast<PromptPage *>(this),
-                                            i18n("Directory Exists"),
-                                            i18n("The directory '%1' already exists. Use it anyway?", dir),
-                                            QMessageBox::Yes | QMessageBox::No);
-        if (result != QMessageBox::Yes) {
-            return false;
-        }
-        m_wizard->m_useExistingDir = true;
-    }
-
-    // Check if parent directory exists
-    QString parentDir = m_wizard->m_projectRootEdit->text();
-    if (!QDir(parentDir).exists()) {
-        auto result = QMessageBox::question(const_cast<PromptPage *>(this),
-                                            i18n("Create Directory"),
-                                            i18n("The project root '%1' does not exist. Create it?", parentDir),
-                                            QMessageBox::Yes | QMessageBox::No);
-        if (result != QMessageBox::Yes) {
-            return false;
-        }
-        QDir().mkpath(parentDir);
-    }
-
-    m_wizard->m_selectedDirectory = dir;
-    return true;
-}
-
-// ============================================================================
-// ConfirmPage
-// ============================================================================
-
-ConfirmPage::ConfirmPage(ClaudeSessionWizard *wizard)
-    : QWizardPage(wizard)
-    , m_wizard(wizard)
-{
-    setTitle(i18n("Confirm Settings"));
-    setSubTitle(i18n("Review and adjust settings before creating the session."));
-
-    auto *layout = new QVBoxLayout(this);
-
-    // Summary
-    layout->addWidget(wizard->m_summaryLabel);
-
-    // Git settings
-    auto *gitGroup = new QGroupBox(i18n("Git Settings"), this);
-    auto *gitLayout = new QVBoxLayout(gitGroup);
-    gitLayout->addWidget(wizard->m_initGitCheck);
-
-    auto *remoteLayout = new QHBoxLayout();
-    remoteLayout->addWidget(new QLabel(i18n("Remote URL prefix:"), this));
-    remoteLayout->addWidget(wizard->m_gitRemoteEdit);
-    gitLayout->addLayout(remoteLayout);
-
-    layout->addWidget(gitGroup);
-
-    // Claude settings
-    auto *claudeGroup = new QGroupBox(i18n("Claude Settings"), this);
-    auto *claudeLayout = new QGridLayout(claudeGroup);
-
-    claudeLayout->addWidget(new QLabel(i18n("Model:"), this), 0, 0);
-    claudeLayout->addWidget(wizard->m_modelCombo, 0, 1);
-    claudeLayout->addWidget(wizard->m_autoApproveReadCheck, 1, 0, 1, 2);
-
-    layout->addWidget(claudeGroup);
-
-    layout->addStretch();
-}
-
-void ConfirmPage::initializePage()
-{
-    QString dir = m_wizard->selectedDirectory();
-    QString prompt = m_wizard->m_taskPrompt;
-
-    QString summary;
-    if (!prompt.isEmpty()) {
-        summary = i18n("<b>Task:</b> %1<br><br>", prompt.left(100) + (prompt.length() > 100 ? QStringLiteral("...") : QString()));
-    }
-    summary += i18n("<b>Directory:</b> %1<br>", dir);
-    summary += i18n("<b>Branch:</b> %1", m_wizard->m_worktreeNameEdit->text());
-
-    m_wizard->m_summaryLabel->setText(summary);
-
-    // Check if target directory is already a git repo
-    m_wizard->detectGitState(dir);
-    m_wizard->m_initGitCheck->setEnabled(!m_wizard->m_isGitRepo);
-    if (m_wizard->m_isGitRepo) {
-        m_wizard->m_initGitCheck->setChecked(false);
-        m_wizard->m_initGitCheck->setText(i18n("Already a git repository"));
-    }
-}
-
-bool ConfirmPage::validatePage()
-{
-    QString dir = m_wizard->selectedDirectory();
-
-    // Create directory if needed
-    if (!QDir(dir).exists()) {
-        if (!QDir().mkpath(dir)) {
-            QMessageBox::warning(const_cast<ConfirmPage *>(this), i18n("Error"), i18n("Failed to create directory: %1", dir));
-            return false;
-        }
-        qDebug() << "ConfirmPage: Created directory:" << dir;
-    }
-
-    // Init git if requested
-    if (m_wizard->shouldInitGit()) {
-        QProcess git;
-        git.setWorkingDirectory(dir);
-        git.start(QStringLiteral("git"), {QStringLiteral("init")});
-        git.waitForFinished(5000);
-
-        if (git.exitCode() == 0) {
-            qDebug() << "ConfirmPage: Initialized git repo in:" << dir;
-
-            // Set up remote if configured
-            QString remoteRoot = m_wizard->m_gitRemoteEdit->text();
-            if (!remoteRoot.isEmpty()) {
-                QString repoName = QDir(dir).dirName();
-                QString remoteUrl = remoteRoot + repoName + QStringLiteral(".git");
-
-                QProcess gitRemote;
-                gitRemote.setWorkingDirectory(dir);
-                gitRemote.start(QStringLiteral("git"), {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), remoteUrl});
-                gitRemote.waitForFinished(5000);
-
-                if (gitRemote.exitCode() == 0) {
-                    qDebug() << "ConfirmPage: Added remote origin:" << remoteUrl;
-                }
-            }
-        } else {
-            qWarning() << "ConfirmPage: Failed to init git:" << git.readAllStandardError();
-        }
-    }
-
-    qDebug() << "ConfirmPage: Session will use directory:" << dir;
-    return true;
-}
-
 } // namespace Konsolai
 
-// Include MOC
 #include "moc_ClaudeSessionWizard.cpp"

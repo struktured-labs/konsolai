@@ -1202,10 +1202,8 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                 QString workDir = wizard.selectedDirectory();
                 qDebug() << "Creating Claude session in:" << workDir;
 
-                // Git operations before session creation
-                if (wizard.shouldInitGit()) {
-                    QProcess::execute(QStringLiteral("git"), {QStringLiteral("init"), workDir});
-                }
+                // Git init is handled by the wizard dialog itself.
+                // Worktree creation is handled here since it needs error feedback.
                 if (!wizard.worktreeBranch().isEmpty()) {
                     QString branchName = wizard.worktreeBranch();
                     QString repoRoot = wizard.repoRoot();
