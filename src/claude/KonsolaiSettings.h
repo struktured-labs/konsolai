@@ -6,6 +6,8 @@
 #ifndef KONSOLAI_SETTINGS_H
 #define KONSOLAI_SETTINGS_H
 
+#include "konsoleprivate_export.h"
+
 #include <QObject>
 #include <QString>
 
@@ -23,7 +25,7 @@ namespace Konsolai
  * - GitHub API key (stored securely)
  * - Default Claude model
  */
-class KonsolaiSettings : public QObject
+class KONSOLEPRIVATE_EXPORT KonsolaiSettings : public QObject
 {
     Q_OBJECT
 

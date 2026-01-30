@@ -6,6 +6,8 @@
 #ifndef CLAUDESESSIONSTATE_H
 #define CLAUDESESSIONSTATE_H
 
+#include "konsoleprivate_export.h"
+
 #include <QString>
 #include <QDateTime>
 #include <QJsonObject>
@@ -24,7 +26,7 @@ namespace Konsolai
  * - Claude model
  * - Attachment status (whether Konsolai is currently attached)
  */
-class ClaudeSessionState
+class KONSOLEPRIVATE_EXPORT ClaudeSessionState
 {
 public:
     ClaudeSessionState() = default;

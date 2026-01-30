@@ -6,6 +6,8 @@
 #ifndef CLAUDEMENU_H
 #define CLAUDEMENU_H
 
+#include "konsoleprivate_export.h"
+
 #include <QAction>
 #include <QMenu>
 
@@ -35,7 +37,7 @@ class ClaudeSessionRegistry;
  * - ---
  * - Configure Hooks...
  */
-class ClaudeMenu : public QMenu
+class KONSOLEPRIVATE_EXPORT ClaudeMenu : public QMenu
 {
     Q_OBJECT
 

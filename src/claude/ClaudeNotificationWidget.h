@@ -6,6 +6,8 @@
 #ifndef CLAUDENOTIFICATIONWIDGET_H
 #define CLAUDENOTIFICATIONWIDGET_H
 
+#include "konsoleprivate_export.h"
+
 #include "NotificationManager.h"
 
 #include <QWidget>
@@ -26,7 +28,7 @@ namespace Konsolai
  * - Color-coded by notification type
  * - Click to dismiss
  */
-class ClaudeNotificationWidget : public QWidget
+class KONSOLEPRIVATE_EXPORT ClaudeNotificationWidget : public QWidget
 {
     Q_OBJECT
     Q_PROPERTY(qreal opacity READ opacity WRITE setOpacity)

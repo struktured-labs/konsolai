@@ -7,6 +7,8 @@
 #ifndef CLAUDE_SESSION_WIZARD_H
 #define CLAUDE_SESSION_WIZARD_H
 
+#include "konsoleprivate_export.h"
+
 #include <QDialog>
 #include <QDir>
 #include <QStringList>
@@ -36,7 +38,7 @@ namespace Konsolai
  *
  * Tab order: prompt -> folder name -> git options -> model
  */
-class ClaudeSessionWizard : public QDialog
+class KONSOLEPRIVATE_EXPORT ClaudeSessionWizard : public QDialog
 {
     Q_OBJECT
 

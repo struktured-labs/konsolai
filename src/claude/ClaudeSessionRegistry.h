@@ -6,6 +6,8 @@
 #ifndef CLAUDESESSIONREGISTRY_H
 #define CLAUDESESSIONREGISTRY_H
 
+#include "konsoleprivate_export.h"
+
 #include "ClaudeSessionState.h"
 #include "TmuxManager.h"
 
@@ -35,7 +37,7 @@ class ClaudeSession;
  * 3. Cross-reference to identify orphaned sessions
  * 4. Update menu with reattach options
  */
-class ClaudeSessionRegistry : public QObject
+class KONSOLEPRIVATE_EXPORT ClaudeSessionRegistry : public QObject
 {
     Q_OBJECT
 

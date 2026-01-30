@@ -6,6 +6,8 @@
 #ifndef CLAUDESESSION_H
 #define CLAUDESESSION_H
 
+#include "konsoleprivate_export.h"
+
 #include "ClaudeHookHandler.h"
 #include "ClaudeProcess.h"
 #include "TmuxManager.h"
@@ -28,7 +30,7 @@ namespace Konsolai
 /**
  * Log entry for auto-approved actions
  */
-struct ApprovalLogEntry {
+struct KONSOLEPRIVATE_EXPORT ApprovalLogEntry {
     QDateTime timestamp;
     QString toolName;
     QString action;
@@ -53,7 +55,7 @@ struct ApprovalLogEntry {
  *
  * Note: Inherits QDBusContext from parent Session class
  */
-class ClaudeSession : public Konsole::Session
+class KONSOLEPRIVATE_EXPORT ClaudeSession : public Konsole::Session
 {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.konsolai.Claude")

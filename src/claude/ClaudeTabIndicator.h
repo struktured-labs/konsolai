@@ -6,6 +6,8 @@
 #ifndef CLAUDETABINDICATOR_H
 #define CLAUDETABINDICATOR_H
 
+#include "konsoleprivate_export.h"
+
 #include "ClaudeProcess.h"
 
 #include <QPainter>
@@ -29,7 +31,7 @@ class ClaudeSession;
  *
  * Size: 12x12 pixels, appears before tab title
  */
-class ClaudeTabIndicator : public QWidget
+class KONSOLEPRIVATE_EXPORT ClaudeTabIndicator : public QWidget
 {
     Q_OBJECT
 

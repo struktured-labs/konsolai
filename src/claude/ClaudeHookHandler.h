@@ -8,6 +8,8 @@
 #ifndef CLAUDEHOOKHANDLER_H
 #define CLAUDEHOOKHANDLER_H
 
+#include "konsoleprivate_export.h"
+
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -35,7 +37,7 @@ class ClaudeSession;
  *
  * Socket path: ~/.konsolai/sessions/{session-id}.sock
  */
-class ClaudeHookHandler : public QObject
+class KONSOLEPRIVATE_EXPORT ClaudeHookHandler : public QObject
 {
     Q_OBJECT
 
@@ -135,7 +137,7 @@ private:
  * This is a simple client that connects to the Unix socket and sends a single
  * message, then disconnects.
  */
-class ClaudeHookClient : public QObject
+class KONSOLEPRIVATE_EXPORT ClaudeHookClient : public QObject
 {
     Q_OBJECT
 
