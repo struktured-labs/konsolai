@@ -6,10 +6,11 @@
 #include "ClaudeSessionRegistry.h"
 #include "ClaudeSession.h"
 
-#include <QFile>
 #include <QDir>
-#include <QJsonDocument>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QStandardPaths>
 
 namespace Konsolai
@@ -271,6 +272,78 @@ void ClaudeSessionRegistry::saveState()
     QJsonDocument doc(root);
     file.write(doc.toJson(QJsonDocument::Indented));
     file.close();
+}
+
+QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString &searchRoot) const
+{
+    QList<ClaudeSessionState> discovered;
+
+    if (searchRoot.isEmpty() || !QDir(searchRoot).exists()) {
+        return discovered;
+    }
+
+    QDir rootDir(searchRoot);
+    const auto entries = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+
+    for (const QString &dirName : entries) {
+        QString projectPath = rootDir.filePath(dirName);
+
+        // Check for .claude directory (Claude Code footprint)
+        QString claudeDir = QDir(projectPath).filePath(QStringLiteral(".claude"));
+        if (!QDir(claudeDir).exists()) {
+            continue;
+        }
+
+        // Skip if we already know about this project
+        bool alreadyKnown = false;
+        for (auto it = m_sessionStates.constBegin(); it != m_sessionStates.constEnd(); ++it) {
+            if (it.value().workingDirectory == projectPath) {
+                alreadyKnown = true;
+                break;
+            }
+        }
+        if (alreadyKnown) {
+            continue;
+        }
+
+        // Create a discoverable session state
+        ClaudeSessionState state;
+        state.sessionName = QStringLiteral("discovered-%1").arg(dirName);
+        state.sessionId = dirName.left(8);
+        state.workingDirectory = projectPath;
+        state.isAttached = false;
+
+        // Try to get more info from settings.local.json
+        QString settingsPath = QDir(claudeDir).filePath(QStringLiteral("settings.local.json"));
+        if (QFile::exists(settingsPath)) {
+            QFile f(settingsPath);
+            if (f.open(QIODevice::ReadOnly)) {
+                QJsonParseError err;
+                QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+                if (err.error == QJsonParseError::NoError && doc.isObject()) {
+                    // If it has konsolai hooks, it was a konsolai session
+                    QString content = QString::fromUtf8(doc.toJson());
+                    if (content.contains(QStringLiteral("konsolai"))) {
+                        state.profileName = QStringLiteral("Claude");
+                    } else {
+                        state.profileName = QStringLiteral("External");
+                    }
+                }
+                f.close();
+            }
+        } else {
+            state.profileName = QStringLiteral("External");
+        }
+
+        // Check file modification time for approximate date
+        QFileInfo claudeDirInfo(claudeDir);
+        state.created = claudeDirInfo.birthTime().isValid() ? claudeDirInfo.birthTime() : claudeDirInfo.lastModified();
+        state.lastAccessed = claudeDirInfo.lastModified();
+
+        discovered.append(state);
+    }
+
+    return discovered;
 }
 
 void ClaudeSessionRegistry::onPeriodicRefresh()

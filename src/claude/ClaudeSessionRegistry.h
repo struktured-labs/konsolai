@@ -99,6 +99,15 @@ public:
     void refreshOrphanedSessions();
 
     /**
+     * Discover Claude sessions by scanning directories for .claude footprints.
+     * Finds any project that has been used with Claude (not just konsolai sessions).
+     *
+     * @param searchRoot Directory to scan (e.g., ~/projects)
+     * @return List of session states for discovered projects
+     */
+    QList<ClaudeSessionState> discoverSessions(const QString &searchRoot) const;
+
+    /**
      * Get path to sessions state file
      */
     static QString sessionStateFilePath();
@@ -128,6 +137,11 @@ Q_SIGNALS:
      * Emitted when a session is unregistered
      */
     void sessionUnregistered(const QString &sessionName);
+
+    /**
+     * Emitted when new sessions are discovered from project scanning
+     */
+    void sessionsDiscovered(const QList<ClaudeSessionState> &sessions);
 
 private Q_SLOTS:
     void onPeriodicRefresh();

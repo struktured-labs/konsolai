@@ -6,6 +6,7 @@
 #include "SessionManagerPanel.h"
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
+#include "KonsolaiSettings.h"
 #include "TmuxManager.h"
 
 #include <KLocalizedString>
@@ -107,6 +108,12 @@ void SessionManagerPanel::setupUi()
     m_archivedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("archive-remove")));
     m_archivedCategory->setFlags(Qt::ItemIsEnabled);
     m_archivedCategory->setExpanded(false);
+
+    m_discoveredCategory = new QTreeWidgetItem(m_treeWidget);
+    m_discoveredCategory->setText(0, i18n("Discovered"));
+    m_discoveredCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-find")));
+    m_discoveredCategory->setFlags(Qt::ItemIsEnabled);
+    m_discoveredCategory->setExpanded(false);
 
     setMinimumWidth(200);
     setMaximumWidth(350);
@@ -323,12 +330,22 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column)
 
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory) {
+    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
+        || item == m_discoveredCategory) {
         return;
     }
 
     QString sessionId = item->data(0, Qt::UserRole).toString();
     if (sessionId.isEmpty()) {
+        return;
+    }
+
+    // Check if this is a discovered session (parent is m_discoveredCategory)
+    if (item->parent() == m_discoveredCategory) {
+        QString workDir = item->data(0, Qt::UserRole + 1).toString();
+        if (!workDir.isEmpty()) {
+            Q_EMIT unarchiveRequested(sessionId, workDir);
+        }
         return;
     }
 
@@ -350,12 +367,33 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 void SessionManagerPanel::onContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory) {
+    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
+        || item == m_discoveredCategory) {
         return;
     }
 
     QString sessionId = item->data(0, Qt::UserRole).toString();
-    if (sessionId.isEmpty() || !m_metadata.contains(sessionId)) {
+    if (sessionId.isEmpty()) {
+        return;
+    }
+
+    // Handle discovered sessions
+    if (item->parent() == m_discoveredCategory) {
+        QString workDir = item->data(0, Qt::UserRole + 1).toString();
+        if (workDir.isEmpty()) {
+            return;
+        }
+
+        QMenu menu(this);
+        QAction *openAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("Open Session Here"));
+        connect(openAction, &QAction::triggered, this, [this, sessionId, workDir]() {
+            Q_EMIT unarchiveRequested(sessionId, workDir);
+        });
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        return;
+    }
+
+    if (!m_metadata.contains(sessionId)) {
         return;
     }
 
@@ -457,10 +495,36 @@ void SessionManagerPanel::updateTreeWidget()
         }
     }
 
+    // Add discovered sessions (from project folder scanning)
+    while (m_discoveredCategory->childCount() > 0) {
+        delete m_discoveredCategory->takeChild(0);
+    }
+    if (m_registry) {
+        // Scan workspace root for Claude footprints
+        QString searchRoot;
+        auto *settings = KonsolaiSettings::instance();
+        if (settings) {
+            searchRoot = settings->projectRoot();
+        } else {
+            searchRoot = QDir::homePath() + QStringLiteral("/projects");
+        }
+        const auto discovered = m_registry->discoverSessions(searchRoot);
+        for (const auto &state : discovered) {
+            auto *item = new QTreeWidgetItem(m_discoveredCategory);
+            QString displayName = QDir(state.workingDirectory).dirName();
+            item->setText(0, displayName);
+            item->setData(0, Qt::UserRole, state.sessionId);
+            item->setData(0, Qt::UserRole + 1, state.workingDirectory);
+            item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-cloud")));
+            item->setToolTip(0, QStringLiteral("%1\n%2\nLast modified: %3").arg(state.profileName, state.workingDirectory, state.lastAccessed.toString()));
+        }
+    }
+
     // Update category visibility
     m_pinnedCategory->setHidden(m_pinnedCategory->childCount() == 0);
     m_closedCategory->setHidden(m_closedCategory->childCount() == 0);
     m_archivedCategory->setHidden(m_archivedCategory->childCount() == 0);
+    m_discoveredCategory->setHidden(m_discoveredCategory->childCount() == 0);
 }
 
 void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent)

@@ -160,6 +160,7 @@ private:
     QTreeWidgetItem *m_activeCategory = nullptr;
     QTreeWidgetItem *m_closedCategory = nullptr;
     QTreeWidgetItem *m_archivedCategory = nullptr;
+    QTreeWidgetItem *m_discoveredCategory = nullptr;
 
     QMap<QString, SessionMetadata> m_metadata;
     QMap<QString, ClaudeSession *> m_activeSessions;

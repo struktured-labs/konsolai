@@ -35,6 +35,11 @@ set(claude_SRCS
 add_library(konsolai_claude STATIC ${claude_SRCS})
 set_target_properties(konsolai_claude PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# On Windows, konsolai_claude is linked INTO konsoleprivate (shared lib).
+# Without this, #include <Session.h> resolves KONSOLEPRIVATE_EXPORT to dllimport,
+# causing undefined __imp_ references at link time.
+target_compile_definitions(konsolai_claude PRIVATE konsoleprivate_EXPORTS)
+
 target_link_libraries(konsolai_claude
     PUBLIC
     Qt::Core
