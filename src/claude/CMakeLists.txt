@@ -32,12 +32,12 @@ set(claude_SRCS
     ${dbus_xml_srcs}
 )
 
-add_library(konsolai_claude STATIC ${claude_SRCS})
+add_library(konsolai_claude OBJECT ${claude_SRCS})
 set_target_properties(konsolai_claude PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# On Windows, konsolai_claude is linked INTO konsoleprivate (shared lib).
-# Without this, #include <Session.h> resolves KONSOLEPRIVATE_EXPORT to dllimport,
-# causing undefined __imp_ references at link time.
+# konsolai_claude objects are linked directly into konsoleprivate (shared lib).
+# This define ensures #include <Session.h> resolves KONSOLEPRIVATE_EXPORT to
+# dllexport (building) instead of dllimport (using) on Windows.
 target_compile_definitions(konsolai_claude PRIVATE konsoleprivate_EXPORTS)
 
 target_link_libraries(konsolai_claude
