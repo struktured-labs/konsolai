@@ -9,10 +9,13 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDebug>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDirIterator>
 #include <QFileDialog>
+#include <QFileSystemModel>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -22,6 +25,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QStringListModel>
 #include <QVBoxLayout>
 
 #include <KLocalizedString>
@@ -64,6 +68,9 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
             m_modelCombo->setCurrentIndex(idx);
         }
     }
+
+    // Populate folder completer from workspace root
+    updateFolderCompleter();
 
     // Focus the prompt field
     m_promptEdit->setFocus();
@@ -119,7 +126,12 @@ QString ClaudeSessionWizard::worktreeBranch() const
 QString ClaudeSessionWizard::repoRoot() const
 {
     if (m_createWorktreeCheck && m_createWorktreeCheck->isChecked() && m_sourceRepoEdit) {
-        return m_sourceRepoEdit->text();
+        QString repo = m_sourceRepoEdit->text();
+        // Fall back to workspace root if source repo is empty
+        if (repo.isEmpty() && m_projectRootEdit) {
+            return m_projectRootEdit->text();
+        }
+        return repo;
     }
     return m_repoRoot;
 }
@@ -187,6 +199,13 @@ void ClaudeSessionWizard::setupUi()
     m_folderNameEdit = new QLineEdit(this);
     m_folderNameEdit->setPlaceholderText(i18n("my-project-name"));
     connect(m_folderNameEdit, &QLineEdit::textChanged, this, &ClaudeSessionWizard::onFolderNameChanged);
+
+    // Directory completion relative to workspace root
+    auto *folderCompleter = new QCompleter(this);
+    folderCompleter->setCaseSensitivity(Qt::CaseInsensitive);
+    folderCompleter->setCompletionMode(QCompleter::PopupCompletion);
+    m_folderNameEdit->setCompleter(folderCompleter);
+
     folderRow->addWidget(m_folderNameEdit);
     m_browseFolderButton = new QPushButton(i18n("Browse..."), this);
     connect(m_browseFolderButton, &QPushButton::clicked, this, [this]() {
@@ -255,11 +274,11 @@ void ClaudeSessionWizard::setupUi()
     });
     gitLayout->addWidget(m_createWorktreeCheck, 3, 0, 1, 2);
 
-    // Source repo
+    // Source repo (defaults to workspace root when empty)
     gitLayout->addWidget(new QLabel(i18n("Source repo:"), this), 4, 0);
     auto *repoRow = new QHBoxLayout();
     m_sourceRepoEdit = new QLineEdit(this);
-    m_sourceRepoEdit->setPlaceholderText(i18n("/path/to/main/repo"));
+    m_sourceRepoEdit->setPlaceholderText(i18n("(defaults to workspace root)"));
     m_sourceRepoEdit->setEnabled(false);
     connect(m_sourceRepoEdit, &QLineEdit::textChanged, this, [this]() {
         updatePreview();
@@ -295,6 +314,7 @@ void ClaudeSessionWizard::setupUi()
     optionsRow->addWidget(m_modelCombo);
     optionsRow->addSpacing(16);
     m_autoApproveReadCheck = new QCheckBox(i18n("Auto-approve Read"), this);
+    m_autoApproveReadCheck->setChecked(true);
     optionsRow->addWidget(m_autoApproveReadCheck);
     optionsRow->addStretch();
     mainLayout->addLayout(optionsRow);
@@ -329,6 +349,31 @@ void ClaudeSessionWizard::setupUi()
     setTabOrder(m_modelCombo, m_autoApproveReadCheck);
 }
 
+void ClaudeSessionWizard::updateFolderCompleter()
+{
+    QString root = m_projectRootEdit->text();
+    if (root.isEmpty() || !QDir(root).exists()) {
+        return;
+    }
+
+    QStringList dirs;
+    QDir rootDir(root);
+    const auto entries = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString &entry : entries) {
+        dirs << entry;
+    }
+
+    auto *completer = m_folderNameEdit->completer();
+    if (completer) {
+        auto *model = qobject_cast<QStringListModel *>(completer->model());
+        if (!model) {
+            model = new QStringListModel(completer);
+            completer->setModel(model);
+        }
+        model->setStringList(dirs);
+    }
+}
+
 void ClaudeSessionWizard::onPromptChanged()
 {
     QString prompt = m_promptEdit->text();
@@ -351,6 +396,7 @@ void ClaudeSessionWizard::onFolderNameChanged(const QString &name)
 void ClaudeSessionWizard::onProjectRootChanged(const QString &path)
 {
     Q_UNUSED(path);
+    updateFolderCompleter();
     updatePreview();
 }
 
@@ -359,7 +405,13 @@ void ClaudeSessionWizard::onCreatePressed()
     QString dir = selectedDirectory();
 
     if (dir.isEmpty()) {
-        QMessageBox::warning(this, i18n("Error"), i18n("Please enter a project name."));
+        if (m_folderNameEdit->text().isEmpty()) {
+            QMessageBox::warning(this, i18n("Missing Folder Name"), i18n("Enter a task description or type a folder name."));
+            m_promptEdit->setFocus();
+        } else {
+            QMessageBox::warning(this, i18n("Missing Workspace Root"), i18n("Set the workspace root directory."));
+            m_projectRootEdit->setFocus();
+        }
         return;
     }
 

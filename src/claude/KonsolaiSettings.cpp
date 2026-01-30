@@ -122,7 +122,7 @@ void KonsolaiSettings::setWorktreeSourceRepo(const QString &path)
 bool KonsolaiSettings::useWorktrees() const
 {
     KConfigGroup group(m_config, QStringLiteral("Git"));
-    return group.readEntry("UseWorktrees", true); // Default to true for worktree workflow
+    return group.readEntry("UseWorktrees", false);
 }
 
 void KonsolaiSettings::setUseWorktrees(bool enabled)

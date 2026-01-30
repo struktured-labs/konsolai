@@ -65,6 +65,7 @@ private Q_SLOTS:
 
 private:
     void setupUi();
+    void updateFolderCompleter();
     QString generateFolderName(const QString &prompt) const;
     QString generateWorktreeName(const QString &prompt) const;
     void detectGitState(const QString &path);
