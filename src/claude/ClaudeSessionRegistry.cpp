@@ -15,15 +15,15 @@
 namespace Konsolai
 {
 
-ClaudeSessionRegistry *ClaudeSessionRegistry::s_instance = nullptr;
+static ClaudeSessionRegistry *s_registryInstance = nullptr;
 
 ClaudeSessionRegistry::ClaudeSessionRegistry(QObject *parent)
     : QObject(parent)
     , m_tmuxManager(new TmuxManager(this))
     , m_refreshTimer(new QTimer(this))
 {
-    if (!s_instance) {
-        s_instance = this;
+    if (!s_registryInstance) {
+        s_registryInstance = this;
     }
 
     // Load persisted state
@@ -42,14 +42,14 @@ ClaudeSessionRegistry::~ClaudeSessionRegistry()
     // Save state before shutdown
     saveState();
 
-    if (s_instance == this) {
-        s_instance = nullptr;
+    if (s_registryInstance == this) {
+        s_registryInstance = nullptr;
     }
 }
 
 ClaudeSessionRegistry* ClaudeSessionRegistry::instance()
 {
-    return s_instance;
+    return s_registryInstance;
 }
 
 void ClaudeSessionRegistry::registerSession(ClaudeSession *session)

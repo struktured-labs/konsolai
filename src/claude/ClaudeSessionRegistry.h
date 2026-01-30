@@ -134,8 +134,6 @@ private Q_SLOTS:
     void onPeriodicRefresh();
 
 private:
-    static ClaudeSessionRegistry *s_instance;
-
     TmuxManager *m_tmuxManager = nullptr;
 
     // Active sessions (attached to Konsolai windows)

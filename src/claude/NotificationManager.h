@@ -156,8 +156,6 @@ private:
     void initSystemTray();
     void initSounds();
 
-    static NotificationManager *s_instance;
-
 #if HAVE_KSTATUSNOTIFIERITEM
     KStatusNotifierItem *m_systemTray = nullptr;
 #endif

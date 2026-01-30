@@ -20,13 +20,13 @@
 namespace Konsolai
 {
 
-NotificationManager *NotificationManager::s_instance = nullptr;
+static NotificationManager *s_notificationManagerInstance = nullptr;
 
 NotificationManager::NotificationManager(QObject *parent)
     : QObject(parent)
 {
-    if (!s_instance) {
-        s_instance = this;
+    if (!s_notificationManagerInstance) {
+        s_notificationManagerInstance = this;
     }
 
     initSystemTray();
@@ -34,14 +34,14 @@ NotificationManager::NotificationManager(QObject *parent)
 
 NotificationManager::~NotificationManager()
 {
-    if (s_instance == this) {
-        s_instance = nullptr;
+    if (s_notificationManagerInstance == this) {
+        s_notificationManagerInstance = nullptr;
     }
 }
 
 NotificationManager *NotificationManager::instance()
 {
-    return s_instance;
+    return s_notificationManagerInstance;
 }
 
 void NotificationManager::initSystemTray()
