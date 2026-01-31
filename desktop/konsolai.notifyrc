@@ -1,5 +1,5 @@
 [Global]
-IconName=utilities-terminal
+IconName=konsolai
 DesktopEntry=org.kde.konsolai
 Comment=Konsolai
 Comment[af]=Konsole
