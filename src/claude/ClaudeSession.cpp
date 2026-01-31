@@ -464,9 +464,10 @@ void ClaudeSession::denyPermission()
 
 void ClaudeSession::stop()
 {
-    // Send Ctrl+C to stop Claude
+    // Send Ctrl+C to stop Claude (use sendKeySequence, not sendKeys,
+    // because sendKeys uses -l which would type literal "C-c")
     if (m_tmuxManager) {
-        m_tmuxManager->sendKeys(m_sessionName, QStringLiteral("C-c"));
+        m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("C-c"));
     }
 }
 

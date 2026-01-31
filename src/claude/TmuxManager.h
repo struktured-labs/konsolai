@@ -126,9 +126,16 @@ public:
     bool detachSession(const QString &sessionName);
 
     /**
-     * Send keys to a tmux session
+     * Send literal text to a tmux session (uses send-keys -l).
+     * A trailing \\n is converted to carriage return so Enter is
+     * included in the same tmux command.
      */
     bool sendKeys(const QString &sessionName, const QString &keys);
+
+    /**
+     * Send a tmux key name (e.g. "C-c", "Enter", "Up") without -l.
+     */
+    bool sendKeySequence(const QString &sessionName, const QString &keyName);
 
     /**
      * Capture pane content from a tmux session

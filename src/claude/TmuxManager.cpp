@@ -171,22 +171,29 @@ bool TmuxManager::detachSession(const QString &sessionName)
 bool TmuxManager::sendKeys(const QString &sessionName, const QString &keys)
 {
     bool ok = false;
-    // Use -l for literal text to avoid interpretation issues
-    // Then send Enter separately if the text ends with \n
+
+    // Replace trailing \n with \r (carriage return) so the Enter key is
+    // included in a single tmux send-keys -l call.  This avoids a race
+    // between a separate "send-keys Enter" command and also fixes the case
+    // where the text is empty (just an Enter press) — previously `ok`
+    // stayed false and Enter was never sent.
     QString text = keys;
-    bool sendEnter = text.endsWith(QLatin1Char('\n'));
-    if (sendEnter) {
+    if (text.endsWith(QLatin1Char('\n'))) {
         text.chop(1);
+        text.append(QLatin1Char('\r'));
     }
 
     if (!text.isEmpty()) {
         executeCommand({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, QStringLiteral("-l"), text}, &ok);
     }
 
-    if (sendEnter && ok) {
-        executeCommand({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, QStringLiteral("Enter")}, &ok);
-    }
+    return ok;
+}
 
+bool TmuxManager::sendKeySequence(const QString &sessionName, const QString &keyName)
+{
+    bool ok = false;
+    executeCommand({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, keyName}, &ok);
     return ok;
 }
 
