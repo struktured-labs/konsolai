@@ -322,16 +322,26 @@ void ClaudeSession::connectSignals()
         }
     });
 
-    // Handle task completion notifications for double yolo mode
+    // Handle idle state for double/triple yolo modes
     connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
-        qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "tripleYoloMode:" << m_tripleYoloMode;
-        // Triple yolo: auto-continue when Claude becomes idle
-        if (m_tripleYoloMode && newState == ClaudeProcess::State::Idle) {
-            qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
-            QTimer::singleShot(500, this, [this]() {
-                sendPrompt(m_autoContinuePrompt);
-                incrementTripleYoloApproval();
-            });
+        qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "doubleYoloMode:" << m_doubleYoloMode
+                 << "tripleYoloMode:" << m_tripleYoloMode;
+
+        if (newState == ClaudeProcess::State::Idle) {
+            if (m_tripleYoloMode) {
+                // Triple yolo: auto-continue with a new prompt
+                qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
+                QTimer::singleShot(500, this, [this]() {
+                    sendPrompt(m_autoContinuePrompt);
+                    incrementTripleYoloApproval();
+                });
+            } else if (m_doubleYoloMode) {
+                // Double yolo: auto-accept suggestion (Tab + Enter)
+                qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode)";
+                QTimer::singleShot(1000, this, [this]() {
+                    autoAcceptSuggestion();
+                });
+            }
         }
     });
 
@@ -602,11 +612,36 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
     return false;
 }
 
+void ClaudeSession::autoAcceptSuggestion()
+{
+    if (!m_tmuxManager || !m_doubleYoloMode) {
+        return;
+    }
+
+    // Press Tab to accept any visible suggestion in Claude's input,
+    // then Enter to submit it.  If there is no suggestion, Tab is a
+    // no-op in Claude Code's Ink UI and Enter on an empty prompt is
+    // ignored, so this is safe to fire speculatively.
+    m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Tab"));
+    QTimer::singleShot(100, this, [this]() {
+        approvePermission(); // sends Enter
+        incrementDoubleYoloApproval();
+    });
+}
+
 void ClaudeSession::setDoubleYoloMode(bool enabled)
 {
     if (m_doubleYoloMode != enabled) {
         m_doubleYoloMode = enabled;
         Q_EMIT doubleYoloModeChanged(enabled);
+
+        // If Claude is already idle, auto-accept any suggestion now
+        if (enabled && !m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
+            qDebug() << "ClaudeSession: Claude already idle - auto-accepting suggestion immediately";
+            QTimer::singleShot(500, this, [this]() {
+                autoAcceptSuggestion();
+            });
+        }
     }
 }
 

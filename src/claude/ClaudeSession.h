@@ -457,6 +457,9 @@ private:
     void stopPermissionPolling();
     void pollForPermissionPrompt();
     bool detectPermissionPrompt(const QString &terminalOutput);
+
+    // Double yolo: auto-accept suggestions
+    void autoAcceptSuggestion();
 };
 
 } // namespace Konsolai
