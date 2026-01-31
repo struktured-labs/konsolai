@@ -119,6 +119,59 @@ void KonsolaiSettings::setWorktreeSourceRepo(const QString &path)
     Q_EMIT settingsChanged();
 }
 
+bool KonsolaiSettings::yoloMode() const
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    return group.readEntry("Enabled", false);
+}
+
+void KonsolaiSettings::setYoloMode(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    group.writeEntry("Enabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::doubleYoloMode() const
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    return group.readEntry("DoubleEnabled", false);
+}
+
+void KonsolaiSettings::setDoubleYoloMode(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    group.writeEntry("DoubleEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::tripleYoloMode() const
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    return group.readEntry("TripleEnabled", false);
+}
+
+void KonsolaiSettings::setTripleYoloMode(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    group.writeEntry("TripleEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+QString KonsolaiSettings::autoContinuePrompt() const
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    return group.readEntry("AutoContinuePrompt",
+                           QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable."));
+}
+
+void KonsolaiSettings::setAutoContinuePrompt(const QString &prompt)
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    group.writeEntry("AutoContinuePrompt", prompt);
+    Q_EMIT settingsChanged();
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

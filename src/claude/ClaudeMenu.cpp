@@ -7,6 +7,7 @@
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
 #include "ClaudeSessionState.h"
+#include "KonsolaiSettings.h"
 #include "TmuxManager.h"
 
 #include <KLocalizedString>
@@ -21,6 +22,16 @@ ClaudeMenu::ClaudeMenu(QWidget *parent)
     : QMenu(i18n("&Claude"), parent)
     , m_registry(ClaudeSessionRegistry::instance())
 {
+    // Load persisted yolo mode settings before creating actions
+    // so the checkboxes start in the correct state.
+    auto *settings = KonsolaiSettings::instance();
+    if (settings) {
+        m_yoloMode = settings->yoloMode();
+        m_doubleYoloMode = settings->doubleYoloMode();
+        m_tripleYoloMode = settings->tripleYoloMode();
+        m_autoContinuePrompt = settings->autoContinuePrompt();
+    }
+
     createActions();
     createReattachMenu();
 
@@ -362,6 +373,12 @@ void ClaudeMenu::setYoloMode(bool enabled)
         m_activeSession->setYoloMode(enabled);
     }
 
+    // Persist
+    if (auto *s = KonsolaiSettings::instance()) {
+        s->setYoloMode(enabled);
+        s->save();
+    }
+
     Q_EMIT yoloModeChanged(enabled);
 }
 
@@ -380,6 +397,12 @@ void ClaudeMenu::setDoubleYoloMode(bool enabled)
     // Update per-session setting
     if (m_activeSession) {
         m_activeSession->setDoubleYoloMode(enabled);
+    }
+
+    // Persist
+    if (auto *s = KonsolaiSettings::instance()) {
+        s->setDoubleYoloMode(enabled);
+        s->save();
     }
 
     Q_EMIT doubleYoloModeChanged(enabled);
@@ -421,6 +444,12 @@ void ClaudeMenu::setTripleYoloMode(bool enabled)
         m_activeSession->setTripleYoloMode(enabled);
     }
 
+    // Persist
+    if (auto *s = KonsolaiSettings::instance()) {
+        s->setTripleYoloMode(enabled);
+        s->save();
+    }
+
     Q_EMIT tripleYoloModeChanged(enabled);
 }
 
@@ -431,6 +460,12 @@ void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
     // Update per-session setting
     if (m_activeSession) {
         m_activeSession->setAutoContinuePrompt(prompt);
+    }
+
+    // Persist
+    if (auto *s = KonsolaiSettings::instance()) {
+        s->setAutoContinuePrompt(prompt);
+        s->save();
     }
 }
 

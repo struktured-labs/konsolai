@@ -652,7 +652,7 @@ void Session::setSessionAttribute(int what, const QString &caption)
     }
 
     if (what == SessionName) {
-        if (_localTabTitleFormat != caption) {
+        if (!_tabTitleSetByUser && _localTabTitleFormat != caption) {
             _localTabTitleFormat = caption;
             setTitle(Session::DisplayedTitleRole, caption);
             modified = true;

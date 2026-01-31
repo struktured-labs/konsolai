@@ -5,6 +5,7 @@
 
 #include "ClaudeSession.h"
 #include "ClaudeHookHandler.h"
+#include "KonsolaiSettings.h"
 
 #include <QDir>
 #include <QFile>
@@ -76,6 +77,14 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
         setTabTitleFormat(Konsole::Session::LocalTabTitle, projectName);
         setTabTitleFormat(Konsole::Session::RemoteTabTitle, projectName);
         tabTitleSetByUser(true);
+    }
+
+    // Apply persisted yolo mode defaults to new sessions
+    if (auto *settings = KonsolaiSettings::instance()) {
+        m_yoloMode = settings->yoloMode();
+        m_doubleYoloMode = settings->doubleYoloMode();
+        m_tripleYoloMode = settings->tripleYoloMode();
+        m_autoContinuePrompt = settings->autoContinuePrompt();
     }
 
     // NOTE: We don't set program/arguments here - we do it in run()

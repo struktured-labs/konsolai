@@ -78,6 +78,30 @@ public:
     void setWorktreeSourceRepo(const QString &path);
 
     /**
+     * Yolo mode (auto-approve) default
+     */
+    bool yoloMode() const;
+    void setYoloMode(bool enabled);
+
+    /**
+     * Double yolo mode (auto-complete) default
+     */
+    bool doubleYoloMode() const;
+    void setDoubleYoloMode(bool enabled);
+
+    /**
+     * Triple yolo mode (auto-continue) default
+     */
+    bool tripleYoloMode() const;
+    void setTripleYoloMode(bool enabled);
+
+    /**
+     * Auto-continue prompt for triple yolo mode
+     */
+    QString autoContinuePrompt() const;
+    void setAutoContinuePrompt(const QString &prompt);
+
+    /**
      * Save settings to disk
      */
     void save();
