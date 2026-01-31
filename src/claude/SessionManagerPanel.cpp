@@ -163,8 +163,9 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         meta.isArchived = false;
         m_metadata[sessionId] = meta;
     } else {
-        // Session was archived, now unarchived
+        // Session was archived/expired, now unarchived
         m_metadata[sessionId].isArchived = false;
+        m_metadata[sessionId].isExpired = false;
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
     }
 
@@ -326,6 +327,24 @@ void SessionManagerPanel::unarchiveSession(const QString &sessionId)
     Q_EMIT unarchiveRequested(sessionId, meta.workingDirectory);
 }
 
+void SessionManagerPanel::markExpired(const QString &sessionName)
+{
+    // Find metadata by session name
+    for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
+        if (it->sessionName == sessionName) {
+            it->isArchived = true;
+            it->isExpired = true;
+            it->lastAccessed = QDateTime::currentDateTime();
+            m_activeSessions.remove(it->sessionId);
+            saveMetadata();
+            updateTreeWidget();
+            qDebug() << "SessionManagerPanel: Marked session as expired:" << sessionName;
+            return;
+        }
+    }
+    qDebug() << "SessionManagerPanel: Could not find session to mark expired:" << sessionName;
+}
+
 void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column)
@@ -472,6 +491,19 @@ void SessionManagerPanel::updateTreeWidget()
         delete m_archivedCategory->takeChild(0);
     }
 
+    // Pre-pass: detect sessions with dead tmux backends and mark them expired
+    {
+        TmuxManager tmux;
+        for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
+            if (!it->isArchived && !m_activeSessions.contains(it->sessionId)) {
+                if (!tmux.sessionExists(it->sessionName)) {
+                    it->isArchived = true;
+                    it->isExpired = true;
+                }
+            }
+        }
+    }
+
     // Sort sessions by last accessed (most recent first)
     QList<SessionMetadata> sortedMeta = m_metadata.values();
     std::sort(sortedMeta.begin(), sortedMeta.end(), [](const SessionMetadata &a, const SessionMetadata &b) {
@@ -568,7 +600,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     item->setToolTip(0, QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString()));
 
     // Set icon based on state
-    if (meta.isArchived) {
+    if (meta.isArchived && meta.isExpired) {
+        item->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-warning")));
+    } else if (meta.isArchived) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-grey")));
     } else if (isActive) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-open")));
@@ -580,14 +614,6 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     // Add status indicator
     if (isActive) {
         item->setForeground(0, QBrush(Qt::darkGreen));
-    } else if (!meta.isArchived) {
-        // Detached - check if tmux session still exists
-        TmuxManager tmux;
-        if (!tmux.sessionExists(meta.sessionName)) {
-            // Session no longer exists in tmux, mark as archived
-            // (Can't modify const reference, so we'll handle this elsewhere)
-            item->setForeground(0, QBrush(Qt::gray));
-        }
     }
 }
 
@@ -617,6 +643,7 @@ void SessionManagerPanel::loadMetadata()
         meta.workingDirectory = obj[QStringLiteral("workingDirectory")].toString();
         meta.isPinned = obj[QStringLiteral("isPinned")].toBool();
         meta.isArchived = obj[QStringLiteral("isArchived")].toBool();
+        meta.isExpired = obj[QStringLiteral("isExpired")].toBool();
         meta.lastAccessed = QDateTime::fromString(obj[QStringLiteral("lastAccessed")].toString(), Qt::ISODate);
         meta.createdAt = QDateTime::fromString(obj[QStringLiteral("createdAt")].toString(), Qt::ISODate);
 
@@ -641,6 +668,7 @@ void SessionManagerPanel::saveMetadata()
         obj[QStringLiteral("workingDirectory")] = meta.workingDirectory;
         obj[QStringLiteral("isPinned")] = meta.isPinned;
         obj[QStringLiteral("isArchived")] = meta.isArchived;
+        obj[QStringLiteral("isExpired")] = meta.isExpired;
         obj[QStringLiteral("lastAccessed")] = meta.lastAccessed.toString(Qt::ISODate);
         obj[QStringLiteral("createdAt")] = meta.createdAt.toString(Qt::ISODate);
         array.append(obj);

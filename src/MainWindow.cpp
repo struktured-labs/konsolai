@@ -492,6 +492,14 @@ void MainWindow::setupActions()
     connect(_claudeMenu, &Konsolai::ClaudeMenu::reattachRequested, this, [this](const QString &sessionName) {
         qDebug() << "Reattach requested for session:" << sessionName;
 
+        // Verify the tmux session still exists before attempting reattach
+        Konsolai::TmuxManager tmux;
+        if (!tmux.sessionExists(sessionName)) {
+            _sessionPanel->markExpired(sessionName);
+            KMessageBox::information(this, i18n("The session '%1' no longer exists. It has been moved to Archived.", sessionName), i18n("Session Not Found"));
+            return;
+        }
+
         // Get the Claude profile
         Profile::Ptr claudeProfile;
         const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();

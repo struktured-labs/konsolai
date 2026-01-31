@@ -34,6 +34,7 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     QString workingDirectory;
     bool isPinned = false;
     bool isArchived = false;
+    bool isExpired = false;
     QDateTime lastAccessed;
     QDateTime createdAt;
 };
@@ -119,6 +120,11 @@ public Q_SLOTS:
      * Unarchive a session (restarts Claude with same session ID)
      */
     void unarchiveSession(const QString &sessionId);
+
+    /**
+     * Mark a session as expired (dead tmux backend) and auto-archive it
+     */
+    void markExpired(const QString &sessionName);
 
 Q_SIGNALS:
     /**
