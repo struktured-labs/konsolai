@@ -56,6 +56,7 @@
 #include "WindowSystemInfo.h"
 
 // Claude integration
+#include "claude/ClaudeConversationPicker.h"
 #include "claude/ClaudeMenu.h"
 #include "claude/ClaudeProcess.h"
 #include "claude/ClaudeSession.h"
@@ -606,8 +607,18 @@ void MainWindow::setupActions()
             return;
         }
 
+        // Check for existing Claude conversations in this project
+        auto conversations = Konsolai::ClaudeSessionRegistry::readClaudeConversations(workingDirectory);
+        QString resumeId;
+        if (!conversations.isEmpty()) {
+            resumeId = Konsolai::ClaudeConversationPicker::pick(conversations, this);
+        }
+
         // Create new session with the working directory
         auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workingDirectory, this);
+        if (!resumeId.isEmpty()) {
+            claudeSession->setResumeSessionId(resumeId);
+        }
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
         // setSessionProfile overrides initialWorkingDirectory with profile default — restore it
         claudeSession->setInitialWorkingDirectory(workingDirectory);

@@ -236,6 +236,23 @@ public:
     }
 
     /**
+     * Set a Claude CLI conversation ID to resume when starting this session.
+     * When set, the session will pass --resume <id> to the Claude CLI.
+     */
+    void setResumeSessionId(const QString &id)
+    {
+        m_resumeSessionId = id;
+    }
+
+    /**
+     * Get the Claude CLI conversation resume ID (empty if starting fresh).
+     */
+    QString resumeSessionId() const
+    {
+        return m_resumeSessionId;
+    }
+
+    /**
      * Whether this session is for reattaching to an existing tmux session
      */
     bool isReattach() const { return m_isReattach; }
@@ -412,6 +429,7 @@ private:
     QString m_profileName;
     QString m_workingDir;
     ClaudeProcess::Model m_claudeModel = ClaudeProcess::Model::Default;
+    QString m_resumeSessionId;
     bool m_isReattach = false;
 
     TmuxManager *m_tmuxManager = nullptr;

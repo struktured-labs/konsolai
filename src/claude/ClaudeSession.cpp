@@ -71,9 +71,11 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     if (!projectName.isEmpty()) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
-        // Use %d (directory name) instead of %n (process name) to show project folder
-        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%d"));
-        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%d"));
+        // Use literal project name - format codes like %d (cwd) and %n (process name)
+        // resolve to the tmux client process, not the Claude session's project
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, projectName);
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, projectName);
+        tabTitleSetByUser(true);
     }
 
     // NOTE: We don't set program/arguments here - we do it in run()
@@ -119,12 +121,13 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
 
     setInitialWorkingDirectory(m_workingDir);
 
-    // Set tab title to session name for reattached sessions
+    // Set tab title to session name for reattached sessions (will be updated in run())
     setTitle(Konsole::Session::NameRole, existingSessionName);
     setTitle(Konsole::Session::DisplayedTitleRole, existingSessionName);
-    // Use static title format to prevent process detection from overriding
-    setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%n"));
-    setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%n"));
+    // Use literal session name - format codes resolve to the tmux client, not the project
+    setTabTitleFormat(Konsole::Session::LocalTabTitle, existingSessionName);
+    setTabTitleFormat(Konsole::Session::RemoteTabTitle, existingSessionName);
+    tabTitleSetByUser(true);
 
     // NOTE: We don't set program/arguments here - we do it in run()
 
@@ -193,14 +196,18 @@ void ClaudeSession::run()
         m_workingDir = QDir::currentPath();
     }
 
-    // Update tab title based on final working directory
+    // Update tab title to project name (directory basename)
+    // We use a literal string (no format codes) because format codes like %d and %n
+    // resolve to the tmux client process info, not the Claude session's project.
+    // We also set tabTitleSetByUser to prevent OSC 30 escape sequences from tmux/shell
+    // from overriding the title (they would set it to the build directory name).
     QString projectName = QDir(m_workingDir).dirName();
     if (!projectName.isEmpty() && projectName != QStringLiteral(".")) {
         setTitle(Konsole::Session::NameRole, projectName);
         setTitle(Konsole::Session::DisplayedTitleRole, projectName);
-        // Use %d (directory name) instead of %n (process name) to show project folder
-        setTabTitleFormat(Konsole::Session::LocalTabTitle, QStringLiteral("%d"));
-        setTabTitleFormat(Konsole::Session::RemoteTabTitle, QStringLiteral("%d"));
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, projectName);
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, projectName);
+        tabTitleSetByUser(true);
     }
 
     // Emit signal so session panel can update metadata with correct working directory
@@ -339,7 +346,12 @@ QString ClaudeSession::shellCommand() const
     }
 
     // Create new session or attach if exists
-    QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), {});
+    QStringList extraArgs;
+    if (!m_resumeSessionId.isEmpty()) {
+        extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
+    }
+
+    QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
 
     return m_tmuxManager->buildNewSessionCommand(
         m_sessionName,

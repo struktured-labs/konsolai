@@ -27,6 +27,7 @@ set(claude_SRCS
     ClaudeMenu.cpp
     ClaudeTabIndicator.cpp
     ClaudeSessionWizard.cpp
+    ClaudeConversationPicker.cpp
     SessionManagerPanel.cpp
     KonsolaiSettings.cpp
     ${dbus_xml_srcs}

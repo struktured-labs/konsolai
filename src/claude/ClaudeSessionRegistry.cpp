@@ -274,6 +274,62 @@ void ClaudeSessionRegistry::saveState()
     file.close();
 }
 
+QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const QString &projectPath)
+{
+    QList<ClaudeConversation> conversations;
+
+    if (projectPath.isEmpty()) {
+        return conversations;
+    }
+
+    // Convert project path to hashed directory name: replace '/' with '-'
+    // e.g. /home/user/projects/foo → -home-user-projects-foo
+    QString hashedName = projectPath;
+    hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
+
+    QString indexPath = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName + QStringLiteral("/sessions-index.json");
+
+    QFile file(indexPath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+        return conversations;
+    }
+
+    QJsonParseError error;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+    file.close();
+
+    if (error.error != QJsonParseError::NoError || !doc.isArray()) {
+        return conversations;
+    }
+
+    const QJsonArray entries = doc.array();
+    for (const QJsonValue &value : entries) {
+        if (!value.isObject()) {
+            continue;
+        }
+
+        QJsonObject obj = value.toObject();
+        ClaudeConversation conv;
+        conv.sessionId = obj.value(QStringLiteral("sessionId")).toString();
+        conv.summary = obj.value(QStringLiteral("summary")).toString();
+        conv.firstPrompt = obj.value(QStringLiteral("firstPrompt")).toString();
+        conv.messageCount = obj.value(QStringLiteral("messageCount")).toInt();
+        conv.created = QDateTime::fromString(obj.value(QStringLiteral("created")).toString(), Qt::ISODate);
+        conv.modified = QDateTime::fromString(obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
+
+        if (!conv.sessionId.isEmpty()) {
+            conversations.append(conv);
+        }
+    }
+
+    // Sort by modified date descending (most recent first)
+    std::sort(conversations.begin(), conversations.end(), [](const ClaudeConversation &a, const ClaudeConversation &b) {
+        return a.modified > b.modified;
+    });
+
+    return conversations;
+}
+
 QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString &searchRoot) const
 {
     QList<ClaudeSessionState> discovered;

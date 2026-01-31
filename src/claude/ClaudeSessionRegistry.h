@@ -11,6 +11,7 @@
 #include "ClaudeSessionState.h"
 #include "TmuxManager.h"
 
+#include <QDateTime>
 #include <QHash>
 #include <QList>
 #include <QObject>
@@ -21,6 +22,18 @@ namespace Konsolai
 {
 
 class ClaudeSession;
+
+/**
+ * A Claude CLI conversation entry from sessions-index.json
+ */
+struct KONSOLEPRIVATE_EXPORT ClaudeConversation {
+    QString sessionId; // UUID
+    QString summary;
+    QString firstPrompt;
+    int messageCount = 0;
+    QDateTime created;
+    QDateTime modified;
+};
 
 /**
  * ClaudeSessionRegistry tracks all Claude sessions across Konsolai.
@@ -108,6 +121,17 @@ public:
      * @return List of session states for discovered projects
      */
     QList<ClaudeSessionState> discoverSessions(const QString &searchRoot) const;
+
+    /**
+     * Read Claude CLI conversation history for a project path.
+     *
+     * Reads ~/.claude/projects/{hashed-path}/sessions-index.json and returns
+     * conversation entries sorted by modified date (most recent first).
+     *
+     * @param projectPath Absolute path to the project directory
+     * @return List of conversations, empty if none found
+     */
+    static QList<ClaudeConversation> readClaudeConversations(const QString &projectPath);
 
     /**
      * Get path to sessions state file
