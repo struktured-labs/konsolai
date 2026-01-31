@@ -508,6 +508,15 @@ void ClaudeSession::setYoloMode(bool enabled)
                 }
                 // Also start terminal polling as a fallback
                 startPermissionPolling();
+
+                // If a permission prompt is already showing, approve it now
+                if (claudeState() == ClaudeProcess::State::WaitingInput) {
+                    qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving immediately";
+                    QTimer::singleShot(100, this, [this]() {
+                        approvePermission();
+                        incrementYoloApproval();
+                    });
+                }
             } else {
                 // Remove the yolo file
                 if (QFile::exists(yoloPath)) {
@@ -606,6 +615,15 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
     if (m_tripleYoloMode != enabled) {
         m_tripleYoloMode = enabled;
         Q_EMIT tripleYoloModeChanged(enabled);
+
+        // If Claude is already idle, send the auto-continue prompt now
+        if (enabled && claudeState() == ClaudeProcess::State::Idle) {
+            qDebug() << "ClaudeSession: Claude already idle - auto-continuing immediately";
+            QTimer::singleShot(500, this, [this]() {
+                sendPrompt(m_autoContinuePrompt);
+                incrementTripleYoloApproval();
+            });
+        }
     }
 }
 
