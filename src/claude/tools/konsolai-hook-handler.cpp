@@ -134,6 +134,12 @@ int main(int argc, char *argv[])
     eventData[QStringLiteral("session_id")] = QString::fromLocal8Bit(qgetenv("KONSOLAI_SESSION_ID"));
     eventData[QStringLiteral("working_dir")] = QString::fromLocal8Bit(qgetenv("PWD"));
 
+    // If the socket file doesn't exist, the Konsolai session is not running.
+    // Exit silently — this handles stale hooks left in settings.local.json.
+    if (!QFileInfo::exists(socketPath)) {
+        return 0;
+    }
+
     // Connect to socket and send event to Konsolai (for tracking/notifications)
     QLocalSocket socket;
     socket.connectToServer(socketPath);
