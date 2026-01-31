@@ -522,9 +522,13 @@ void MainWindow::setupActions()
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
         // Create view and add to container
-        // Note: createView() internally calls session->run()
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
+
+        // Start the session (attaches to existing tmux session)
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
 
         // Register with registry and connect to UI
         auto *registry = Konsolai::ClaudeSessionRegistry::instance();
@@ -605,9 +609,16 @@ void MainWindow::setupActions()
         // Create new session with the working directory
         auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workingDirectory, this);
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+        // setSessionProfile overrides initialWorkingDirectory with profile default — restore it
+        claudeSession->setInitialWorkingDirectory(workingDirectory);
 
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
+
+        // Start the session (sets up tmux command, tab title, and starts the process)
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
 
         // Register with panel
         _sessionPanel->registerSession(claudeSession);
@@ -1407,9 +1418,13 @@ void MainWindow::autoReattachClaudeSessions()
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
         // Create view and add to container
-        // Note: createView() internally calls session->run()
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
+
+        // Start the session (attaches to existing tmux session)
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
 
         // Register with registry and connect to status UI
         registry->registerSession(claudeSession);
