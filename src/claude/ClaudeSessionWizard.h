@@ -32,7 +32,7 @@ namespace Konsolai
  * - Workspace root (top, not focused)
  * - Task prompt (center, focused on open)
  * - Folder name (auto-inferred from prompt, with browse)
- * - Git (Optional) panel: init + worktree combined
+ * - Git (Optional) panel: combo box for git mode
  * - Model and options
  * - Preview
  *
@@ -73,6 +73,16 @@ private:
     QStringList getWorktrees(const QString &repoRoot);
     void updatePreview();
 
+    // Git mode enum
+    enum GitMode {
+        GitInit = 0,
+        GitWorktree = 1,
+        GitCurrentBranch = 2,
+        GitNone = 3
+    };
+
+    void updateGitSubFields();
+
     // Widgets
     QLineEdit *m_projectRootEdit = nullptr;
     QPushButton *m_browseRootButton = nullptr;
@@ -80,11 +90,13 @@ private:
     QLineEdit *m_folderNameEdit = nullptr;
     QPushButton *m_browseFolderButton = nullptr;
     QGroupBox *m_gitGroup = nullptr;
-    QCheckBox *m_initGitCheck = nullptr;
+    QComboBox *m_gitModeCombo = nullptr;
+    QLabel *m_remotePrefixLabel = nullptr;
     QLineEdit *m_gitRemoteEdit = nullptr;
-    QCheckBox *m_createWorktreeCheck = nullptr;
+    QLabel *m_sourceRepoLabel = nullptr;
     QLineEdit *m_sourceRepoEdit = nullptr;
     QPushButton *m_browseRepoButton = nullptr;
+    QLabel *m_branchNameLabel = nullptr;
     QLineEdit *m_worktreeNameEdit = nullptr;
     QComboBox *m_modelCombo = nullptr;
     QCheckBox *m_autoApproveReadCheck = nullptr;

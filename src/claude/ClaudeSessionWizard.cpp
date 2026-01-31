@@ -46,20 +46,16 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
     if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
         m_projectRootEdit->setText(settings->projectRoot());
         m_gitRemoteEdit->setText(settings->gitRemoteRoot());
-        m_initGitCheck->setChecked(settings->autoInitGit());
+
+        int gitMode = settings->gitMode();
+        if (gitMode >= 0 && gitMode <= GitNone) {
+            m_gitModeCombo->setCurrentIndex(gitMode);
+        }
+        updateGitSubFields();
 
         QString sourceRepo = settings->worktreeSourceRepo();
         if (!sourceRepo.isEmpty()) {
             m_sourceRepoEdit->setText(sourceRepo);
-        }
-        bool useWorktrees = settings->useWorktrees();
-        m_createWorktreeCheck->setChecked(useWorktrees);
-        m_sourceRepoEdit->setEnabled(useWorktrees);
-        m_browseRepoButton->setEnabled(useWorktrees);
-        m_worktreeNameEdit->setEnabled(useWorktrees);
-        if (useWorktrees) {
-            m_initGitCheck->setEnabled(false);
-            m_initGitCheck->setChecked(false);
         }
 
         QString model = settings->defaultModel();
@@ -106,15 +102,12 @@ QString ClaudeSessionWizard::selectedDirectory() const
 
 bool ClaudeSessionWizard::shouldInitGit() const
 {
-    if (m_createWorktreeCheck && m_createWorktreeCheck->isChecked()) {
-        return false;
-    }
-    return m_initGitCheck && m_initGitCheck->isChecked() && !m_isGitRepo;
+    return m_gitModeCombo && m_gitModeCombo->currentIndex() == GitInit;
 }
 
 QString ClaudeSessionWizard::worktreeBranch() const
 {
-    if (!m_createWorktreeCheck || !m_createWorktreeCheck->isChecked()) {
+    if (!m_gitModeCombo || m_gitModeCombo->currentIndex() != GitWorktree) {
         return QString();
     }
     if (!m_worktreeNameEdit || m_worktreeNameEdit->text().isEmpty()) {
@@ -125,7 +118,7 @@ QString ClaudeSessionWizard::worktreeBranch() const
 
 QString ClaudeSessionWizard::repoRoot() const
 {
-    if (m_createWorktreeCheck && m_createWorktreeCheck->isChecked() && m_sourceRepoEdit) {
+    if (m_gitModeCombo && m_gitModeCombo->currentIndex() == GitWorktree && m_sourceRepoEdit) {
         QString repo = m_sourceRepoEdit->text();
         // Fall back to workspace root if source repo is empty
         if (repo.isEmpty() && m_projectRootEdit) {
@@ -242,50 +235,37 @@ void ClaudeSessionWizard::setupUi()
     m_gitGroup = new QGroupBox(i18n("Git (Optional)"), this);
     auto *gitLayout = new QGridLayout(m_gitGroup);
 
-    // Git init
-    m_initGitCheck = new QCheckBox(i18n("Initialize git repository"), this);
-    m_initGitCheck->setChecked(true);
-    gitLayout->addWidget(m_initGitCheck, 0, 0, 1, 2);
+    // Git mode combo
+    gitLayout->addWidget(new QLabel(i18n("Git mode:"), this), 0, 0);
+    m_gitModeCombo = new QComboBox(this);
+    m_gitModeCombo->addItem(i18n("Initialize new repository"));
+    m_gitModeCombo->addItem(i18n("Create as worktree"));
+    m_gitModeCombo->addItem(i18n("Use current branch"));
+    m_gitModeCombo->addItem(i18n("None"));
+    connect(m_gitModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        updateGitSubFields();
+        updatePreview();
+    });
+    gitLayout->addWidget(m_gitModeCombo, 0, 1);
 
-    // Remote URL
-    gitLayout->addWidget(new QLabel(i18n("Remote prefix:"), this), 1, 0);
+    // Remote prefix
+    m_remotePrefixLabel = new QLabel(i18n("Remote prefix:"), this);
+    gitLayout->addWidget(m_remotePrefixLabel, 1, 0);
     m_gitRemoteEdit = new QLineEdit(this);
     m_gitRemoteEdit->setPlaceholderText(i18n("git@github.com:username/"));
     gitLayout->addWidget(m_gitRemoteEdit, 1, 1);
 
-    // Separator line via spacing
-    auto *worktreeSep = new QLabel(this);
-    worktreeSep->setFrameStyle(QFrame::HLine | QFrame::Sunken);
-    gitLayout->addWidget(worktreeSep, 2, 0, 1, 2);
-
-    // Worktree option
-    m_createWorktreeCheck = new QCheckBox(i18n("Create as git worktree"), this);
-    connect(m_createWorktreeCheck, &QCheckBox::toggled, this, [this](bool checked) {
-        m_sourceRepoEdit->setEnabled(checked);
-        m_browseRepoButton->setEnabled(checked);
-        m_worktreeNameEdit->setEnabled(checked);
-        m_initGitCheck->setEnabled(!checked);
-        if (checked) {
-            m_initGitCheck->setChecked(false);
-        } else {
-            m_initGitCheck->setChecked(true);
-        }
-        updatePreview();
-    });
-    gitLayout->addWidget(m_createWorktreeCheck, 3, 0, 1, 2);
-
-    // Source repo (defaults to workspace root when empty)
-    gitLayout->addWidget(new QLabel(i18n("Source repo:"), this), 4, 0);
+    // Source repo
+    m_sourceRepoLabel = new QLabel(i18n("Source repo:"), this);
+    gitLayout->addWidget(m_sourceRepoLabel, 2, 0);
     auto *repoRow = new QHBoxLayout();
     m_sourceRepoEdit = new QLineEdit(this);
     m_sourceRepoEdit->setPlaceholderText(i18n("(defaults to workspace root)"));
-    m_sourceRepoEdit->setEnabled(false);
     connect(m_sourceRepoEdit, &QLineEdit::textChanged, this, [this]() {
         updatePreview();
     });
     repoRow->addWidget(m_sourceRepoEdit);
     m_browseRepoButton = new QPushButton(i18n("Browse..."), this);
-    m_browseRepoButton->setEnabled(false);
     connect(m_browseRepoButton, &QPushButton::clicked, this, [this]() {
         QString dir = QFileDialog::getExistingDirectory(this, i18n("Select Source Repository"), m_sourceRepoEdit->text());
         if (!dir.isEmpty()) {
@@ -293,14 +273,14 @@ void ClaudeSessionWizard::setupUi()
         }
     });
     repoRow->addWidget(m_browseRepoButton);
-    gitLayout->addLayout(repoRow, 4, 1);
+    gitLayout->addLayout(repoRow, 2, 1);
 
     // Branch name
-    gitLayout->addWidget(new QLabel(i18n("Branch name:"), this), 5, 0);
+    m_branchNameLabel = new QLabel(i18n("Branch name:"), this);
+    gitLayout->addWidget(m_branchNameLabel, 3, 0);
     m_worktreeNameEdit = new QLineEdit(this);
     m_worktreeNameEdit->setPlaceholderText(i18n("feature/project-name"));
-    m_worktreeNameEdit->setEnabled(false);
-    gitLayout->addWidget(m_worktreeNameEdit, 5, 1);
+    gitLayout->addWidget(m_worktreeNameEdit, 3, 1);
 
     mainLayout->addWidget(m_gitGroup);
 
@@ -340,10 +320,9 @@ void ClaudeSessionWizard::setupUi()
     // --- Tab order: prompt -> folder name -> git options -> model ---
     setTabOrder(m_promptEdit, m_folderNameEdit);
     setTabOrder(m_folderNameEdit, m_browseFolderButton);
-    setTabOrder(m_browseFolderButton, m_initGitCheck);
-    setTabOrder(m_initGitCheck, m_gitRemoteEdit);
-    setTabOrder(m_gitRemoteEdit, m_createWorktreeCheck);
-    setTabOrder(m_createWorktreeCheck, m_sourceRepoEdit);
+    setTabOrder(m_browseFolderButton, m_gitModeCombo);
+    setTabOrder(m_gitModeCombo, m_gitRemoteEdit);
+    setTabOrder(m_gitRemoteEdit, m_sourceRepoEdit);
     setTabOrder(m_sourceRepoEdit, m_worktreeNameEdit);
     setTabOrder(m_worktreeNameEdit, m_modelCombo);
     setTabOrder(m_modelCombo, m_autoApproveReadCheck);
@@ -390,6 +369,17 @@ void ClaudeSessionWizard::onPromptChanged()
 void ClaudeSessionWizard::onFolderNameChanged(const QString &name)
 {
     Q_UNUSED(name);
+    QString dir = selectedDirectory();
+    if (!dir.isEmpty() && QDir(dir).exists()) {
+        detectGitState(dir);
+        if (m_isGitRepo) {
+            m_gitModeCombo->setCurrentIndex(GitWorktree);
+            m_sourceRepoEdit->setText(m_repoRoot);
+        } else {
+            m_gitModeCombo->setCurrentIndex(GitInit);
+            m_sourceRepoEdit->clear();
+        }
+    }
     updatePreview();
 }
 
@@ -397,6 +387,17 @@ void ClaudeSessionWizard::onProjectRootChanged(const QString &path)
 {
     Q_UNUSED(path);
     updateFolderCompleter();
+    QString dir = selectedDirectory();
+    if (!dir.isEmpty() && QDir(dir).exists()) {
+        detectGitState(dir);
+        if (m_isGitRepo) {
+            m_gitModeCombo->setCurrentIndex(GitWorktree);
+            m_sourceRepoEdit->setText(m_repoRoot);
+        } else {
+            m_gitModeCombo->setCurrentIndex(GitInit);
+            m_sourceRepoEdit->clear();
+        }
+    }
     updatePreview();
 }
 
@@ -448,8 +449,27 @@ void ClaudeSessionWizard::onCreatePressed()
         }
     }
 
+    // Validate worktree fields
+    int gitMode = m_gitModeCombo->currentIndex();
+    if (gitMode == GitWorktree) {
+        if (m_worktreeNameEdit->text().isEmpty()) {
+            QMessageBox::warning(this, i18n("Missing Branch Name"), i18n("Enter a branch name for the worktree."));
+            m_worktreeNameEdit->setFocus();
+            return;
+        }
+        QString repo = m_sourceRepoEdit->text();
+        if (repo.isEmpty()) {
+            repo = m_projectRootEdit->text();
+        }
+        if (repo.isEmpty()) {
+            QMessageBox::warning(this, i18n("Missing Source Repository"), i18n("Enter a source repository for the worktree."));
+            m_sourceRepoEdit->setFocus();
+            return;
+        }
+    }
+
     // Init git if requested
-    if (shouldInitGit()) {
+    if (gitMode == GitInit) {
         QProcess git;
         git.setWorkingDirectory(dir);
         git.start(QStringLiteral("git"), {QStringLiteral("init")});
@@ -470,6 +490,16 @@ void ClaudeSessionWizard::onCreatePressed()
                 gitRemote.waitForFinished(5000);
             }
         }
+    }
+
+    // Save settings
+    if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
+        settings->setProjectRoot(m_projectRootEdit->text());
+        settings->setGitRemoteRoot(m_gitRemoteEdit->text());
+        settings->setGitMode(gitMode);
+        settings->setWorktreeSourceRepo(m_sourceRepoEdit->text());
+        settings->setDefaultModel(m_modelCombo->currentText());
+        settings->save();
     }
 
     m_selectedDirectory = dir;
@@ -609,6 +639,23 @@ QStringList ClaudeSessionWizard::getWorktrees(const QString &repoRoot)
     return result;
 }
 
+void ClaudeSessionWizard::updateGitSubFields()
+{
+    int mode = m_gitModeCombo->currentIndex();
+
+    bool remoteOn = (mode == GitInit);
+    bool worktreeOn = (mode == GitWorktree);
+
+    m_remotePrefixLabel->setEnabled(remoteOn);
+    m_gitRemoteEdit->setEnabled(remoteOn);
+
+    m_sourceRepoLabel->setEnabled(worktreeOn);
+    m_sourceRepoEdit->setEnabled(worktreeOn);
+    m_browseRepoButton->setEnabled(worktreeOn);
+    m_branchNameLabel->setEnabled(worktreeOn);
+    m_worktreeNameEdit->setEnabled(worktreeOn);
+}
+
 void ClaudeSessionWizard::updatePreview()
 {
     QString dir = selectedDirectory();
@@ -618,7 +665,11 @@ void ClaudeSessionWizard::updatePreview()
     }
 
     QString preview;
-    if (m_createWorktreeCheck && m_createWorktreeCheck->isChecked()) {
+    switch (m_gitModeCombo->currentIndex()) {
+    case GitInit:
+        preview = i18n("Will create: %1 (git init)", dir);
+        break;
+    case GitWorktree: {
         QString branch = m_worktreeNameEdit ? m_worktreeNameEdit->text() : QString();
         QString repo = m_sourceRepoEdit ? m_sourceRepoEdit->text() : QString();
         if (!branch.isEmpty() && !repo.isEmpty()) {
@@ -626,11 +677,15 @@ void ClaudeSessionWizard::updatePreview()
         } else {
             preview = i18n("Will create worktree: %1\n(Select source repo and branch)", dir);
         }
-    } else {
+        break;
+    }
+    case GitCurrentBranch:
+        preview = i18n("Will use: %1 (existing repo, current branch)", dir);
+        break;
+    case GitNone:
+    default:
         preview = i18n("Will create: %1", dir);
-        if (m_initGitCheck && m_initGitCheck->isChecked()) {
-            preview += i18n(" (git init)");
-        }
+        break;
     }
     m_previewLabel->setText(preview);
 }

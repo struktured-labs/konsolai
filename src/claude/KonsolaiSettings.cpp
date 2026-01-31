@@ -93,16 +93,16 @@ void KonsolaiSettings::setDefaultModel(const QString &model)
     Q_EMIT settingsChanged();
 }
 
-bool KonsolaiSettings::autoInitGit() const
+int KonsolaiSettings::gitMode() const
 {
     KConfigGroup group(m_config, QStringLiteral("Git"));
-    return group.readEntry("AutoInit", true);
+    return group.readEntry("GitMode", 0);
 }
 
-void KonsolaiSettings::setAutoInitGit(bool enabled)
+void KonsolaiSettings::setGitMode(int mode)
 {
     KConfigGroup group(m_config, QStringLiteral("Git"));
-    group.writeEntry("AutoInit", enabled);
+    group.writeEntry("GitMode", mode);
     Q_EMIT settingsChanged();
 }
 
@@ -116,19 +116,6 @@ void KonsolaiSettings::setWorktreeSourceRepo(const QString &path)
 {
     KConfigGroup group(m_config, QStringLiteral("Git"));
     group.writeEntry("WorktreeSourceRepo", path);
-    Q_EMIT settingsChanged();
-}
-
-bool KonsolaiSettings::useWorktrees() const
-{
-    KConfigGroup group(m_config, QStringLiteral("Git"));
-    return group.readEntry("UseWorktrees", false);
-}
-
-void KonsolaiSettings::setUseWorktrees(bool enabled)
-{
-    KConfigGroup group(m_config, QStringLiteral("Git"));
-    group.writeEntry("UseWorktrees", enabled);
     Q_EMIT settingsChanged();
 }
 

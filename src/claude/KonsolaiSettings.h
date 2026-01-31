@@ -60,10 +60,14 @@ public:
     void setDefaultModel(const QString &model);
 
     /**
-     * Whether to auto-init git for new projects
+     * Git mode for new sessions:
+     * 0 = Initialize new repository
+     * 1 = Create as worktree
+     * 2 = Use current branch (existing repo)
+     * 3 = None
      */
-    bool autoInitGit() const;
-    void setAutoInitGit(bool enabled);
+    int gitMode() const;
+    void setGitMode(int mode);
 
     /**
      * Source repository for creating worktrees.
@@ -72,12 +76,6 @@ public:
      */
     QString worktreeSourceRepo() const;
     void setWorktreeSourceRepo(const QString &path);
-
-    /**
-     * Whether to use worktrees by default for new sessions
-     */
-    bool useWorktrees() const;
-    void setUseWorktrees(bool enabled);
 
     /**
      * Save settings to disk
