@@ -158,6 +158,7 @@ private:
     void saveMetadata();
     void updateTreeWidget();
     void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent);
+    void showApprovalLog(ClaudeSession *session);
     SessionMetadata *findMetadata(const QString &sessionId);
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
 

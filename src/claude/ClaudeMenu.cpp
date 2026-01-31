@@ -165,18 +165,32 @@ void ClaudeMenu::setActiveSession(ClaudeSession *session)
             syncYoloModesFromSession();
         });
 
-        // Sync yolo modes with per-session settings
+        // Sync yolo modes with per-session settings.
+        // Use blockSignals to prevent setChecked from firing toggled → onYoloModeToggled
+        // → setYoloMode, which could write back to the wrong session during transitions.
         connect(m_activeSession, &ClaudeSession::yoloModeChanged, this, [this](bool enabled) {
-            if (m_yoloModeAction)
+            if (m_yoloModeAction) {
+                m_yoloModeAction->blockSignals(true);
                 m_yoloModeAction->setChecked(enabled);
+                m_yoloModeAction->blockSignals(false);
+            }
+            m_yoloMode = enabled;
         });
         connect(m_activeSession, &ClaudeSession::doubleYoloModeChanged, this, [this](bool enabled) {
-            if (m_doubleYoloModeAction)
+            if (m_doubleYoloModeAction) {
+                m_doubleYoloModeAction->blockSignals(true);
                 m_doubleYoloModeAction->setChecked(enabled);
+                m_doubleYoloModeAction->blockSignals(false);
+            }
+            m_doubleYoloMode = enabled;
         });
         connect(m_activeSession, &ClaudeSession::tripleYoloModeChanged, this, [this](bool enabled) {
-            if (m_tripleYoloModeAction)
+            if (m_tripleYoloModeAction) {
+                m_tripleYoloModeAction->blockSignals(true);
                 m_tripleYoloModeAction->setChecked(enabled);
+                m_tripleYoloModeAction->blockSignals(false);
+            }
+            m_tripleYoloMode = enabled;
         });
     }
 
@@ -423,20 +437,25 @@ void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
 void ClaudeMenu::syncYoloModesFromSession()
 {
     if (m_activeSession) {
-        // Sync menu checkboxes with session's settings (without triggering signals)
+        // Sync both the boolean fields and the checkbox state from the active session.
+        // This ensures isYoloMode() etc. return the per-session value.
+        m_yoloMode = m_activeSession->yoloMode();
+        m_doubleYoloMode = m_activeSession->doubleYoloMode();
+        m_tripleYoloMode = m_activeSession->tripleYoloMode();
+
         if (m_yoloModeAction) {
             m_yoloModeAction->blockSignals(true);
-            m_yoloModeAction->setChecked(m_activeSession->yoloMode());
+            m_yoloModeAction->setChecked(m_yoloMode);
             m_yoloModeAction->blockSignals(false);
         }
         if (m_doubleYoloModeAction) {
             m_doubleYoloModeAction->blockSignals(true);
-            m_doubleYoloModeAction->setChecked(m_activeSession->doubleYoloMode());
+            m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
             m_doubleYoloModeAction->blockSignals(false);
         }
         if (m_tripleYoloModeAction) {
             m_tripleYoloModeAction->blockSignals(true);
-            m_tripleYoloModeAction->setChecked(m_activeSession->tripleYoloMode());
+            m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
             m_tripleYoloModeAction->blockSignals(false);
         }
         m_autoContinuePrompt = m_activeSession->autoContinuePrompt();

@@ -11,12 +11,17 @@
 
 #include <KLocalizedString>
 #include <QAction>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDir>
 #include <QHeaderView>
 #include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
 #include <QStandardPaths>
+#include <QVBoxLayout>
 
 namespace Konsolai
 {
@@ -172,6 +177,10 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     saveMetadata();
     updateTreeWidget();
 
+    // Avoid duplicate signal connections if registerSession is called
+    // multiple times for the same session (e.g. on every tab switch).
+    disconnect(session, nullptr, this, nullptr);
+
     // Connect to session destruction
     connect(session, &QObject::destroyed, this, [this, sessionId]() {
         m_activeSessions.remove(sessionId);
@@ -193,8 +202,14 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         updateTreeWidget();
     });
 
-    // Connect to yolo mode changes to update display
+    // Connect to all yolo mode changes to update display
     connect(session, &ClaudeSession::yoloModeChanged, this, [this](bool) {
+        updateTreeWidget();
+    });
+    connect(session, &ClaudeSession::doubleYoloModeChanged, this, [this](bool) {
+        updateTreeWidget();
+    });
+    connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this](bool) {
         updateTreeWidget();
     });
 }
@@ -459,6 +474,18 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         }
 
+        // Show approval log for active sessions with approvals
+        if (isActive && m_activeSessions.contains(sessionId)) {
+            ClaudeSession *activeSession = m_activeSessions[sessionId];
+            if (activeSession && activeSession->totalApprovalCount() > 0) {
+                QAction *logAction =
+                    menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-details")), i18n("View Approval Log (%1)", activeSession->totalApprovalCount()));
+                connect(logAction, &QAction::triggered, this, [this, activeSession]() {
+                    showApprovalLog(activeSession);
+                });
+            }
+        }
+
         menu.addSeparator();
 
         QAction *archiveAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-remove")), i18n("Archive"));
@@ -700,6 +727,63 @@ QTreeWidgetItem *SessionManagerPanel::findTreeItem(const QString &sessionId)
         }
     }
     return nullptr;
+}
+
+void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
+{
+    if (!session) {
+        return;
+    }
+
+    const auto &log = session->approvalLog();
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(i18n("Approval Log - %1", QDir(session->workingDirectory()).dirName()));
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *summary = new QLabel(i18n("Total auto-approvals: %1 (Yolo: %2, Double: %3, Triple: %4)",
+                                    session->totalApprovalCount(),
+                                    session->yoloApprovalCount(),
+                                    session->doubleYoloApprovalCount(),
+                                    session->tripleYoloApprovalCount()),
+                               &dialog);
+    layout->addWidget(summary);
+
+    auto *tree = new QTreeWidget(&dialog);
+    tree->setHeaderLabels({i18n("Time"), i18n("Tool"), i18n("Action"), i18n("Level")});
+    tree->setRootIsDecorated(false);
+    tree->setAlternatingRowColors(true);
+
+    // Show most recent first
+    for (int i = log.size() - 1; i >= 0; --i) {
+        const auto &entry = log[i];
+        auto *item = new QTreeWidgetItem(tree);
+        item->setText(0, entry.timestamp.toString(QStringLiteral("hh:mm:ss")));
+        item->setText(1, entry.toolName);
+        item->setText(2, entry.action);
+        QString levelStr;
+        if (entry.yoloLevel == 1) {
+            levelStr = QStringLiteral("Yolo");
+        } else if (entry.yoloLevel == 2) {
+            levelStr = QStringLiteral("Double");
+        } else if (entry.yoloLevel == 3) {
+            levelStr = QStringLiteral("Triple");
+        }
+        item->setText(3, levelStr);
+    }
+
+    tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(2, QHeaderView::Stretch);
+    tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    layout->addWidget(tree);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    dialog.resize(550, 400);
+    dialog.exec();
 }
 
 } // namespace Konsolai
