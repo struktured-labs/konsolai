@@ -538,8 +538,10 @@ void ClaudeSession::pollForPermissionPrompt()
         return;
     }
 
-    // Capture last 20 lines of terminal output
-    QString output = m_tmuxManager->capturePane(m_sessionName, -20, 0);
+    // Only capture the last 5 lines — the permission prompt UI appears at the
+    // very bottom of the terminal.  Scanning more risks false positives from
+    // earlier output that happens to contain "Yes" or "❯".
+    QString output = m_tmuxManager->capturePane(m_sessionName, -5, 0);
 
     if (detectPermissionPrompt(output)) {
         if (!m_permissionPromptDetected) {
@@ -551,8 +553,9 @@ void ClaudeSession::pollForPermissionPrompt()
                 approvePermission();
                 incrementYoloApproval();
 
-                // Reset detection flag after a delay to allow re-detection
-                QTimer::singleShot(500, this, [this]() {
+                // Reset detection flag after a longer cooldown to avoid
+                // rapid-fire false positives from stale terminal content.
+                QTimer::singleShot(2000, this, [this]() {
                     m_permissionPromptDetected = false;
                 });
             });
@@ -564,27 +567,17 @@ void ClaudeSession::pollForPermissionPrompt()
 
 bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
 {
-    // Look for Claude Code permission prompt patterns
-    // These patterns match the interactive permission UI
+    // Match the Claude Code interactive permission selection UI that appears
+    // at the bottom of the terminal.  We check individual LINES so that the
+    // selector arrow (❯) must be on the SAME line as "Yes" — not just
+    // somewhere in the same 5-line window.
 
-    // Pattern 1: "Do you want to proceed?"
-    if (terminalOutput.contains(QStringLiteral("Do you want to proceed?"))) {
-        return true;
-    }
-
-    // Pattern 2: Arrow pointing to "Yes" option (❯ followed by number and Yes)
-    if (terminalOutput.contains(QStringLiteral("❯")) && (terminalOutput.contains(QStringLiteral("Yes")) || terminalOutput.contains(QStringLiteral("yes")))) {
-        return true;
-    }
-
-    // Pattern 3: Allow this action patterns
-    if (terminalOutput.contains(QStringLiteral("Allow this")) || terminalOutput.contains(QStringLiteral("Allow command"))) {
-        return true;
-    }
-
-    // Pattern 4: Permission request header
-    if (terminalOutput.contains(QStringLiteral("Permission Request")) || terminalOutput.contains(QStringLiteral("permission request"))) {
-        return true;
+    const auto lines = terminalOutput.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        // The active selection line looks like:  ❯ Yes  (possibly with ANSI codes)
+        if (line.contains(QStringLiteral("❯")) && line.contains(QStringLiteral("Yes"))) {
+            return true;
+        }
     }
 
     return false;
