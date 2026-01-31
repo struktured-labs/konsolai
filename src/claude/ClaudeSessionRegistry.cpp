@@ -298,11 +298,19 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
     QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
     file.close();
 
-    if (error.error != QJsonParseError::NoError || !doc.isArray()) {
+    if (error.error != QJsonParseError::NoError) {
         return conversations;
     }
 
-    const QJsonArray entries = doc.array();
+    // Handle both formats: bare array or { "version": N, "entries": [...] }
+    QJsonArray entries;
+    if (doc.isArray()) {
+        entries = doc.array();
+    } else if (doc.isObject()) {
+        entries = doc.object().value(QStringLiteral("entries")).toArray();
+    } else {
+        return conversations;
+    }
     for (const QJsonValue &value : entries) {
         if (!value.isObject()) {
             continue;
