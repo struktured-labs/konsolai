@@ -12,8 +12,12 @@
 
 #include <KLocalizedString>
 #include <QActionGroup>
-#include <QInputDialog>
+#include <QCheckBox>
+#include <QDialogButtonBox>
+#include <QLabel>
 #include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QVBoxLayout>
 
 namespace Konsolai
 {
@@ -30,6 +34,7 @@ ClaudeMenu::ClaudeMenu(QWidget *parent)
         m_doubleYoloMode = settings->doubleYoloMode();
         m_tripleYoloMode = settings->tripleYoloMode();
         m_autoContinuePrompt = settings->autoContinuePrompt();
+        m_trySuggestionsFirst = settings->trySuggestionsFirst();
     }
 
     createActions();
@@ -415,15 +420,52 @@ void ClaudeMenu::onTripleYoloModeToggled(bool checked)
 
 void ClaudeMenu::onSetAutoContinuePrompt()
 {
-    bool ok = false;
-    QString prompt = QInputDialog::getMultiLineText(this,
-                                                    i18n("Auto-Continue Prompt"),
-                                                    i18n("Enter the prompt to send when Claude becomes idle:"),
-                                                    m_autoContinuePrompt,
-                                                    &ok);
+    QDialog dialog(this);
+    dialog.setWindowTitle(i18n("Auto-Continue Settings"));
+    dialog.resize(480, 300);
 
-    if (ok && !prompt.isEmpty()) {
-        setAutoContinuePrompt(prompt);
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *label = new QLabel(i18n("Enter the prompt to send when Claude becomes idle:"), &dialog);
+    layout->addWidget(label);
+
+    auto *textEdit = new QPlainTextEdit(&dialog);
+    textEdit->setPlainText(m_autoContinuePrompt);
+    layout->addWidget(textEdit);
+
+    auto *checkBox = new QCheckBox(i18n("Accept suggestions first (double yolo)"), &dialog);
+    checkBox->setToolTip(
+        i18n("When enabled, Tab+Enter fires before auto-continue. "
+             "If no suggestion is accepted, auto-continue follows as fallback."));
+    checkBox->setChecked(m_trySuggestionsFirst);
+    layout->addWidget(checkBox);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        QString prompt = textEdit->toPlainText();
+        if (!prompt.isEmpty()) {
+            setAutoContinuePrompt(prompt);
+        }
+
+        bool trySuggestions = checkBox->isChecked();
+        if (m_trySuggestionsFirst != trySuggestions) {
+            m_trySuggestionsFirst = trySuggestions;
+
+            // Update per-session setting
+            if (m_activeSession) {
+                m_activeSession->setTrySuggestionsFirst(trySuggestions);
+            }
+
+            // Persist
+            if (auto *s = KonsolaiSettings::instance()) {
+                s->setTrySuggestionsFirst(trySuggestions);
+                s->save();
+            }
+        }
     }
 }
 
@@ -477,6 +519,7 @@ void ClaudeMenu::syncYoloModesFromSession()
         m_yoloMode = m_activeSession->yoloMode();
         m_doubleYoloMode = m_activeSession->doubleYoloMode();
         m_tripleYoloMode = m_activeSession->tripleYoloMode();
+        m_trySuggestionsFirst = m_activeSession->trySuggestionsFirst();
 
         if (m_yoloModeAction) {
             m_yoloModeAction->blockSignals(true);

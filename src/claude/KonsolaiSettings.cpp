@@ -172,6 +172,19 @@ void KonsolaiSettings::setAutoContinuePrompt(const QString &prompt)
     Q_EMIT settingsChanged();
 }
 
+bool KonsolaiSettings::trySuggestionsFirst() const
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    return group.readEntry("TrySuggestionsFirst", true);
+}
+
+void KonsolaiSettings::setTrySuggestionsFirst(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("YoloMode"));
+    group.writeEntry("TrySuggestionsFirst", enabled);
+    Q_EMIT settingsChanged();
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

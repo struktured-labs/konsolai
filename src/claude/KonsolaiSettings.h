@@ -102,6 +102,12 @@ public:
     void setAutoContinuePrompt(const QString &prompt);
 
     /**
+     * Try suggestions first (double yolo before triple yolo)
+     */
+    bool trySuggestionsFirst() const;
+    void setTrySuggestionsFirst(bool enabled);
+
+    /**
      * Save settings to disk
      */
     void save();

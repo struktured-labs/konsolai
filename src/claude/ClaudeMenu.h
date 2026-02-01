@@ -216,6 +216,9 @@ private:
 
     // Auto-continue prompt for Triple Yolo
     QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
+
+    // Whether double yolo fires before triple yolo
+    bool m_trySuggestionsFirst = true;
 };
 
 } // namespace Konsolai

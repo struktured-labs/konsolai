@@ -85,6 +85,7 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
         m_doubleYoloMode = settings->doubleYoloMode();
         m_tripleYoloMode = settings->tripleYoloMode();
         m_autoContinuePrompt = settings->autoContinuePrompt();
+        m_trySuggestionsFirst = settings->trySuggestionsFirst();
     }
 
     // NOTE: We don't set program/arguments here - we do it in run()
@@ -313,35 +314,50 @@ void ClaudeSession::connectSignals()
         Q_UNUSED(description);
         qDebug() << "ClaudeSession: Permission requested:" << action << "yoloMode:" << m_yoloMode;
         if (m_yoloMode) {
-            qDebug() << "ClaudeSession: Auto-approving permission (yolo mode)";
+            qDebug() << "ClaudeSession: Auto-approving permission always (yolo mode)";
             // Use a short delay to ensure the prompt is ready
             QTimer::singleShot(100, this, [this]() {
-                approvePermission();
+                approvePermissionAlways();
                 incrementYoloApproval();
             });
         }
     });
 
     // Handle idle state for double/triple yolo modes
+    // Precedence: when trySuggestionsFirst is true, double yolo fires first.
+    // If Claude stays idle after 2s, triple yolo fires as fallback.
     connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
         qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "doubleYoloMode:" << m_doubleYoloMode
-                 << "tripleYoloMode:" << m_tripleYoloMode;
+                 << "tripleYoloMode:" << m_tripleYoloMode << "trySuggestionsFirst:" << m_trySuggestionsFirst;
 
-        if (newState == ClaudeProcess::State::Idle) {
-            if (m_tripleYoloMode) {
-                // Triple yolo: auto-continue with a new prompt
-                qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
-                QTimer::singleShot(500, this, [this]() {
-                    sendPrompt(m_autoContinuePrompt);
-                    incrementTripleYoloApproval();
-                });
-            } else if (m_doubleYoloMode) {
-                // Double yolo: auto-accept suggestion (Tab + Enter)
-                qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode)";
-                QTimer::singleShot(1000, this, [this]() {
-                    autoAcceptSuggestion();
-                });
+        // Cancel any pending fallback if Claude is no longer idle
+        if (newState != ClaudeProcess::State::Idle) {
+            if (m_suggestionFallbackTimer && m_suggestionFallbackTimer->isActive()) {
+                m_suggestionFallbackTimer->stop();
+                qDebug() << "ClaudeSession: Cancelled suggestion fallback (state changed)";
             }
+            return;
+        }
+
+        // State is Idle — decide what to fire
+        if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
+            // Double yolo fires first: Tab + Enter to accept suggestion
+            qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode)";
+            QTimer::singleShot(1000, this, [this]() {
+                autoAcceptSuggestion();
+            });
+
+            // If triple yolo is also on, schedule fallback
+            if (m_tripleYoloMode) {
+                scheduleSuggestionFallback();
+            }
+        } else if (m_tripleYoloMode) {
+            // Triple yolo fires directly (trySuggestionsFirst is off, or double yolo is off)
+            qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
+            QTimer::singleShot(500, this, [this]() {
+                sendPrompt(m_autoContinuePrompt);
+                incrementTripleYoloApproval();
+            });
         }
     });
 
@@ -466,6 +482,22 @@ void ClaudeSession::approvePermission()
     sendText(QStringLiteral("\n"));
 }
 
+void ClaudeSession::approvePermissionAlways()
+{
+    // Claude Code's permission UI typically shows:
+    //   ❯ Allow once        (option 1, pre-selected)
+    //     Always allow       (option 2)
+    //     Deny               (option 3)
+    // Navigate Down to option 2 ("Always allow") then press Enter.
+    // This reduces future permission prompts for the same tool.
+    if (m_tmuxManager) {
+        m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Down"));
+        QTimer::singleShot(100, this, [this]() {
+            sendText(QStringLiteral("\n"));
+        });
+    }
+}
+
 void ClaudeSession::denyPermission()
 {
     // Send 'n' followed by Enter to deny
@@ -521,9 +553,9 @@ void ClaudeSession::setYoloMode(bool enabled)
 
                 // If a permission prompt is already showing, approve it now
                 if (claudeState() == ClaudeProcess::State::WaitingInput) {
-                    qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving immediately";
+                    qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving always immediately";
                     QTimer::singleShot(100, this, [this]() {
-                        approvePermission();
+                        approvePermissionAlways();
                         incrementYoloApproval();
                     });
                 }
@@ -579,7 +611,7 @@ void ClaudeSession::pollForPermissionPrompt()
 
             // Send approval with small delay to ensure prompt is ready
             QTimer::singleShot(50, this, [this]() {
-                approvePermission();
+                approvePermissionAlways();
                 incrementYoloApproval();
 
                 // Reset detection flag after a longer cooldown to avoid
@@ -629,18 +661,43 @@ void ClaudeSession::autoAcceptSuggestion()
     });
 }
 
+void ClaudeSession::scheduleSuggestionFallback()
+{
+    if (!m_suggestionFallbackTimer) {
+        m_suggestionFallbackTimer = new QTimer(this);
+        m_suggestionFallbackTimer->setSingleShot(true);
+        connect(m_suggestionFallbackTimer, &QTimer::timeout, this, [this]() {
+            // Only fire if Claude is still idle (suggestion wasn't accepted)
+            if (m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
+                qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
+                sendPrompt(m_autoContinuePrompt);
+                incrementTripleYoloApproval();
+            }
+        });
+    }
+
+    // 2s after double yolo fires, check if Claude is still idle
+    qDebug() << "ClaudeSession: Scheduling suggestion fallback in 2000ms";
+    m_suggestionFallbackTimer->start(2000);
+}
+
 void ClaudeSession::setDoubleYoloMode(bool enabled)
 {
     if (m_doubleYoloMode != enabled) {
         m_doubleYoloMode = enabled;
         Q_EMIT doubleYoloModeChanged(enabled);
 
-        // If Claude is already idle, auto-accept any suggestion now
-        if (enabled && !m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
-            qDebug() << "ClaudeSession: Claude already idle - auto-accepting suggestion immediately";
-            QTimer::singleShot(500, this, [this]() {
-                autoAcceptSuggestion();
-            });
+        // If Claude is already idle, apply immediately with new precedence
+        if (enabled && claudeState() == ClaudeProcess::State::Idle) {
+            if (m_trySuggestionsFirst || !m_tripleYoloMode) {
+                qDebug() << "ClaudeSession: Claude already idle - auto-accepting suggestion immediately";
+                QTimer::singleShot(500, this, [this]() {
+                    autoAcceptSuggestion();
+                });
+                if (m_tripleYoloMode) {
+                    scheduleSuggestionFallback();
+                }
+            }
         }
     }
 }
@@ -651,7 +708,9 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
         m_tripleYoloMode = enabled;
         Q_EMIT tripleYoloModeChanged(enabled);
 
-        // If Claude is already idle, send the auto-continue prompt now
+        // When explicitly enabled and Claude is already idle,
+        // fire the auto-continue prompt immediately — no precedence delay.
+        // The try-suggestions-first logic only applies to ongoing idle events.
         if (enabled && claudeState() == ClaudeProcess::State::Idle) {
             qDebug() << "ClaudeSession: Claude already idle - auto-continuing immediately";
             QTimer::singleShot(500, this, [this]() {

@@ -166,6 +166,20 @@ public:
     }
 
     /**
+     * Whether double yolo (accept suggestions) fires before triple yolo (auto-continue).
+     * When true (default), Tab+Enter fires first; if Claude stays idle, triple yolo follows.
+     * When false, triple yolo fires directly (old behavior).
+     */
+    bool trySuggestionsFirst() const
+    {
+        return m_trySuggestionsFirst;
+    }
+    void setTrySuggestionsFirst(bool enabled)
+    {
+        m_trySuggestionsFirst = enabled;
+    }
+
+    /**
      * Approval counts for each yolo mode level
      */
     int yoloApprovalCount() const
@@ -312,9 +326,16 @@ public Q_SLOTS:
     Q_SCRIPTABLE void sendPrompt(const QString &prompt);
 
     /**
-     * Approve a pending permission request
+     * Approve a pending permission request (selects default option)
      */
     Q_SCRIPTABLE void approvePermission();
+
+    /**
+     * Approve and allow all future similar requests.
+     * Navigates to option 2 ("Always allow") before pressing Enter.
+     * Used by yolo mode to reduce future permission prompts.
+     */
+    void approvePermissionAlways();
 
     /**
      * Deny a pending permission request
@@ -440,6 +461,7 @@ private:
     bool m_yoloMode = false;
     bool m_doubleYoloMode = false;
     bool m_tripleYoloMode = false;
+    bool m_trySuggestionsFirst = true;
     QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
 
     // Approval counters
@@ -460,6 +482,10 @@ private:
 
     // Double yolo: auto-accept suggestions
     void autoAcceptSuggestion();
+
+    // Fallback timer: if double yolo fires but Claude stays idle, triple yolo follows
+    QTimer *m_suggestionFallbackTimer = nullptr;
+    void scheduleSuggestionFallback();
 };
 
 } // namespace Konsolai
