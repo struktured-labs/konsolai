@@ -422,7 +422,7 @@ void ClaudeMenu::onSetAutoContinuePrompt()
 {
     QDialog dialog(this);
     dialog.setWindowTitle(i18n("Auto-Continue Settings"));
-    dialog.resize(480, 300);
+    dialog.resize(480, 340);
 
     auto *layout = new QVBoxLayout(&dialog);
 
@@ -433,12 +433,17 @@ void ClaudeMenu::onSetAutoContinuePrompt()
     textEdit->setPlainText(m_autoContinuePrompt);
     layout->addWidget(textEdit);
 
-    auto *checkBox = new QCheckBox(i18n("Accept suggestions first (double yolo)"), &dialog);
-    checkBox->setToolTip(
+    auto *suggestionsCheckBox = new QCheckBox(i18n("Accept suggestions first (double yolo)"), &dialog);
+    suggestionsCheckBox->setToolTip(
         i18n("When enabled, Tab+Enter fires before auto-continue. "
              "If no suggestion is accepted, auto-continue follows as fallback."));
-    checkBox->setChecked(m_trySuggestionsFirst);
-    layout->addWidget(checkBox);
+    suggestionsCheckBox->setChecked(m_trySuggestionsFirst);
+    layout->addWidget(suggestionsCheckBox);
+
+    auto *globalCheckBox = new QCheckBox(i18n("Set as global default for new sessions"), &dialog);
+    globalCheckBox->setToolTip(i18n("When checked, also saves this prompt as the default for all new sessions."));
+    globalCheckBox->setChecked(false);
+    layout->addWidget(globalCheckBox);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -448,19 +453,27 @@ void ClaudeMenu::onSetAutoContinuePrompt()
     if (dialog.exec() == QDialog::Accepted) {
         QString prompt = textEdit->toPlainText();
         if (!prompt.isEmpty()) {
-            setAutoContinuePrompt(prompt);
+            // Always update menu state and active session
+            m_autoContinuePrompt = prompt;
+            if (m_activeSession) {
+                m_activeSession->setAutoContinuePrompt(prompt);
+            }
+
+            // Only persist globally if the checkbox is checked
+            if (globalCheckBox->isChecked()) {
+                if (auto *s = KonsolaiSettings::instance()) {
+                    s->setAutoContinuePrompt(prompt);
+                    s->save();
+                }
+            }
         }
 
-        bool trySuggestions = checkBox->isChecked();
+        bool trySuggestions = suggestionsCheckBox->isChecked();
         if (m_trySuggestionsFirst != trySuggestions) {
             m_trySuggestionsFirst = trySuggestions;
-
-            // Update per-session setting
             if (m_activeSession) {
                 m_activeSession->setTrySuggestionsFirst(trySuggestions);
             }
-
-            // Persist
             if (auto *s = KonsolaiSettings::instance()) {
                 s->setTrySuggestionsFirst(trySuggestions);
                 s->save();
@@ -499,15 +512,10 @@ void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
 {
     m_autoContinuePrompt = prompt;
 
-    // Update per-session setting
+    // Update per-session setting only — not global.
+    // Global default is only changed via the dialog's "Set as global default" checkbox.
     if (m_activeSession) {
         m_activeSession->setAutoContinuePrompt(prompt);
-    }
-
-    // Persist
-    if (auto *s = KonsolaiSettings::instance()) {
-        s->setAutoContinuePrompt(prompt);
-        s->save();
     }
 }
 

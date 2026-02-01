@@ -28,6 +28,41 @@ namespace Konsolai
 {
 
 /**
+ * Per-session token usage counters
+ */
+struct KONSOLEPRIVATE_EXPORT TokenUsage {
+    quint64 inputTokens = 0;
+    quint64 outputTokens = 0;
+    quint64 cacheReadTokens = 0;
+    quint64 cacheCreationTokens = 0;
+
+    quint64 totalTokens() const
+    {
+        return inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
+    }
+
+    double estimatedCostUSD() const
+    {
+        // Anthropic pricing per million tokens (Claude Opus 4.5)
+        return (inputTokens * 3.0 + outputTokens * 15.0 + cacheCreationTokens * 0.30 + cacheReadTokens * 0.30) / 1000000.0;
+    }
+
+    QString formatCompact() const
+    {
+        auto fmt = [](quint64 n) -> QString {
+            if (n >= 1000000) {
+                return QStringLiteral("%1M").arg(n / 1000000.0, 0, 'f', 1);
+            }
+            if (n >= 1000) {
+                return QStringLiteral("%1K").arg(n / 1000.0, 0, 'f', 1);
+            }
+            return QString::number(n);
+        };
+        return QStringLiteral("%1↑ %2↓").arg(fmt(inputTokens + cacheReadTokens + cacheCreationTokens), fmt(outputTokens));
+    }
+};
+
+/**
  * Log entry for auto-approved actions
  */
 struct KONSOLEPRIVATE_EXPORT ApprovalLogEntry {
@@ -250,6 +285,19 @@ public:
     }
 
     /**
+     * Get current token usage for this session
+     */
+    const TokenUsage &tokenUsage() const
+    {
+        return m_tokenUsage;
+    }
+
+    /**
+     * Refresh token usage by parsing Claude CLI conversation files
+     */
+    void refreshTokenUsage();
+
+    /**
      * Set a Claude CLI conversation ID to resume when starting this session.
      * When set, the session will pass --resume <id> to the Claude CLI.
      */
@@ -438,6 +486,11 @@ Q_SIGNALS:
      */
     void workingDirectoryChanged(const QString &newPath);
 
+    /**
+     * Emitted when token usage is updated
+     */
+    void tokenUsageChanged();
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -471,6 +524,12 @@ private:
 
     // Approval log
     QVector<ApprovalLogEntry> m_approvalLog;
+
+    // Token usage tracking
+    TokenUsage m_tokenUsage;
+    QTimer *m_tokenRefreshTimer = nullptr;
+    void startTokenTracking();
+    TokenUsage parseConversationTokens(const QString &jsonlPath);
 
     // Permission prompt polling for yolo mode
     QTimer *m_permissionPollTimer = nullptr;

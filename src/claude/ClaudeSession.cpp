@@ -8,7 +8,9 @@
 #include "KonsolaiSettings.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMessageBox>
@@ -293,6 +295,9 @@ void ClaudeSession::run()
     Session::run();
 
     qDebug() << "ClaudeSession::run() - session started, isRunning:" << isRunning();
+
+    // Start token usage tracking (parses Claude conversation JSONL files)
+    startTokenTracking();
 }
 
 void ClaudeSession::connectSignals()
@@ -365,6 +370,13 @@ void ClaudeSession::connectSignals()
     connect(m_claudeProcess, &ClaudeProcess::yoloApprovalOccurred, this, [this](const QString &toolName) {
         qDebug() << "ClaudeSession: Yolo hook auto-approved:" << toolName;
         incrementYoloApproval();
+    });
+
+    // Refresh token usage when Claude finishes a task (state → Idle)
+    connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
+        if (newState == ClaudeProcess::State::Idle) {
+            refreshTokenUsage();
+        }
     });
 }
 
@@ -642,6 +654,105 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
     }
 
     return false;
+}
+
+void ClaudeSession::startTokenTracking()
+{
+    if (!m_tokenRefreshTimer) {
+        m_tokenRefreshTimer = new QTimer(this);
+        connect(m_tokenRefreshTimer, &QTimer::timeout, this, &ClaudeSession::refreshTokenUsage);
+    }
+    // Refresh every 30s as a background poll; also refreshes on Idle state changes
+    m_tokenRefreshTimer->start(30000);
+
+    // Initial refresh
+    refreshTokenUsage();
+}
+
+void ClaudeSession::refreshTokenUsage()
+{
+    if (m_workingDir.isEmpty()) {
+        return;
+    }
+
+    // Convert working dir to Claude's hashed project path
+    QString hashedName = m_workingDir;
+    hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
+    QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+
+    if (!QDir(projectDir).exists()) {
+        return;
+    }
+
+    // Find the most recently modified JSONL file
+    QString newestFile;
+    QDateTime newestTime;
+
+    QDirIterator it(projectDir, {QStringLiteral("*.jsonl")}, QDir::Files);
+    while (it.hasNext()) {
+        it.next();
+        QDateTime mtime = it.fileInfo().lastModified();
+        if (!newestTime.isValid() || mtime > newestTime) {
+            newestTime = mtime;
+            newestFile = it.filePath();
+        }
+    }
+
+    if (newestFile.isEmpty()) {
+        return;
+    }
+
+    TokenUsage usage = parseConversationTokens(newestFile);
+    if (usage.totalTokens() != m_tokenUsage.totalTokens()) {
+        m_tokenUsage = usage;
+        qDebug() << "ClaudeSession: Token usage updated -"
+                 << "in:" << usage.inputTokens << "out:" << usage.outputTokens << "cache_read:" << usage.cacheReadTokens
+                 << "cache_create:" << usage.cacheCreationTokens << "cost: $" << QString::number(usage.estimatedCostUSD(), 'f', 4);
+        Q_EMIT tokenUsageChanged();
+    }
+}
+
+TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
+{
+    TokenUsage usage;
+
+    QFile file(jsonlPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return usage;
+    }
+
+    while (!file.atEnd()) {
+        QByteArray line = file.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+
+        QJsonParseError error;
+        QJsonDocument doc = QJsonDocument::fromJson(line, &error);
+        if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+            continue;
+        }
+
+        QJsonObject obj = doc.object();
+        if (obj.value(QStringLiteral("type")).toString() != QStringLiteral("assistant")) {
+            continue;
+        }
+
+        // Token data is in message.usage
+        QJsonObject message = obj.value(QStringLiteral("message")).toObject();
+        QJsonObject usageObj = message.value(QStringLiteral("usage")).toObject();
+
+        if (usageObj.isEmpty()) {
+            continue;
+        }
+
+        usage.inputTokens += usageObj.value(QStringLiteral("input_tokens")).toInteger();
+        usage.outputTokens += usageObj.value(QStringLiteral("output_tokens")).toInteger();
+        usage.cacheReadTokens += usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger();
+        usage.cacheCreationTokens += usageObj.value(QStringLiteral("cache_creation_input_tokens")).toInteger();
+    }
+
+    return usage;
 }
 
 void ClaudeSession::autoAcceptSuggestion()

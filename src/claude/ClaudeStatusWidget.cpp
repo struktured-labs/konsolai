@@ -60,6 +60,7 @@ void ClaudeStatusWidget::setSession(ClaudeSession *session)
         connect(m_session, &ClaudeSession::taskFinished,
                 this, [this]() { updateTask(QString()); });
         connect(m_session, &ClaudeSession::approvalCountChanged, this, &ClaudeStatusWidget::updateDisplay);
+        connect(m_session, &ClaudeSession::tokenUsageChanged, this, &ClaudeStatusWidget::updateDisplay);
         connect(m_session, &QObject::destroyed,
                 this, &ClaudeStatusWidget::onSessionDestroyed);
 
@@ -135,10 +136,14 @@ void ClaudeStatusWidget::updateDisplay()
         icon = QString::fromUtf8(SPINNER_FRAMES[m_spinnerIndex]);
     }
 
-    // Build status text with approval count if any
+    // Build status text with approval count and token usage
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
     if (m_session && m_session->totalApprovalCount() > 0) {
         statusText += QStringLiteral(" │ ⚡%1").arg(m_session->totalApprovalCount());
+    }
+    if (m_session && m_session->tokenUsage().totalTokens() > 0) {
+        const auto &usage = m_session->tokenUsage();
+        statusText += QStringLiteral(" │ %1 ($%2)").arg(usage.formatCompact(), QString::number(usage.estimatedCostUSD(), 'f', 2));
     }
     m_stateLabel->setText(statusText);
 
