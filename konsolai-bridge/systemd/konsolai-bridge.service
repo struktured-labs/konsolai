@@ -1,0 +1,22 @@
+[Unit]
+Description=Konsolai Bridge — REST/WebSocket API for remote session control
+Documentation=https://github.com/struktured-labs/konsolai
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env konsolai-bridge --log-level INFO
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=%h/.config/konsolai %h/.local/share/konsolai %h/.konsolai
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target
