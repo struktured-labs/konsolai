@@ -7,10 +7,10 @@
 <!ENTITY Ahmad.Samir.mail '<email>a.samirh78@gmail.com</email>'>
 ]>
 
-<book id="konsole" lang="&language;">
+<book id="konsolai" lang="&language;">
 
 <bookinfo>
-<title>The &konsole; Handbook</title>
+<title>The Konsolai Handbook</title>
 <authorgroup>
 <author>&Jonathan.Singer; &Jonathan.Singer.mail;</author>
 <author>&Kurt.Hindenburg; &Kurt.Hindenburg.mail;</author>
@@ -50,20 +50,28 @@
 <holder>&Ahmad.Samir;</holder>
 </copyright>
 
+<copyright>
+    <year>2025</year>
+<holder>Struktured Labs</holder>
+</copyright>
+
 <legalnotice>&FDLNotice;</legalnotice>
 
-<date>2024-04-23</date>
-<releaseinfo>KDE Gear 24.05</releaseinfo>
+<date>2025-01-31</date>
+<releaseinfo>Konsolai 0.1</releaseinfo>
 
-<abstract><para>&konsole; is &kde;'s terminal emulator.</para></abstract>
+<abstract><para>Konsolai is a Claude-native terminal emulator built on &konsole;.
+It integrates Claude Code directly into each terminal tab, with tmux-backed session
+persistence, automatic permission handling (yolo modes), token tracking, and a hooks
+system for bidirectional communication between the terminal and Claude.</para></abstract>
 
 <keywordset>
 <keyword>KDE</keyword>
+<keyword>konsolai</keyword>
 <keyword>konsole</keyword>
-<keyword>kdebase</keyword>
-<keyword>command</keyword>
-<keyword>line</keyword>
+<keyword>claude</keyword>
 <keyword>terminal</keyword>
+<keyword>ai</keyword>
 <keyword>cli</keyword>
 </keywordset>
 
@@ -513,6 +521,415 @@ Cycling between the three displayed modes can also be done by a keyboard shortcu
 <keycombo>&Ctrl;&Alt;<keycap>\</keycap></keycombo>
 </para></listitem>
 </itemizedlist>
+</sect1>
+
+</chapter>
+
+<chapter id="claude-integration">
+<title>Claude Integration</title>
+
+<para>Konsolai extends &konsole; with deep integration of
+<ulink url="https://claude.ai/claude-code">Claude Code</ulink>, Anthropic's
+CLI-based AI coding assistant.  Every terminal tab runs its own Claude Code
+session inside a dedicated <application>tmux</application> session, so work
+persists even when the application is closed.</para>
+
+<sect1 id="claude-getting-started">
+<title>Getting Started with Claude</title>
+
+<para>When you open a new tab in Konsolai, a Claude Code session starts
+automatically.  Behind the scenes Konsolai:</para>
+
+<orderedlist>
+<listitem><para>Creates (or reattaches to) a <application>tmux</application>
+session named
+<literal>konsolai-<replaceable>profile</replaceable>-<replaceable>id</replaceable></literal>,
+where <replaceable>id</replaceable> is an 8-character hex identifier.</para></listitem>
+<listitem><para>Launches <command>claude</command> inside that tmux
+session.</para></listitem>
+<listitem><para>Installs hooks so Claude can communicate events (permissions,
+tool use, stop) back to Konsolai through a Unix domain socket.</para></listitem>
+</orderedlist>
+
+<para>Requirements:</para>
+<itemizedlist>
+<listitem><para><application>tmux</application> must be installed and in
+your <envar>PATH</envar>.</para></listitem>
+<listitem><para>The <command>claude</command> CLI (Claude Code) must be
+installed and authenticated.  See
+<ulink url="https://docs.anthropic.com/en/docs/claude-code">Claude Code
+documentation</ulink> for setup instructions.</para></listitem>
+</itemizedlist>
+
+<para>The tab bar shows a colored indicator for each session:</para>
+<itemizedlist>
+<listitem><para>Gray &mdash; Not running</para></listitem>
+<listitem><para>Blue &mdash; Idle (ready for input)</para></listitem>
+<listitem><para>Spinning blue &mdash; Working</para></listitem>
+<listitem><para>Orange &mdash; Waiting for input (permission prompt)</para></listitem>
+<listitem><para>Red &mdash; Error</para></listitem>
+</itemizedlist>
+</sect1>
+
+<sect1 id="claude-menu">
+<title>The Claude Menu</title>
+
+<para>The <guimenu>Claude</guimenu> menu provides the following
+actions:</para>
+
+<variablelist>
+
+<varlistentry>
+<term><menuchoice>
+<shortcut><keycombo action="simul">&Ctrl;&Shift;<keycap>A</keycap></keycombo></shortcut>
+<guimenuitem>Approve Permission</guimenuitem>
+</menuchoice></term>
+<listitem><para>Approve a pending permission request from Claude.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><menuchoice>
+<shortcut><keycombo action="simul">&Ctrl;&Shift;<keycap>D</keycap></keycombo></shortcut>
+<guimenuitem>Deny Permission</guimenuitem>
+</menuchoice></term>
+<listitem><para>Deny a pending permission request.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><menuchoice>
+<shortcut><keycombo action="simul">&Ctrl;&Shift;<keycap>S</keycap></keycombo></shortcut>
+<guimenuitem>Stop Claude</guimenuitem>
+</menuchoice></term>
+<listitem><para>Send an interrupt signal to stop the current Claude
+operation.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><menuchoice>
+<shortcut><keycombo action="simul">&Ctrl;&Shift;<keycap>R</keycap></keycombo></shortcut>
+<guimenuitem>Restart Claude</guimenuitem>
+</menuchoice></term>
+<listitem><para>Restart the Claude session in the current tab.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Yolo Mode (Auto-Approve)</guimenuitem></term>
+<listitem><para>Toggle yolo mode. See <xref linkend="claude-yolo"/>.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Double Yolo Mode (Auto-Complete)</guimenuitem></term>
+<listitem><para>Toggle double yolo mode. See <xref linkend="claude-yolo"/>.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Triple Yolo Mode (Auto-Continue)</guimenuitem></term>
+<listitem><para>Toggle triple yolo mode. See <xref linkend="claude-yolo"/>.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Set Auto-Continue Prompt...</guimenuitem></term>
+<listitem><para>Configure the prompt used by triple yolo mode. See
+<xref linkend="claude-autocontinue"/>.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Detach Session</guimenuitem></term>
+<listitem><para>Detach from the tmux session without killing it. The Claude
+session continues running in the background and can be reattached
+later.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Kill Session</guimenuitem></term>
+<listitem><para>Kill the tmux session completely, terminating the Claude
+process.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Reattach Session</guimenuitem></term>
+<listitem><para>Shows a submenu of orphaned tmux sessions from previous
+Konsolai runs that can be reattached.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Archive All Detached Sessions</guimenuitem></term>
+<listitem><para>Kill all detached (orphaned) tmux sessions at
+once.</para></listitem>
+</varlistentry>
+
+<varlistentry>
+<term><guimenuitem>Configure Hooks...</guimenuitem></term>
+<listitem><para>Open the hooks configuration dialog. See
+<xref linkend="claude-hooks"/>.</para></listitem>
+</varlistentry>
+
+</variablelist>
+</sect1>
+
+<sect1 id="claude-yolo">
+<title>Yolo Modes</title>
+
+<para>Konsolai provides three escalating levels of automation for
+interacting with Claude.  Each level includes the behavior of the
+levels below it.</para>
+
+<sect2 id="yolo-level1">
+<title>Yolo Mode (Auto-Approve)</title>
+<para>When enabled, Konsolai automatically approves every permission
+request from Claude.  This is equivalent to selecting <guilabel>Always
+allow</guilabel> for each tool use prompt.</para>
+<para>Internally, a <filename>.yolo</filename> marker file is created at
+<filename>~/.local/share/konsolai/sessions/<replaceable>session-id</replaceable>.yolo</filename>.
+The hook handler binary checks for this file and outputs an approval
+decision before the prompt is even displayed.</para>
+<para>A fallback polling mechanism (every 300&nbsp;ms) detects permission
+prompts in the terminal output in case hooks are not delivering
+events.</para>
+</sect2>
+
+<sect2 id="yolo-level2">
+<title>Double Yolo Mode (Auto-Accept Suggestions)</title>
+<para>In addition to auto-approving permissions, double yolo mode
+automatically accepts tab-completion suggestions from Claude by sending
+<keycap>Tab</keycap> followed by <keycap>Enter</keycap>.</para>
+<para>The <guilabel>Try Suggestions First</guilabel> setting (enabled by
+default) causes double yolo to fire before triple yolo, giving Claude's
+own suggestions priority over the auto-continue prompt.</para>
+</sect2>
+
+<sect2 id="yolo-level3">
+<title>Triple Yolo Mode (Auto-Continue)</title>
+<para>Triple yolo automatically sends a configurable prompt whenever Claude
+becomes idle.  This creates a fully autonomous loop where Claude
+continuously works on tasks without waiting for user input.</para>
+<para>The idle state is detected by polling the terminal output every
+2&nbsp;seconds (when hooks are not available) for prompt indicators such as
+<literal>&gt;</literal> or <literal>&#x276F; </literal> at the end of the output.
+Permission prompts are explicitly excluded to avoid conflicts with yolo
+mode.</para>
+<para>If double yolo fires a suggestion but Claude remains idle, triple
+yolo follows after a 2-second fallback delay.</para>
+</sect2>
+
+</sect1>
+
+<sect1 id="claude-autocontinue">
+<title>Auto-Continue Prompt</title>
+
+<para>The auto-continue prompt is the text sent to Claude when triple yolo
+mode detects an idle state.  The default prompt is:</para>
+
+<blockquote><para><literal>Continue improving, debugging, fixing, adding
+features, or introducing tests where applicable.</literal></para></blockquote>
+
+<para>You can customize this prompt in two ways:</para>
+<itemizedlist>
+<listitem><para><emphasis>Per-session</emphasis> &mdash; Use
+<menuchoice><guimenu>Claude</guimenu><guimenuitem>Set Auto-Continue
+Prompt...</guimenuitem></menuchoice> to set a prompt for the current
+session only.  The per-session prompt is persisted in the session registry
+and restored when the session is reattached.</para></listitem>
+<listitem><para><emphasis>Global default</emphasis> &mdash; Open
+<menuchoice><guimenu>Settings</guimenu><guimenuitem>Configure
+Konsolai...</guimenuitem></menuchoice> to set the default prompt used
+by all new sessions.  A per-session prompt takes precedence over the
+global default.</para></listitem>
+</itemizedlist>
+
+<para>When a session is created, Konsolai checks the session registry for
+a previously used prompt matching the same working directory and restores
+it automatically.</para>
+</sect1>
+
+<sect1 id="claude-session-persistence">
+<title>Session Persistence</title>
+
+<para>Each Claude Code session runs inside a <application>tmux</application>
+session.  This means:</para>
+
+<itemizedlist>
+<listitem><para>Closing a Konsolai tab detaches from the tmux session but
+does not kill it.  Claude continues working in the background.</para></listitem>
+<listitem><para>Closing Konsolai entirely leaves all tmux sessions
+running.  On next launch, orphaned sessions appear in the
+<guimenu>Claude</guimenu> &gt; <guimenuitem>Reattach
+Session</guimenuitem> submenu and in the Session Manager panel.</para></listitem>
+<listitem><para>Session state (yolo modes, auto-continue prompt, working
+directory, profile) is persisted to
+<filename>~/.local/share/konsolai/session-registry.json</filename>.</para></listitem>
+</itemizedlist>
+
+<para>The session registry is refreshed every 30&nbsp;seconds to detect
+new or terminated tmux sessions.  Each session entry records:</para>
+<itemizedlist>
+<listitem><para>Session name and unique ID</para></listitem>
+<listitem><para>Profile name and working directory</para></listitem>
+<listitem><para>Claude model</para></listitem>
+<listitem><para>Per-session yolo mode settings (all three levels)</para></listitem>
+<listitem><para>Auto-continue prompt (empty means use global default)</para></listitem>
+<listitem><para>Attachment status</para></listitem>
+</itemizedlist>
+
+<para>Global application settings (default yolo modes, default
+auto-continue prompt, default model, etc.) are stored in
+<filename>konsolairc</filename> via the standard &kde; configuration
+system.</para>
+</sect1>
+
+<sect1 id="claude-token-tracking">
+<title>Token Tracking</title>
+
+<para>Konsolai tracks token usage and displays estimated cost in the
+status bar.  Token data is read from the Claude CLI conversation files
+located at
+<filename>~/.claude/projects/<replaceable>hashed-path</replaceable>/*.jsonl</filename>.</para>
+
+<para>Each JSONL entry for assistant messages includes a
+<literal>usage</literal> object with input tokens, output tokens, cache
+read tokens, and cache creation tokens.  Konsolai parses these and
+computes cost based on current Claude pricing:</para>
+
+<itemizedlist>
+<listitem><para>Input tokens: $3.00 per million</para></listitem>
+<listitem><para>Output tokens: $15.00 per million</para></listitem>
+<listitem><para>Cache creation tokens: $0.30 per million</para></listitem>
+<listitem><para>Cache read tokens: $0.30 per million</para></listitem>
+</itemizedlist>
+
+<para>The token display refreshes every 30&nbsp;seconds and on Claude
+state changes.  The compact format shows input and output tokens as
+<literal><replaceable>X</replaceable>&#x2191;
+<replaceable>Y</replaceable>&#x2193;</literal>.</para>
+</sect1>
+
+<sect1 id="claude-hooks">
+<title>Hooks System</title>
+
+<para>Konsolai uses a hooks system based on Unix domain sockets for
+bidirectional communication with Claude Code.</para>
+
+<sect2 id="hooks-architecture">
+<title>Architecture</title>
+<para>When a Claude session starts, Konsolai:</para>
+<orderedlist>
+<listitem><para>Creates a Unix domain socket at
+<filename>~/.local/share/konsolai/sessions/<replaceable>session-id</replaceable>.sock</filename>.</para></listitem>
+<listitem><para>Generates a hooks configuration and merges it into the
+project's
+<filename>.claude/settings.local.json</filename>.</para></listitem>
+<listitem><para>The configuration instructs Claude to call the
+<command>konsolai-hook-handler</command> binary for each hook
+event, passing the socket path and event type as
+arguments.</para></listitem>
+</orderedlist>
+</sect2>
+
+<sect2 id="hooks-events">
+<title>Hook Events</title>
+<para>The following hook events are handled:</para>
+<variablelist>
+<varlistentry>
+<term>Stop</term>
+<listitem><para>Claude finished responding.  Used to update the session
+state indicator.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>PreToolUse</term>
+<listitem><para>Claude is about to use a tool.  Konsolai receives this
+for tracking and display purposes.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>PostToolUse</term>
+<listitem><para>Claude finished using a tool.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>Notification</term>
+<listitem><para>General notifications from Claude (permission prompts,
+idle events, etc.).</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>PermissionRequest</term>
+<listitem><para>Claude is requesting permission to perform an action.
+When yolo mode is enabled, the hook handler binary auto-approves by
+writing an approval JSON to stdout before the prompt
+appears.</para></listitem>
+</varlistentry>
+</variablelist>
+</sect2>
+
+<sect2 id="hooks-handler">
+<title>Hook Handler Binary</title>
+<para>The <command>konsolai-hook-handler</command> is a lightweight binary
+that:</para>
+<orderedlist>
+<listitem><para>Receives event data from Claude via stdin
+(JSON).</para></listitem>
+<listitem><para>For <literal>PermissionRequest</literal> events, checks
+for a <filename>.yolo</filename> marker file and auto-approves if
+present.</para></listitem>
+<listitem><para>Connects to the Konsolai Unix domain socket and forwards
+the event for tracking and UI updates.</para></listitem>
+<listitem><para>Exits silently if the socket does not exist (handles
+stale hooks from previous sessions).</para></listitem>
+</orderedlist>
+</sect2>
+
+</sect1>
+
+<sect1 id="claude-session-manager">
+<title>Session Manager Panel</title>
+
+<para>The Session Manager panel provides an overview of all Claude
+sessions.  Sessions are organized into categories:</para>
+
+<variablelist>
+<varlistentry>
+<term>Pinned</term>
+<listitem><para>Sessions pinned to the top for quick access.  Pinned
+sessions remain visible even when detached.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>Active</term>
+<listitem><para>Sessions currently attached to a Konsolai tab.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>Closed</term>
+<listitem><para>Detached but still running tmux sessions.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>Archived</term>
+<listitem><para>Killed sessions with preserved metadata.  These can be
+unarchived to restart Claude with the same session
+identity.</para></listitem>
+</varlistentry>
+<varlistentry>
+<term>Discovered</term>
+<listitem><para>Sessions found via project scanning that are not yet
+tracked by the registry.</para></listitem>
+</varlistentry>
+</variablelist>
+
+<para>Right-click a session for a context menu with these actions:</para>
+<itemizedlist>
+<listitem><para><guimenuitem>Attach</guimenuitem> &mdash; Reattach to a
+detached session.</para></listitem>
+<listitem><para><guimenuitem>Pin / Unpin</guimenuitem> &mdash; Toggle
+pinned status.</para></listitem>
+<listitem><para><guimenuitem>View Approval Log</guimenuitem> &mdash;
+See a log of all auto-approvals made by yolo modes, with timestamps,
+tool names, and which yolo level triggered each approval.</para></listitem>
+<listitem><para><guimenuitem>Archive</guimenuitem> &mdash; Kill the tmux
+session but preserve its metadata.</para></listitem>
+<listitem><para><guimenuitem>Unarchive &amp; Start</guimenuitem> &mdash;
+Restart Claude with the archived session's identity.</para></listitem>
+<listitem><para><guimenuitem>Delete Permanently</guimenuitem> &mdash;
+Remove the session and its metadata entirely.</para></listitem>
+</itemizedlist>
+
+<para>Double-clicking a session attaches to it (if detached) or
+unarchives it (if archived).  Session metadata is persisted to
+<filename>~/.local/share/konsolai/sessions.json</filename>.</para>
 </sect1>
 
 </chapter>
