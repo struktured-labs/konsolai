@@ -154,6 +154,29 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     setTabTitleFormat(Konsole::Session::RemoteTabTitle, existingSessionName);
     tabTitleSetByUser(true);
 
+    // Restore yolo state from global defaults, then override with per-session state
+    if (auto *settings = KonsolaiSettings::instance()) {
+        m_yoloMode = settings->yoloMode();
+        m_doubleYoloMode = settings->doubleYoloMode();
+        m_tripleYoloMode = settings->tripleYoloMode();
+        m_autoContinuePrompt = settings->autoContinuePrompt();
+        m_trySuggestionsFirst = settings->trySuggestionsFirst();
+    }
+    if (auto *registry = ClaudeSessionRegistry::instance()) {
+        if (const auto *saved = registry->sessionState(existingSessionName)) {
+            m_yoloMode = saved->yoloMode;
+            m_doubleYoloMode = saved->doubleYoloMode;
+            m_tripleYoloMode = saved->tripleYoloMode;
+            if (!saved->autoContinuePrompt.isEmpty()) {
+                m_autoContinuePrompt = saved->autoContinuePrompt;
+            }
+            if (!saved->workingDirectory.isEmpty()) {
+                m_workingDir = saved->workingDirectory;
+                setInitialWorkingDirectory(m_workingDir);
+            }
+        }
+    }
+
     // NOTE: We don't set program/arguments here - we do it in run()
 
     connectSignals();

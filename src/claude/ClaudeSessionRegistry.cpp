@@ -192,6 +192,15 @@ const ClaudeSessionState *ClaudeSessionRegistry::lastSessionState(const QString 
     return result;
 }
 
+const ClaudeSessionState *ClaudeSessionRegistry::sessionState(const QString &sessionName) const
+{
+    auto it = m_sessionStates.constFind(sessionName);
+    if (it != m_sessionStates.constEnd()) {
+        return &it.value();
+    }
+    return nullptr;
+}
+
 bool ClaudeSessionRegistry::sessionExists(const QString &sessionName) const
 {
     return m_tmuxManager->sessionExists(sessionName);

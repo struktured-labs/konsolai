@@ -123,6 +123,12 @@ public:
     const ClaudeSessionState *lastSessionState(const QString &workingDirectory) const;
 
     /**
+     * Look up persisted state by session name.
+     * Returns nullptr if the session name is not in the registry.
+     */
+    const ClaudeSessionState *sessionState(const QString &sessionName) const;
+
+    /**
      * Check if a session exists (in tmux)
      */
     bool sessionExists(const QString &sessionName) const;
