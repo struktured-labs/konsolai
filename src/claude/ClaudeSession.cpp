@@ -311,6 +311,11 @@ void ClaudeSession::run()
 
     // Start token usage tracking (parses Claude conversation JSONL files)
     startTokenTracking();
+
+    // Start idle polling if triple yolo is already enabled (from persisted settings)
+    if (m_tripleYoloMode) {
+        startIdlePolling();
+    }
 }
 
 void ClaudeSession::connectSignals()
@@ -354,8 +359,13 @@ void ClaudeSession::connectSignals()
                 m_suggestionFallbackTimer->stop();
                 qDebug() << "ClaudeSession: Cancelled suggestion fallback (state changed)";
             }
+            // Reset idle detection since hooks are delivering events
+            m_idlePromptDetected = false;
             return;
         }
+
+        // Hooks are delivering Idle events — stop polling (signal handler is sufficient)
+        stopIdlePolling();
 
         // State is Idle — decide what to fire
         if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
@@ -680,6 +690,105 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
     return false;
 }
 
+void ClaudeSession::startIdlePolling()
+{
+    if (!m_idlePollTimer) {
+        m_idlePollTimer = new QTimer(this);
+        connect(m_idlePollTimer, &QTimer::timeout, this, &ClaudeSession::pollForIdlePrompt);
+    }
+
+    if (!m_idlePollTimer->isActive()) {
+        qDebug() << "ClaudeSession: Starting idle polling for triple yolo mode";
+        m_idlePollTimer->start(2000); // Poll every 2s
+    }
+}
+
+void ClaudeSession::stopIdlePolling()
+{
+    if (m_idlePollTimer && m_idlePollTimer->isActive()) {
+        qDebug() << "ClaudeSession: Stopping idle polling";
+        m_idlePollTimer->stop();
+    }
+    m_idlePromptDetected = false;
+}
+
+void ClaudeSession::pollForIdlePrompt()
+{
+    if (!m_tripleYoloMode || !m_tmuxManager) {
+        return;
+    }
+
+    // If hooks have established Idle state, stop polling — the signal handler covers it
+    if (claudeState() == ClaudeProcess::State::Idle) {
+        return;
+    }
+
+    // Skip if Claude is actively working (hook confirmed)
+    if (claudeState() == ClaudeProcess::State::Working || claudeState() == ClaudeProcess::State::WaitingInput) {
+        m_idlePromptDetected = false;
+        return;
+    }
+
+    // Capture bottom of terminal to check for Claude's input prompt
+    QString output = m_tmuxManager->capturePane(m_sessionName, -3, 0);
+
+    if (detectIdlePrompt(output)) {
+        if (!m_idlePromptDetected) {
+            m_idlePromptDetected = true;
+            qDebug() << "ClaudeSession: Idle prompt detected via polling - auto-continuing (triple yolo)";
+
+            QTimer::singleShot(500, this, [this]() {
+                if (m_tripleYoloMode) {
+                    sendPrompt(m_autoContinuePrompt);
+                    incrementTripleYoloApproval();
+
+                    // Cooldown to avoid rapid-fire on stale output
+                    QTimer::singleShot(5000, this, [this]() {
+                        m_idlePromptDetected = false;
+                    });
+                }
+            });
+        }
+    } else {
+        m_idlePromptDetected = false;
+    }
+}
+
+bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
+{
+    // Claude Code's Ink UI shows a prompt like ">" or "❯" on the last line
+    // when idle and waiting for user input.  We look for this WITHOUT any
+    // permission prompt or selection UI present.
+    const auto lines = terminalOutput.split(QLatin1Char('\n'));
+
+    // Skip if this looks like a permission prompt
+    for (const QString &line : lines) {
+        if (line.contains(QStringLiteral("Yes")) && line.contains(QStringLiteral("❯"))) {
+            return false;
+        }
+        if (line.contains(QStringLiteral("Allow")) || line.contains(QStringLiteral("Deny"))) {
+            return false;
+        }
+    }
+
+    // Check last non-empty line for the input prompt indicator
+    for (int i = lines.size() - 1; i >= 0; --i) {
+        QString trimmed = lines[i].trimmed();
+        if (trimmed.isEmpty()) {
+            continue;
+        }
+        // Claude Code shows ">" as the input prompt when idle.
+        // It may also show "❯" in some contexts.
+        // The line should be short (just the prompt character, maybe with project name).
+        if (trimmed == QStringLiteral(">") || trimmed.endsWith(QStringLiteral("> ")) || trimmed.startsWith(QStringLiteral(">"))) {
+            return true;
+        }
+        break; // Only check the last non-empty line
+    }
+
+    return false;
+}
+
 void ClaudeSession::startTokenTracking()
 {
     if (!m_tokenRefreshTimer) {
@@ -822,15 +931,20 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
         m_doubleYoloMode = enabled;
         Q_EMIT doubleYoloModeChanged(enabled);
 
-        // If Claude is already idle, apply immediately with new precedence
-        if (enabled && claudeState() == ClaudeProcess::State::Idle) {
-            if (m_trySuggestionsFirst || !m_tripleYoloMode) {
-                qDebug() << "ClaudeSession: Claude already idle - auto-accepting suggestion immediately";
-                QTimer::singleShot(500, this, [this]() {
-                    autoAcceptSuggestion();
-                });
-                if (m_tripleYoloMode) {
-                    scheduleSuggestionFallback();
+        // If Claude appears idle, apply immediately with new precedence
+        if (enabled) {
+            auto state = claudeState();
+            if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
+                if (m_trySuggestionsFirst || !m_tripleYoloMode) {
+                    qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-accepting suggestion immediately";
+                    QTimer::singleShot(500, this, [this]() {
+                        if (m_doubleYoloMode) {
+                            autoAcceptSuggestion();
+                        }
+                    });
+                    if (m_tripleYoloMode) {
+                        scheduleSuggestionFallback();
+                    }
                 }
             }
         }
@@ -843,15 +957,23 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
         m_tripleYoloMode = enabled;
         Q_EMIT tripleYoloModeChanged(enabled);
 
-        // When explicitly enabled and Claude is already idle,
-        // fire the auto-continue prompt immediately — no precedence delay.
-        // The try-suggestions-first logic only applies to ongoing idle events.
-        if (enabled && claudeState() == ClaudeProcess::State::Idle) {
-            qDebug() << "ClaudeSession: Claude already idle - auto-continuing immediately";
-            QTimer::singleShot(500, this, [this]() {
-                sendPrompt(m_autoContinuePrompt);
-                incrementTripleYoloApproval();
-            });
+        if (enabled) {
+            // Start idle polling as a fallback when hooks aren't delivering state
+            startIdlePolling();
+
+            // Also fire immediately if Claude appears idle right now
+            auto state = claudeState();
+            if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
+                qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-continuing immediately (triple yolo enabled)";
+                QTimer::singleShot(500, this, [this]() {
+                    if (m_tripleYoloMode) {
+                        sendPrompt(m_autoContinuePrompt);
+                        incrementTripleYoloApproval();
+                    }
+                });
+            }
+        } else {
+            stopIdlePolling();
         }
     }
 }

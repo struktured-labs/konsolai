@@ -545,6 +545,14 @@ private:
     // Fallback timer: if double yolo fires but Claude stays idle, triple yolo follows
     QTimer *m_suggestionFallbackTimer = nullptr;
     void scheduleSuggestionFallback();
+
+    // Idle polling for triple yolo when hooks aren't delivering state
+    QTimer *m_idlePollTimer = nullptr;
+    bool m_idlePromptDetected = false;
+    void startIdlePolling();
+    void stopIdlePolling();
+    void pollForIdlePrompt();
+    bool detectIdlePrompt(const QString &terminalOutput);
 };
 
 } // namespace Konsolai
