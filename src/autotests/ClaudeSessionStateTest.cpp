@@ -279,6 +279,53 @@ void ClaudeSessionStateTest::testAutoContinuePromptMissingFromJson()
     QVERIFY(state.autoContinuePrompt.isEmpty());
 }
 
+void ClaudeSessionStateTest::testYoloModeSerialization()
+{
+    ClaudeSessionState state;
+    state.sessionName = QStringLiteral("konsolai-yolo-aabbccdd");
+    state.sessionId = QStringLiteral("aabbccdd");
+    state.yoloMode = true;
+    state.doubleYoloMode = true;
+    state.tripleYoloMode = false;
+
+    QJsonObject json = state.toJson();
+
+    QCOMPARE(json[QStringLiteral("yoloMode")].toBool(), true);
+    QCOMPARE(json[QStringLiteral("doubleYoloMode")].toBool(), true);
+    QCOMPARE(json[QStringLiteral("tripleYoloMode")].toBool(), false);
+}
+
+void ClaudeSessionStateTest::testYoloModeRoundTrip()
+{
+    ClaudeSessionState original;
+    original.sessionName = QStringLiteral("konsolai-yolo-eeff0011");
+    original.sessionId = QStringLiteral("eeff0011");
+    original.yoloMode = true;
+    original.doubleYoloMode = false;
+    original.tripleYoloMode = true;
+
+    QJsonObject json = original.toJson();
+    ClaudeSessionState restored = ClaudeSessionState::fromJson(json);
+
+    QCOMPARE(restored.yoloMode, true);
+    QCOMPARE(restored.doubleYoloMode, false);
+    QCOMPARE(restored.tripleYoloMode, true);
+}
+
+void ClaudeSessionStateTest::testYoloModeDefaultsFalse()
+{
+    // Missing yolo keys in JSON should default to false
+    QJsonObject json;
+    json[QStringLiteral("sessionName")] = QStringLiteral("konsolai-noyolo-22334455");
+    json[QStringLiteral("sessionId")] = QStringLiteral("22334455");
+
+    ClaudeSessionState state = ClaudeSessionState::fromJson(json);
+
+    QCOMPARE(state.yoloMode, false);
+    QCOMPARE(state.doubleYoloMode, false);
+    QCOMPARE(state.tripleYoloMode, false);
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionStateTest)
 
 #include "moc_ClaudeSessionStateTest.cpp"

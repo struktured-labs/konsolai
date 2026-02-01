@@ -116,6 +116,13 @@ public:
     void updateSessionPrompt(const QString &sessionName, const QString &prompt);
 
     /**
+     * Look up the last session state for a working directory.
+     * Returns a pointer to the most recently accessed state with that directory,
+     * or nullptr if none found.
+     */
+    const ClaudeSessionState *lastSessionState(const QString &workingDirectory) const;
+
+    /**
      * Check if a session exists (in tmux)
      */
     bool sessionExists(const QString &sessionName) const;

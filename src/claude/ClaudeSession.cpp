@@ -91,11 +91,15 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
         m_trySuggestionsFirst = settings->trySuggestionsFirst();
     }
 
-    // Override with per-session prompt if one was persisted for this project
+    // Override with per-session state if one was persisted for this project
     if (auto *registry = ClaudeSessionRegistry::instance()) {
-        QString savedPrompt = registry->lastAutoContinuePrompt(m_workingDir);
-        if (!savedPrompt.isEmpty()) {
-            m_autoContinuePrompt = savedPrompt;
+        if (const auto *saved = registry->lastSessionState(m_workingDir)) {
+            if (!saved->autoContinuePrompt.isEmpty()) {
+                m_autoContinuePrompt = saved->autoContinuePrompt;
+            }
+            m_yoloMode = saved->yoloMode;
+            m_doubleYoloMode = saved->doubleYoloMode;
+            m_tripleYoloMode = saved->tripleYoloMode;
         }
     }
 

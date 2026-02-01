@@ -73,6 +73,9 @@ void ClaudeSessionRegistry::registerSession(ClaudeSession *session)
     state.lastAccessed = QDateTime::currentDateTime();
     state.isAttached = true;
     state.autoContinuePrompt = session->autoContinuePrompt();
+    state.yoloMode = session->yoloMode();
+    state.doubleYoloMode = session->doubleYoloMode();
+    state.tripleYoloMode = session->tripleYoloMode();
 
     m_sessionStates.insert(name, state);
 
@@ -94,6 +97,9 @@ void ClaudeSessionRegistry::unregisterSession(ClaudeSession *session)
         m_sessionStates[name].isAttached = false;
         m_sessionStates[name].lastAccessed = QDateTime::currentDateTime();
         m_sessionStates[name].autoContinuePrompt = session->autoContinuePrompt();
+        m_sessionStates[name].yoloMode = session->yoloMode();
+        m_sessionStates[name].doubleYoloMode = session->doubleYoloMode();
+        m_sessionStates[name].tripleYoloMode = session->tripleYoloMode();
     }
 
     Q_EMIT sessionUnregistered(name);
@@ -167,6 +173,23 @@ void ClaudeSessionRegistry::updateSessionPrompt(const QString &sessionName, cons
         m_sessionStates[sessionName].autoContinuePrompt = prompt;
         saveState();
     }
+}
+
+const ClaudeSessionState *ClaudeSessionRegistry::lastSessionState(const QString &workingDirectory) const
+{
+    QDateTime newest;
+    const ClaudeSessionState *result = nullptr;
+
+    for (const ClaudeSessionState &state : m_sessionStates) {
+        if (state.workingDirectory == workingDirectory) {
+            if (!newest.isValid() || state.lastAccessed > newest) {
+                newest = state.lastAccessed;
+                result = &state;
+            }
+        }
+    }
+
+    return result;
 }
 
 bool ClaudeSessionRegistry::sessionExists(const QString &sessionName) const

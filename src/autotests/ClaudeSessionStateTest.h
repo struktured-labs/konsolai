@@ -46,6 +46,11 @@ private Q_SLOTS:
     void testAutoContinuePromptRoundTrip();
     void testAutoContinuePromptEmptyNotInJson();
     void testAutoContinuePromptMissingFromJson();
+
+    // Yolo mode persistence
+    void testYoloModeSerialization();
+    void testYoloModeRoundTrip();
+    void testYoloModeDefaultsFalse();
 };
 
 }
