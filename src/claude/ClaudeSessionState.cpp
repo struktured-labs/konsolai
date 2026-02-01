@@ -21,6 +21,9 @@ QJsonObject ClaudeSessionState::toJson() const
     obj[QStringLiteral("workingDirectory")] = workingDirectory;
     obj[QStringLiteral("claudeModel")] = claudeModel;
     obj[QStringLiteral("isAttached")] = isAttached;
+    if (!autoContinuePrompt.isEmpty()) {
+        obj[QStringLiteral("autoContinuePrompt")] = autoContinuePrompt;
+    }
     return obj;
 }
 
@@ -35,6 +38,7 @@ ClaudeSessionState ClaudeSessionState::fromJson(const QJsonObject &obj)
     state.workingDirectory = obj.value(QStringLiteral("workingDirectory")).toString();
     state.claudeModel = obj.value(QStringLiteral("claudeModel")).toString();
     state.isAttached = obj.value(QStringLiteral("isAttached")).toBool();
+    state.autoContinuePrompt = obj.value(QStringLiteral("autoContinuePrompt")).toString();
     return state;
 }
 

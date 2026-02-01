@@ -40,6 +40,12 @@ private Q_SLOTS:
     // Property tests
     void testTimestamps();
     void testAttachmentStatus();
+
+    // Auto-continue prompt persistence
+    void testAutoContinuePromptSerialization();
+    void testAutoContinuePromptRoundTrip();
+    void testAutoContinuePromptEmptyNotInJson();
+    void testAutoContinuePromptMissingFromJson();
 };
 
 }

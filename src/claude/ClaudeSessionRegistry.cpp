@@ -72,6 +72,7 @@ void ClaudeSessionRegistry::registerSession(ClaudeSession *session)
                     m_sessionStates[name].created : QDateTime::currentDateTime();
     state.lastAccessed = QDateTime::currentDateTime();
     state.isAttached = true;
+    state.autoContinuePrompt = session->autoContinuePrompt();
 
     m_sessionStates.insert(name, state);
 
@@ -88,10 +89,11 @@ void ClaudeSessionRegistry::unregisterSession(ClaudeSession *session)
     QString name = session->sessionName();
     m_activeSessions.remove(name);
 
-    // Mark as detached but keep state
+    // Mark as detached but keep state (including per-session prompt)
     if (m_sessionStates.contains(name)) {
         m_sessionStates[name].isAttached = false;
         m_sessionStates[name].lastAccessed = QDateTime::currentDateTime();
+        m_sessionStates[name].autoContinuePrompt = session->autoContinuePrompt();
     }
 
     Q_EMIT sessionUnregistered(name);
@@ -138,6 +140,33 @@ QList<ClaudeSessionState> ClaudeSessionRegistry::allSessionStates() const
 ClaudeSession* ClaudeSessionRegistry::findSession(const QString &sessionName) const
 {
     return m_activeSessions.value(sessionName, nullptr);
+}
+
+QString ClaudeSessionRegistry::lastAutoContinuePrompt(const QString &workingDirectory) const
+{
+    // Find the most recently accessed session with a matching working directory
+    // that has a custom prompt set
+    QDateTime newest;
+    QString result;
+
+    for (const ClaudeSessionState &state : m_sessionStates) {
+        if (state.workingDirectory == workingDirectory && !state.autoContinuePrompt.isEmpty()) {
+            if (!newest.isValid() || state.lastAccessed > newest) {
+                newest = state.lastAccessed;
+                result = state.autoContinuePrompt;
+            }
+        }
+    }
+
+    return result;
+}
+
+void ClaudeSessionRegistry::updateSessionPrompt(const QString &sessionName, const QString &prompt)
+{
+    if (m_sessionStates.contains(sessionName)) {
+        m_sessionStates[sessionName].autoContinuePrompt = prompt;
+        saveState();
+    }
 }
 
 bool ClaudeSessionRegistry::sessionExists(const QString &sessionName) const

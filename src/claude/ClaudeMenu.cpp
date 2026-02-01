@@ -457,6 +457,11 @@ void ClaudeMenu::onSetAutoContinuePrompt()
             m_autoContinuePrompt = prompt;
             if (m_activeSession) {
                 m_activeSession->setAutoContinuePrompt(prompt);
+
+                // Persist per-session prompt in session registry
+                if (auto *reg = ClaudeSessionRegistry::instance()) {
+                    reg->updateSessionPrompt(m_activeSession->sessionName(), prompt);
+                }
             }
 
             // Only persist globally if the checkbox is checked

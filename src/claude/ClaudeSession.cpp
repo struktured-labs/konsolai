@@ -5,6 +5,7 @@
 
 #include "ClaudeSession.h"
 #include "ClaudeHookHandler.h"
+#include "ClaudeSessionRegistry.h"
 #include "KonsolaiSettings.h"
 
 #include <QDir>
@@ -88,6 +89,14 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
         m_tripleYoloMode = settings->tripleYoloMode();
         m_autoContinuePrompt = settings->autoContinuePrompt();
         m_trySuggestionsFirst = settings->trySuggestionsFirst();
+    }
+
+    // Override with per-session prompt if one was persisted for this project
+    if (auto *registry = ClaudeSessionRegistry::instance()) {
+        QString savedPrompt = registry->lastAutoContinuePrompt(m_workingDir);
+        if (!savedPrompt.isEmpty()) {
+            m_autoContinuePrompt = savedPrompt;
+        }
     }
 
     // NOTE: We don't set program/arguments here - we do it in run()

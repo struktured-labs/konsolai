@@ -58,8 +58,10 @@ ecm_add_tests(
     TmuxManagerTest.cpp
     ClaudeProcessTest.cpp
     ClaudeSessionStateTest.cpp
+    ClaudeSessionRegistryTest.cpp
     ClaudeHookHandlerTest.cpp
     NotificationManagerTest.cpp
     ProfileClaudeTest.cpp
+    TokenUsageTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )

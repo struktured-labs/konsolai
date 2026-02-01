@@ -225,6 +225,60 @@ void ClaudeSessionStateTest::testAttachmentStatus()
     QCOMPARE(restored.isAttached, true);
 }
 
+void ClaudeSessionStateTest::testAutoContinuePromptSerialization()
+{
+    ClaudeSessionState state;
+    state.sessionName = QStringLiteral("konsolai-test-prompt01");
+    state.sessionId = QStringLiteral("prompt01");
+    state.autoContinuePrompt = QStringLiteral("Keep building the app.");
+
+    QJsonObject json = state.toJson();
+
+    QVERIFY(json.contains(QStringLiteral("autoContinuePrompt")));
+    QCOMPARE(json[QStringLiteral("autoContinuePrompt")].toString(), QStringLiteral("Keep building the app."));
+}
+
+void ClaudeSessionStateTest::testAutoContinuePromptRoundTrip()
+{
+    ClaudeSessionState original;
+    original.sessionName = QStringLiteral("konsolai-test-prompt02");
+    original.sessionId = QStringLiteral("prompt02");
+    original.workingDirectory = QStringLiteral("/home/user/myproject");
+    original.autoContinuePrompt = QStringLiteral("Continue fixing bugs and adding tests.");
+
+    QJsonObject json = original.toJson();
+    ClaudeSessionState restored = ClaudeSessionState::fromJson(json);
+
+    QCOMPARE(restored.autoContinuePrompt, original.autoContinuePrompt);
+    QCOMPARE(restored.workingDirectory, original.workingDirectory);
+}
+
+void ClaudeSessionStateTest::testAutoContinuePromptEmptyNotInJson()
+{
+    ClaudeSessionState state;
+    state.sessionName = QStringLiteral("konsolai-test-prompt03");
+    state.sessionId = QStringLiteral("prompt03");
+    // autoContinuePrompt left empty
+
+    QJsonObject json = state.toJson();
+
+    // Empty prompt should NOT be serialized (saves space)
+    QVERIFY(!json.contains(QStringLiteral("autoContinuePrompt")));
+}
+
+void ClaudeSessionStateTest::testAutoContinuePromptMissingFromJson()
+{
+    QJsonObject json;
+    json[QStringLiteral("sessionName")] = QStringLiteral("konsolai-test-prompt04");
+    json[QStringLiteral("sessionId")] = QStringLiteral("prompt04");
+    // No autoContinuePrompt key
+
+    ClaudeSessionState state = ClaudeSessionState::fromJson(json);
+
+    QVERIFY(state.isValid());
+    QVERIFY(state.autoContinuePrompt.isEmpty());
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionStateTest)
 
 #include "moc_ClaudeSessionStateTest.cpp"

@@ -104,6 +104,18 @@ public:
     ClaudeSession* findSession(const QString &sessionName) const;
 
     /**
+     * Look up the last auto-continue prompt used for a working directory.
+     * Returns the prompt from the most recently accessed session with that directory,
+     * or empty string if none found.
+     */
+    QString lastAutoContinuePrompt(const QString &workingDirectory) const;
+
+    /**
+     * Update the auto-continue prompt for a specific session and persist.
+     */
+    void updateSessionPrompt(const QString &sessionName, const QString &prompt);
+
+    /**
      * Check if a session exists (in tmux)
      */
     bool sessionExists(const QString &sessionName) const;

@@ -48,6 +48,9 @@ public:
     // Status
     bool isAttached = false;    // Whether Konsolai is currently attached
 
+    // Per-session settings (empty = use global default)
+    QString autoContinuePrompt;
+
     /**
      * Check if this is a valid session state
      */
