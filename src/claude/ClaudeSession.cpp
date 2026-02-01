@@ -484,7 +484,18 @@ QString ClaudeSession::currentTask() const
 // D-Bus methods
 void ClaudeSession::sendPrompt(const QString &prompt)
 {
-    sendText(prompt + QStringLiteral("\n"));
+    // Send text and Enter separately. Claude Code's Ink UI interprets a
+    // literal \r inside a -l send-keys as a newline within the text field,
+    // not as form submission. Sending Enter via sendKeySequence (without -l)
+    // correctly triggers the submit action.
+    if (m_tmuxManager) {
+        m_tmuxManager->sendKeys(m_sessionName, prompt);
+        QTimer::singleShot(150, this, [this]() {
+            if (m_tmuxManager) {
+                m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Enter"));
+            }
+        });
+    }
 }
 
 void ClaudeSession::approvePermission()
