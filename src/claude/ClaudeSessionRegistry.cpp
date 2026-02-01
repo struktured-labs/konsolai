@@ -228,8 +228,8 @@ void ClaudeSessionRegistry::refreshOrphanedSessions()
         }
     }
 
-    // Check for sessions that no longer exist in tmux
-    QList<QString> toRemove;
+    // Mark sessions that no longer exist in tmux as detached, but keep them.
+    // Per-project settings (yolo modes, prompts) must survive tmux session death.
     for (auto it = m_sessionStates.begin(); it != m_sessionStates.end(); ++it) {
         bool existsInTmux = false;
         for (const TmuxManager::SessionInfo &info : tmuxSessions) {
@@ -240,14 +240,11 @@ void ClaudeSessionRegistry::refreshOrphanedSessions()
         }
 
         if (!existsInTmux && !m_activeSessions.contains(it.key())) {
-            // Session no longer exists, remove from state
-            toRemove.append(it.key());
-            changed = true;
+            if (it->isAttached) {
+                it->isAttached = false;
+                changed = true;
+            }
         }
-    }
-
-    for (const QString &name : toRemove) {
-        m_sessionStates.remove(name);
     }
 
     if (changed) {
@@ -259,7 +256,7 @@ void ClaudeSessionRegistry::refreshOrphanedSessions()
 QString ClaudeSessionRegistry::sessionStateFilePath()
 {
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    return dataDir + QStringLiteral("/konsolai/sessions.json");
+    return dataDir + QStringLiteral("/konsolai/session-registry.json");
 }
 
 void ClaudeSessionRegistry::loadState()
