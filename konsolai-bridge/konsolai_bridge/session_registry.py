@@ -60,6 +60,28 @@ class SessionRegistry:
         """Update cached state for a session (called from hook events)."""
         self._state_cache[session_name] = state
 
+    async def resolve_session_id(self, session_id: str) -> str | None:
+        """Resolve a short 8-hex session ID to the full session name.
+
+        Searches live tmux sessions and persisted data.  Returns None if
+        no match is found.
+        """
+        # Check state cache first (fast path)
+        for name in self._state_cache:
+            if name.endswith(f"-{session_id}"):
+                return name
+        # Check live tmux sessions
+        live = await self._tmux.list_sessions()
+        for info in live:
+            if info.session_id == session_id:
+                return info.name
+        # Check persisted data
+        persisted = self._read_persisted()
+        for name, meta in persisted.items():
+            if meta.get("sessionId") == session_id or name.endswith(f"-{session_id}"):
+                return name
+        return None
+
     async def list_sessions(self) -> list[SessionSummary]:
         """Return summaries of all known sessions."""
         persisted = self._read_persisted()

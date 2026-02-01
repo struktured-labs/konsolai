@@ -404,9 +404,21 @@ def _voice_list(sessions):
             spoken_response="No active sessions.",
             action_taken="list",
         )
-    names = [_short_name(s.name) for s in active[:5]]
+    # Build list incrementally to stay within TTS limit (500 chars)
+    prefix = "Active sessions: "
+    names: list[str] = []
+    for s in active[:5]:
+        names.append(_short_name(s.name))
+        candidate = prefix + ", ".join(names) + "."
+        if len(candidate) > 480:
+            names.pop()
+            break
+    text = prefix + ", ".join(names) + "."
+    remaining = len(active) - len(names)
+    if remaining > 0:
+        text += f" And {remaining} more."
     return VoiceCommandResponse(
         success=True,
-        spoken_response="Active sessions: " + ", ".join(names) + ".",
+        spoken_response=text,
         action_taken="list",
     )

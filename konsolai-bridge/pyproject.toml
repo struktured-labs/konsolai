@@ -31,5 +31,9 @@ dev = [
 [project.scripts]
 konsolai-bridge = "konsolai_bridge.main:cli_main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
 [tool.setuptools.packages.find]
 where = ["."]

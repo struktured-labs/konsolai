@@ -27,13 +27,15 @@ class ConnectionManager:
         await ws.accept()
         async with self._lock:
             self._connections.append(ws)
-        logger.info("WebSocket client connected (total: %d)", len(self._connections))
+            count = len(self._connections)
+        logger.info("WebSocket client connected (total: %d)", count)
 
     async def disconnect(self, ws: WebSocket) -> None:
         async with self._lock:
             if ws in self._connections:
                 self._connections.remove(ws)
-        logger.info("WebSocket client disconnected (total: %d)", len(self._connections))
+            count = len(self._connections)
+        logger.info("WebSocket client disconnected (total: %d)", count)
 
     async def broadcast(self, event: WSEvent) -> None:
         """Send an event to all connected clients."""
@@ -48,9 +50,10 @@ class ConnectionManager:
             for ws in dead:
                 self._connections.remove(ws)
 
-    @property
-    def client_count(self) -> int:
-        return len(self._connections)
+    async def client_count(self) -> int:
+        """Return the number of connected clients."""
+        async with self._lock:
+            return len(self._connections)
 
 
 # Singleton manager — attached to app.state in main.py

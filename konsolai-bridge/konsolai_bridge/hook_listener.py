@@ -31,20 +31,29 @@ class HookListener:
         self._socket_dir = socket_dir
         self._callback = callback
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._monitor_task: asyncio.Task[None] | None = None
         self._running = False
 
     async def start(self) -> None:
         """Begin monitoring the socket directory."""
         self._running = True
         self._socket_dir.mkdir(parents=True, exist_ok=True)
-        asyncio.create_task(self._monitor_loop())
+        self._monitor_task = asyncio.create_task(self._monitor_loop())
         logger.info("HookListener started — watching %s", self._socket_dir)
 
     async def stop(self) -> None:
+        """Cancel all listener tasks and wait for them to finish."""
         self._running = False
+        all_tasks = list(self._tasks.values())
+        if self._monitor_task is not None:
+            self._monitor_task.cancel()
+            all_tasks.append(self._monitor_task)
         for task in self._tasks.values():
             task.cancel()
+        if all_tasks:
+            await asyncio.gather(*all_tasks, return_exceptions=True)
         self._tasks.clear()
+        self._monitor_task = None
 
     async def _monitor_loop(self) -> None:
         """Periodically scan for new/removed sockets."""

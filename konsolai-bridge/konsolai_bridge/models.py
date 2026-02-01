@@ -124,7 +124,7 @@ class VoiceCommandResponse(BaseModel):
     """Response for voice commands — designed for TTS readback."""
     success: bool
     spoken_response: str = Field(
-        ..., description="Short text suitable for TTS playback"
+        ..., max_length=500, description="Short text suitable for TTS playback"
     )
     action_taken: str = ""
     session_name: Optional[str] = None

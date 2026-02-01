@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
-import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -22,56 +20,67 @@ from .tmux import TmuxManager
 logger = logging.getLogger("konsolai_bridge")
 
 
-async def _hook_event_handler(
-    session_id: str,
-    event: dict[str, Any],
-) -> None:
-    """Process a hook event from a Claude session.
+def _make_hook_handler(app: FastAPI):
+    """Create a hook event handler closed over a specific app instance.
 
-    Maps hook events to state changes and broadcasts via WebSocket.
+    This avoids a module-level ``_app`` global.  The returned coroutine
+    resolves the short 8-hex session ID to the full session name via the
+    registry before updating state or emitting WebSocket events.
     """
-    event_type = event.get("type", "")
-    registry: SessionRegistry = _app.state.registry
 
-    if event_type == "Stop":
-        registry.update_state(f"konsolai-*-{session_id}", ClaudeState.IDLE)
-        await websocket.emit_event(
-            WSEventType.STATE_CHANGED,
-            session_id,
-            {"state": "idle"},
-        )
+    async def hook_event_handler(
+        session_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        event_type = event.get("type", "")
+        registry: SessionRegistry = app.state.registry
 
-    elif event_type == "PreToolUse":
-        tool = event.get("tool", "")
-        # Find session name from ID
-        await websocket.emit_event(
-            WSEventType.STATE_CHANGED,
-            session_id,
-            {"state": "working", "tool": tool},
-        )
+        # Resolve short hex id -> full session name
+        session_name = await registry.resolve_session_id(session_id)
+        if not session_name:
+            session_name = session_id  # fallback: raw id
 
-    elif event_type == "PostToolUse":
-        tool = event.get("tool", "")
-        await websocket.emit_event(
-            WSEventType.STATE_CHANGED,
-            session_id,
-            {"state": "working", "tool": tool, "phase": "post"},
-        )
+        if event_type == "Stop":
+            registry.update_state(session_name, ClaudeState.IDLE)
+            await websocket.emit_event(
+                WSEventType.STATE_CHANGED,
+                session_name,
+                {"state": "idle"},
+            )
 
-    elif event_type == "Notification":
-        message = event.get("message", "")
+        elif event_type == "PreToolUse":
+            tool = event.get("tool", "")
+            registry.update_state(session_name, ClaudeState.WORKING)
+            await websocket.emit_event(
+                WSEventType.STATE_CHANGED,
+                session_name,
+                {"state": "working", "tool": tool},
+            )
+
+        elif event_type == "PostToolUse":
+            tool = event.get("tool", "")
+            await websocket.emit_event(
+                WSEventType.STATE_CHANGED,
+                session_name,
+                {"state": "working", "tool": tool, "phase": "post"},
+            )
+
+        elif event_type == "Notification":
+            message = event.get("message", "")
+            await websocket.emit_event(
+                WSEventType.NOTIFICATION,
+                session_name,
+                {"message": message},
+            )
+
+        # Generic forwarding for any event type
         await websocket.emit_event(
             WSEventType.NOTIFICATION,
-            session_id,
-            {"message": message},
+            session_name,
+            {"hook_event": event_type, "raw": event},
         )
 
-    # Generic forwarding for any event type
-    await websocket.emit_event(
-        WSEventType.NOTIFICATION,
-        session_id,
-        {"hook_event": event_type, "raw": event},
-    )
+    return hook_event_handler
 
 
 @asynccontextmanager
@@ -80,7 +89,8 @@ async def lifespan(app: FastAPI):
     config: BridgeConfig = app.state.config
     tmux = TmuxManager()
     registry = SessionRegistry(config.sessions_file, config.socket_dir, tmux)
-    hook_listener = HookListener(config.socket_dir, _hook_event_handler)
+    handler = _make_hook_handler(app)
+    hook_listener = HookListener(config.socket_dir, handler)
 
     app.state.tmux = tmux
     app.state.registry = registry
@@ -119,10 +129,6 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     return app
 
 
-# Module-level app for hook handler reference
-_app: FastAPI = None  # type: ignore[assignment]
-
-
 def cli_main() -> None:
     """CLI entry point — parse args and run the server."""
     parser = argparse.ArgumentParser(description="Konsolai Bridge Service")
@@ -143,12 +149,11 @@ def cli_main() -> None:
     if args.port:
         config.port = args.port
 
-    global _app
-    _app = create_app(config)
+    app = create_app(config)
 
     import uvicorn
     uvicorn.run(
-        _app,
+        app,
         host=config.host,
         port=config.port,
         log_level=args.log_level.lower(),
