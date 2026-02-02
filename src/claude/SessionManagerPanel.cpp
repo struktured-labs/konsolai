@@ -463,16 +463,9 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             unarchiveSession(sessionId);
         });
 
-        menu.addSeparator();
-
-        QAction *deleteAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Delete Permanently"));
-        connect(deleteAction, &QAction::triggered, this, [this, sessionId]() {
-            m_metadata.remove(sessionId);
-            saveMetadata();
-            updateTreeWidget();
-        });
-
         if (!meta.workingDirectory.isEmpty() && QDir(meta.workingDirectory).exists()) {
+            menu.addSeparator();
+
             QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
             connect(trashAction, &QAction::triggered, this, [this, sessionId, meta]() {
                 auto answer = QMessageBox::question(this,

@@ -124,6 +124,20 @@ public:
 
     ~ClaudeSession() override;
 
+    // ========== Terminal Prompt Detection (static, for testability) ==========
+
+    /**
+     * Detect whether terminal output contains a Claude Code permission prompt.
+     * Checks for selector arrow (❯) co-located with "Yes" or "Allow" on the same line.
+     */
+    static bool detectPermissionPrompt(const QString &terminalOutput);
+
+    /**
+     * Detect whether terminal output shows Claude Code's idle input prompt.
+     * Looks for ">" or "❯" on the last non-empty line, excluding permission UIs.
+     */
+    static bool detectIdlePrompt(const QString &terminalOutput);
+
     /**
      * Get the tmux session name
      */
@@ -537,7 +551,6 @@ private:
     void startPermissionPolling();
     void stopPermissionPolling();
     void pollForPermissionPrompt();
-    bool detectPermissionPrompt(const QString &terminalOutput);
 
     // Double yolo: auto-accept suggestions
     void autoAcceptSuggestion();
@@ -552,7 +565,6 @@ private:
     void startIdlePolling();
     void stopIdlePolling();
     void pollForIdlePrompt();
-    bool detectIdlePrompt(const QString &terminalOutput);
 
     // Hook cleanup: remove konsolai hooks from project's .claude/settings.local.json
     void removeHooksFromProjectSettings();

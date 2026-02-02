@@ -702,13 +702,22 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
 {
     // Match the Claude Code interactive permission selection UI that appears
     // at the bottom of the terminal.  We check individual LINES so that the
-    // selector arrow (❯) must be on the SAME line as "Yes" — not just
-    // somewhere in the same 5-line window.
+    // selector arrow (❯) must be on the SAME line as the approval keyword —
+    // not just somewhere in the same 5-line window.
+    //
+    // Claude Code formats vary across versions:
+    //   ❯ Yes                        (compact form)
+    //   ❯ Yes, allow once            (verbose form)
+    //   ❯ Allow once                 (alternate wording)
+    //   ❯ Always allow               (second option, when pre-selected differently)
 
     const auto lines = terminalOutput.split(QLatin1Char('\n'));
     for (const QString &line : lines) {
-        // The active selection line looks like:  ❯ Yes  (possibly with ANSI codes)
-        if (line.contains(QStringLiteral("❯")) && line.contains(QStringLiteral("Yes"))) {
+        if (!line.contains(QStringLiteral("❯"))) {
+            continue;
+        }
+        // Selector arrow is on this line — check for permission-related keywords
+        if (line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive) || line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive)) {
             return true;
         }
     }
@@ -787,12 +796,13 @@ bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
     // permission prompt or selection UI present.
     const auto lines = terminalOutput.split(QLatin1Char('\n'));
 
-    // Skip if this looks like a permission prompt
+    // Skip if this looks like a permission prompt (reuse same keywords as detectPermissionPrompt)
     for (const QString &line : lines) {
-        if (line.contains(QStringLiteral("Yes")) && line.contains(QStringLiteral("❯"))) {
+        if (line.contains(QStringLiteral("❯"))
+            && (line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive) || line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive))) {
             return false;
         }
-        if (line.contains(QStringLiteral("Allow")) || line.contains(QStringLiteral("Deny"))) {
+        if (line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive) || line.contains(QStringLiteral("Deny"), Qt::CaseInsensitive)) {
             return false;
         }
     }
@@ -806,7 +816,7 @@ bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
         // Claude Code shows ">" as the input prompt when idle.
         // It may also show "❯" in some contexts.
         // The line should be short (just the prompt character, maybe with project name).
-        if (trimmed == QStringLiteral(">") || trimmed.endsWith(QStringLiteral("> ")) || trimmed.startsWith(QStringLiteral(">"))) {
+        if (trimmed == QStringLiteral(">") || trimmed.endsWith(QStringLiteral(">")) || trimmed.startsWith(QStringLiteral(">"))) {
             return true;
         }
         break; // Only check the last non-empty line
