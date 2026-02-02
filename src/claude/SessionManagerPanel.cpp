@@ -14,12 +14,14 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QHeaderView>
 #include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QMessageBox>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
@@ -423,6 +425,26 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         connect(openAction, &QAction::triggered, this, [this, sessionId, workDir]() {
             Q_EMIT unarchiveRequested(sessionId, workDir);
         });
+
+        menu.addSeparator();
+
+        QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
+        connect(trashAction, &QAction::triggered, this, [this, workDir]() {
+            auto answer = QMessageBox::question(this,
+                                                i18n("Move to Trash"),
+                                                i18n("Move this project folder to the trash?\n\n%1", workDir),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+            if (answer == QMessageBox::Yes) {
+                QFile dir(workDir);
+                if (dir.moveToTrash()) {
+                    updateTreeWidget();
+                } else {
+                    QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", workDir));
+                }
+            }
+        });
+
         menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
     }
@@ -449,6 +471,27 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             saveMetadata();
             updateTreeWidget();
         });
+
+        if (!meta.workingDirectory.isEmpty() && QDir(meta.workingDirectory).exists()) {
+            QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
+            connect(trashAction, &QAction::triggered, this, [this, sessionId, meta]() {
+                auto answer = QMessageBox::question(this,
+                                                    i18n("Move to Trash"),
+                                                    i18n("Move this project folder to the trash?\n\n%1", meta.workingDirectory),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                if (answer == QMessageBox::Yes) {
+                    QFile dir(meta.workingDirectory);
+                    if (dir.moveToTrash()) {
+                        m_metadata.remove(sessionId);
+                        saveMetadata();
+                        updateTreeWidget();
+                    } else {
+                        QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", meta.workingDirectory));
+                    }
+                }
+            });
+        }
     } else {
         // Active or detached session
         bool isActive = m_activeSessions.contains(sessionId);
