@@ -120,9 +120,9 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
     if (yoloLevel > 0) {
         QColor yoloColor;
         if (yoloLevel == 3) {
-            yoloColor = QColor(255, 0, 255); // Purple for triple
+            yoloColor = QColor(170, 0, 255); // Purple for triple
         } else if (yoloLevel == 2) {
-            yoloColor = QColor(255, 165, 0); // Orange for double
+            yoloColor = QColor(33, 150, 243); // Blue for double
         } else {
             yoloColor = QColor(255, 215, 0); // Gold for single
         }

@@ -87,27 +87,24 @@ void ClaudeMenu::createActions()
     addSeparator();
 
     // Yolo Mode - auto-approve all permissions
-    m_yoloModeAction = addAction(i18n("&Yolo Mode (Auto-Approve)"));
+    m_yoloModeAction = addAction(QStringLiteral("\u26A1 ") + i18n("&Yolo Mode (Auto-Approve)"));
     m_yoloModeAction->setCheckable(true);
     m_yoloModeAction->setChecked(m_yoloMode);
     m_yoloModeAction->setToolTip(i18n("Automatically approve all permission requests"));
-    m_yoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("security-low")));
     connect(m_yoloModeAction, &QAction::toggled, this, &ClaudeMenu::onYoloModeToggled);
 
     // Double Yolo Mode - auto-accept completions
-    m_doubleYoloModeAction = addAction(i18n("Double &Yolo Mode (Auto-Complete)"));
+    m_doubleYoloModeAction = addAction(QStringLiteral("\u26A1\u26A1 ") + i18n("Double &Yolo Mode (Auto-Complete)"));
     m_doubleYoloModeAction->setCheckable(true);
     m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
     m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
-    m_doubleYoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("security-low")));
     connect(m_doubleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onDoubleYoloModeToggled);
 
     // Triple Yolo Mode - auto-continue with prompt
-    m_tripleYoloModeAction = addAction(i18n("&Triple Yolo Mode (Auto-Continue)"));
+    m_tripleYoloModeAction = addAction(QStringLiteral("\u26A1\u26A1\u26A1 ") + i18n("&Triple Yolo Mode (Auto-Continue)"));
     m_tripleYoloModeAction->setCheckable(true);
     m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
     m_tripleYoloModeAction->setToolTip(i18n("Automatically send continue prompt when Claude becomes idle"));
-    m_tripleYoloModeAction->setIcon(QIcon::fromTheme(QStringLiteral("media-playback-start")));
     connect(m_tripleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onTripleYoloModeToggled);
 
     // Set Auto-Continue Prompt

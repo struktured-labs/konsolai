@@ -139,7 +139,16 @@ void ClaudeStatusWidget::updateDisplay()
     // Build status text with approval count and token usage
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
     if (m_session && m_session->totalApprovalCount() > 0) {
-        statusText += QStringLiteral(" │ ⚡%1").arg(m_session->totalApprovalCount());
+        // Show bolt count matching the highest active yolo level
+        QString bolts;
+        if (m_session->tripleYoloMode()) {
+            bolts = QStringLiteral("⚡⚡⚡");
+        } else if (m_session->doubleYoloMode()) {
+            bolts = QStringLiteral("⚡⚡");
+        } else {
+            bolts = QStringLiteral("⚡");
+        }
+        statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
     }
     if (m_session && m_session->tokenUsage().totalTokens() > 0) {
         const auto &usage = m_session->tokenUsage();
