@@ -42,7 +42,10 @@ ClaudeSession* ClaudeSession::createForReattach(const QString &existingSessionNa
     return session;
 }
 
-ClaudeSession::~ClaudeSession() = default;
+ClaudeSession::~ClaudeSession()
+{
+    removeHooksFromProjectSettings();
+}
 
 void ClaudeSession::initializeNew(const QString &profileName, const QString &workingDir)
 {
@@ -998,6 +1001,54 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
         } else {
             stopIdlePolling();
         }
+    }
+}
+
+void ClaudeSession::removeHooksFromProjectSettings()
+{
+    if (m_workingDir.isEmpty()) {
+        return;
+    }
+
+    QString settingsPath = m_workingDir + QStringLiteral("/.claude/settings.local.json");
+    QFile file(settingsPath);
+    if (!file.exists()) {
+        return;
+    }
+
+    if (!file.open(QIODevice::ReadOnly)) {
+        return;
+    }
+
+    QJsonParseError error;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+    file.close();
+
+    if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+        return;
+    }
+
+    QJsonObject settings = doc.object();
+
+    // Only remove hooks that reference konsolai-hook-handler
+    if (!settings.contains(QStringLiteral("hooks"))) {
+        return;
+    }
+
+    // Check that the hooks actually belong to konsolai before removing
+    QString hooksStr = QString::fromUtf8(QJsonDocument(settings.value(QStringLiteral("hooks")).toObject()).toJson());
+    if (!hooksStr.contains(QStringLiteral("konsolai-hook-handler"))) {
+        return;
+    }
+
+    settings.remove(QStringLiteral("hooks"));
+
+    QFile outFile(settingsPath);
+    if (outFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QJsonDocument outDoc(settings);
+        outFile.write(outDoc.toJson(QJsonDocument::Indented));
+        outFile.close();
+        qDebug() << "ClaudeSession: Removed hooks from" << settingsPath;
     }
 }
 

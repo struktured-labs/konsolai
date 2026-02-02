@@ -553,6 +553,9 @@ private:
     void stopIdlePolling();
     void pollForIdlePrompt();
     bool detectIdlePrompt(const QString &terminalOutput);
+
+    // Hook cleanup: remove konsolai hooks from project's .claude/settings.local.json
+    void removeHooksFromProjectSettings();
 };
 
 } // namespace Konsolai

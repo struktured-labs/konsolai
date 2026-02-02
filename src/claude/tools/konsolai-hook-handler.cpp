@@ -145,13 +145,10 @@ int main(int argc, char *argv[])
     socket.connectToServer(socketPath);
 
     if (!socket.waitForConnected(timeout)) {
-        // If we already approved via yolo, exit success even if socket fails
-        if (yoloApproved) {
-            return 0;
-        }
-        QTextStream err(stderr);
-        err << "Error: Failed to connect to Konsolai socket: " << socket.errorString() << "\n";
-        return 2;
+        // Socket exists but nobody is listening (stale/zombie socket).
+        // Always exit 0 — a non-zero exit code causes Claude CLI to treat
+        // the hook as failed, which interrupts the user's session.
+        return 0;
     }
 
     // Build message
@@ -164,13 +161,8 @@ int main(int argc, char *argv[])
 
     socket.write(data);
     if (!socket.waitForBytesWritten(timeout)) {
-        // If we already approved via yolo, exit success even if socket fails
-        if (yoloApproved) {
-            return 0;
-        }
-        QTextStream err(stderr);
-        err << "Error: Failed to write to Konsolai socket: " << socket.errorString() << "\n";
-        return 3;
+        // Write failed — exit 0 anyway to avoid interrupting the Claude session.
+        return 0;
     }
 
     socket.disconnectFromServer();
