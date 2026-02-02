@@ -155,7 +155,7 @@ void ClaudeHookHandlerTest::testReceiveHookEvent()
     QVERIFY(client.waitForConnected(1000));
 
     QJsonObject event;
-    event[QStringLiteral("type")] = QStringLiteral("Stop");
+    event[QStringLiteral("event_type")] = QStringLiteral("Stop");
     event[QStringLiteral("data")] = QJsonObject();
 
     QByteArray message = QJsonDocument(event).toJson(QJsonDocument::Compact);
@@ -194,7 +194,7 @@ void ClaudeHookHandlerTest::testReceiveMultipleEvents()
 
     for (const QString &type : eventTypes) {
         QJsonObject event;
-        event[QStringLiteral("type")] = type;
+        event[QStringLiteral("event_type")] = type;
         event[QStringLiteral("data")] = QJsonObject();
 
         QByteArray message = QJsonDocument(event).toJson(QJsonDocument::Compact);
@@ -255,7 +255,7 @@ void ClaudeHookHandlerTest::testHookEventReceivedSignal()
     eventData[QStringLiteral("file")] = QStringLiteral("/test/path");
 
     QJsonObject event;
-    event[QStringLiteral("type")] = QStringLiteral("PreToolUse");
+    event[QStringLiteral("event_type")] = QStringLiteral("PreToolUse");
     event[QStringLiteral("data")] = eventData;
 
     QByteArray message = QJsonDocument(event).toJson(QJsonDocument::Compact);

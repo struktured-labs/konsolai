@@ -20,10 +20,15 @@ using namespace Konsolai;
 void NotificationManagerTest::initTestCase()
 {
     QStandardPaths::setTestModeEnabled(true);
+
+    // The singleton requires an explicit construction before instance() works.
+    m_manager = new NotificationManager(this);
 }
 
 void NotificationManagerTest::cleanupTestCase()
 {
+    delete m_manager;
+    m_manager = nullptr;
 }
 
 void NotificationManagerTest::testInstance()
@@ -235,14 +240,26 @@ void NotificationManagerTest::testIconName()
 
 void NotificationManagerTest::testSoundPath()
 {
-    // Test sound paths for different notification types
+    // Test sound paths for different notification types.
+    // In a test environment, the .wav files are typically not installed,
+    // so soundPath() will return empty strings.  We verify:
+    // 1. The function does not crash for any type.
+    // 2. Info type always returns empty (no sound by design).
     QString permissionSound = NotificationManager::soundPath(NotificationManager::NotificationType::Permission);
     QString errorSound = NotificationManager::soundPath(NotificationManager::NotificationType::Error);
     QString waitingSound = NotificationManager::soundPath(NotificationManager::NotificationType::WaitingInput);
+    QString infoSound = NotificationManager::soundPath(NotificationManager::NotificationType::Info);
+    QString completeSound = NotificationManager::soundPath(NotificationManager::NotificationType::TaskComplete);
 
-    // Paths should not be empty for types that have sounds
-    // Note: Info and TaskComplete may not have sounds
-    QVERIFY(!permissionSound.isEmpty() || !errorSound.isEmpty() || !waitingSound.isEmpty());
+    // Info should always return empty (no sound by design)
+    QVERIFY(infoSound.isEmpty());
+
+    // If any path is returned, it must end in .wav
+    for (const QString &path : {permissionSound, errorSound, waitingSound, completeSound}) {
+        if (!path.isEmpty()) {
+            QVERIFY2(path.endsWith(QStringLiteral(".wav")), qPrintable(path));
+        }
+    }
 }
 
 void NotificationManagerTest::testShowInTerminalNotificationSignal()

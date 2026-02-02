@@ -12,6 +12,8 @@
 namespace Konsolai
 {
 
+class NotificationManager;
+
 class NotificationManagerTest : public QObject
 {
     Q_OBJECT
@@ -45,6 +47,9 @@ private Q_SLOTS:
     // Signal tests
     void testShowInTerminalNotificationSignal();
     void testSystemTrayStatusChangedSignal();
+
+private:
+    NotificationManager *m_manager = nullptr;
 };
 
 }
