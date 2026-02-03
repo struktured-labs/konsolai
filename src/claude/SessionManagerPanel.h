@@ -13,7 +13,9 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QSet>
 #include <QSettings>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -156,7 +158,9 @@ private:
     void setupUi();
     void loadMetadata();
     void saveMetadata();
+    void scheduleTreeUpdate(); // debounced — coalesces rapid-fire calls
     void updateTreeWidget();
+    void updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames);
     void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent);
     void showApprovalLog(ClaudeSession *session);
     SessionMetadata *findMetadata(const QString &sessionId);
@@ -175,6 +179,12 @@ private:
     QMap<QString, ClaudeSession *> m_activeSessions;
     ClaudeSessionRegistry *m_registry = nullptr;
     bool m_collapsed = false;
+
+    // Debounce timer for updateTreeWidget — coalesces rapid-fire signals
+    QTimer *m_updateDebounce = nullptr;
+
+    // Cached live session names from last async tmux query
+    QSet<QString> m_cachedLiveNames;
 };
 
 } // namespace Konsolai

@@ -200,20 +200,20 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         }
     });
 
-    // Connect to approval count changes to update display
+    // Connect to approval count changes to update display (debounced)
     connect(session, &ClaudeSession::approvalCountChanged, this, [this]() {
-        updateTreeWidget();
+        scheduleTreeUpdate();
     });
 
-    // Connect to all yolo mode changes to update display
+    // Connect to all yolo mode changes to update display (debounced)
     connect(session, &ClaudeSession::yoloModeChanged, this, [this](bool) {
-        updateTreeWidget();
+        scheduleTreeUpdate();
     });
     connect(session, &ClaudeSession::doubleYoloModeChanged, this, [this](bool) {
-        updateTreeWidget();
+        scheduleTreeUpdate();
     });
     connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this](bool) {
-        updateTreeWidget();
+        scheduleTreeUpdate();
     });
 }
 
@@ -539,7 +539,37 @@ void SessionManagerPanel::onNewSessionClicked()
     Q_EMIT newSessionRequested();
 }
 
+void SessionManagerPanel::scheduleTreeUpdate()
+{
+    // Debounce: coalesce rapid-fire signals (e.g. approvalCountChanged fires
+    // many times per minute during yolo mode) into a single deferred update.
+    if (!m_updateDebounce) {
+        m_updateDebounce = new QTimer(this);
+        m_updateDebounce->setSingleShot(true);
+        connect(m_updateDebounce, &QTimer::timeout, this, &SessionManagerPanel::updateTreeWidget);
+    }
+    // Restart the 250ms window on each call — only the last one fires.
+    m_updateDebounce->start(250);
+}
+
 void SessionManagerPanel::updateTreeWidget()
+{
+    // Async pre-pass: query tmux for live sessions without blocking the GUI,
+    // then call updateTreeWidgetWithLiveSessions() with the result.
+    // Use a heap-allocated TmuxManager so it outlives this stack frame.
+    auto *tmux = new TmuxManager(this);
+    tmux->listKonsolaiSessionsAsync([this, tmux](const QList<TmuxManager::SessionInfo> &liveSessions) {
+        QSet<QString> liveNames;
+        for (const auto &info : liveSessions) {
+            liveNames.insert(info.name);
+        }
+        m_cachedLiveNames = liveNames;
+        updateTreeWidgetWithLiveSessions(liveNames);
+        tmux->deleteLater();
+    });
+}
+
+void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames)
 {
     // Clear existing items (except categories)
     while (m_pinnedCategory->childCount() > 0) {
@@ -556,21 +586,11 @@ void SessionManagerPanel::updateTreeWidget()
     }
 
     // Pre-pass: detect sessions with dead tmux backends and mark them expired.
-    // Use a single list-sessions call instead of per-session has-session to avoid
-    // spawning N synchronous processes on the GUI thread.
-    {
-        TmuxManager tmux;
-        QList<TmuxManager::SessionInfo> liveSessions = tmux.listKonsolaiSessions();
-        QSet<QString> liveNames;
-        for (const auto &info : liveSessions) {
-            liveNames.insert(info.name);
-        }
-        for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
-            if (!it->isArchived && !m_activeSessions.contains(it->sessionId)) {
-                if (!liveNames.contains(it->sessionName)) {
-                    it->isArchived = true;
-                    it->isExpired = true;
-                }
+    for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
+        if (!it->isArchived && !m_activeSessions.contains(it->sessionId)) {
+            if (!liveNames.contains(it->sessionName)) {
+                it->isArchived = true;
+                it->isExpired = true;
             }
         }
     }
