@@ -22,6 +22,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QSet>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
@@ -554,12 +555,19 @@ void SessionManagerPanel::updateTreeWidget()
         delete m_archivedCategory->takeChild(0);
     }
 
-    // Pre-pass: detect sessions with dead tmux backends and mark them expired
+    // Pre-pass: detect sessions with dead tmux backends and mark them expired.
+    // Use a single list-sessions call instead of per-session has-session to avoid
+    // spawning N synchronous processes on the GUI thread.
     {
         TmuxManager tmux;
+        QList<TmuxManager::SessionInfo> liveSessions = tmux.listKonsolaiSessions();
+        QSet<QString> liveNames;
+        for (const auto &info : liveSessions) {
+            liveNames.insert(info.name);
+        }
         for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
             if (!it->isArchived && !m_activeSessions.contains(it->sessionId)) {
-                if (!tmux.sessionExists(it->sessionName)) {
+                if (!liveNames.contains(it->sessionName)) {
                     it->isArchived = true;
                     it->isExpired = true;
                 }

@@ -15,6 +15,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 namespace Konsolai
 {
 
@@ -138,9 +140,37 @@ public:
     bool sendKeySequence(const QString &sessionName, const QString &keyName);
 
     /**
-     * Capture pane content from a tmux session
+     * Capture pane content from a tmux session (synchronous — blocks caller)
      */
     QString capturePane(const QString &sessionName, int startLine = -100, int endLine = 100);
+
+    /**
+     * Capture pane content asynchronously (non-blocking).
+     * The callback receives (bool ok, QString output).
+     */
+    void capturePaneAsync(const QString &sessionName, int startLine, int endLine, std::function<void(bool, const QString &)> callback);
+
+    /**
+     * Check session existence asynchronously (non-blocking).
+     * The callback receives (bool exists).
+     */
+    void sessionExistsAsync(const QString &sessionName, std::function<void(bool)> callback);
+
+    /**
+     * List all konsolai sessions asynchronously (non-blocking).
+     * The callback receives the session list.
+     */
+    void listKonsolaiSessionsAsync(std::function<void(const QList<SessionInfo> &)> callback);
+
+    /**
+     * Send keys asynchronously (non-blocking, fire-and-forget).
+     */
+    void sendKeysAsync(const QString &sessionName, const QString &keys);
+
+    /**
+     * Send key sequence asynchronously (non-blocking, fire-and-forget).
+     */
+    void sendKeySequenceAsync(const QString &sessionName, const QString &keyName);
 
     /**
      * Get the current working directory of a tmux session's pane
@@ -155,9 +185,16 @@ Q_SIGNALS:
 
 private:
     /**
-     * Execute a tmux command and return the output
+     * Execute a tmux command synchronously and return the output
      */
     QString executeCommand(const QStringList &args, bool *ok = nullptr) const;
+
+    /**
+     * Execute a tmux command asynchronously.
+     * The callback receives (bool ok, QString stdout).
+     * The QProcess is auto-deleted after the callback.
+     */
+    void executeCommandAsync(const QStringList &args, std::function<void(bool, const QString &)> callback);
 
     /**
      * Parse tmux list-sessions output

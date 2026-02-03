@@ -671,31 +671,42 @@ void ClaudeSession::pollForPermissionPrompt()
         return;
     }
 
+    // Skip if an async capture is already in flight
+    if (m_permissionPollInFlight) {
+        return;
+    }
+
     // Only capture the last 5 lines — the permission prompt UI appears at the
     // very bottom of the terminal.  Scanning more risks false positives from
     // earlier output that happens to contain "Yes" or "❯".
-    QString output = m_tmuxManager->capturePane(m_sessionName, -5, 0);
-
-    if (detectPermissionPrompt(output)) {
-        if (!m_permissionPromptDetected) {
-            m_permissionPromptDetected = true;
-            qDebug() << "ClaudeSession: Permission prompt detected - auto-approving (yolo mode)";
-
-            // Send approval with small delay to ensure prompt is ready
-            QTimer::singleShot(50, this, [this]() {
-                approvePermissionAlways();
-                incrementYoloApproval();
-
-                // Reset detection flag after a longer cooldown to avoid
-                // rapid-fire false positives from stale terminal content.
-                QTimer::singleShot(2000, this, [this]() {
-                    m_permissionPromptDetected = false;
-                });
-            });
+    m_permissionPollInFlight = true;
+    m_tmuxManager->capturePaneAsync(m_sessionName, -5, 0, [this](bool ok, const QString &output) {
+        m_permissionPollInFlight = false;
+        if (!ok || !m_yoloMode) {
+            return;
         }
-    } else {
-        m_permissionPromptDetected = false;
-    }
+
+        if (detectPermissionPrompt(output)) {
+            if (!m_permissionPromptDetected) {
+                m_permissionPromptDetected = true;
+                qDebug() << "ClaudeSession: Permission prompt detected - auto-approving (yolo mode)";
+
+                // Send approval with small delay to ensure prompt is ready
+                QTimer::singleShot(50, this, [this]() {
+                    approvePermissionAlways();
+                    incrementYoloApproval();
+
+                    // Reset detection flag after a longer cooldown to avoid
+                    // rapid-fire false positives from stale terminal content.
+                    QTimer::singleShot(2000, this, [this]() {
+                        m_permissionPromptDetected = false;
+                    });
+                });
+            }
+        } else {
+            m_permissionPromptDetected = false;
+        }
+    });
 }
 
 bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
@@ -756,6 +767,11 @@ void ClaudeSession::pollForIdlePrompt()
         return;
     }
 
+    // Skip if an async capture is already in flight
+    if (m_idlePollInFlight) {
+        return;
+    }
+
     // Skip if Claude is actively working or waiting for permission input (hook confirmed)
     if (claudeState() == ClaudeProcess::State::Working || claudeState() == ClaudeProcess::State::WaitingInput) {
         m_idlePromptDetected = false;
@@ -767,50 +783,59 @@ void ClaudeSession::pollForIdlePrompt()
     // handler's Tab+Enter was a no-op (no suggestion present at the time).
     // Polling can re-detect idle and retry.
 
-    // Capture bottom of terminal to check for Claude's input prompt
-    QString output = m_tmuxManager->capturePane(m_sessionName, -3, 0);
+    // Capture bottom of terminal to check for Claude's input prompt (async)
+    m_idlePollInFlight = true;
+    m_tmuxManager->capturePaneAsync(m_sessionName, -3, 0, [this](bool ok, const QString &output) {
+        m_idlePollInFlight = false;
+        if (!ok) {
+            return;
+        }
+        if (!m_doubleYoloMode && !m_tripleYoloMode) {
+            return;
+        }
 
-    if (detectIdlePrompt(output)) {
-        if (!m_idlePromptDetected) {
-            m_idlePromptDetected = true;
+        if (detectIdlePrompt(output)) {
+            if (!m_idlePromptDetected) {
+                m_idlePromptDetected = true;
 
-            if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
-                // Double yolo via polling: Tab+Enter to accept suggestion
-                qDebug() << "ClaudeSession: Idle detected via polling - auto-accepting suggestion (double yolo)";
-                QTimer::singleShot(500, this, [this]() {
-                    if (m_doubleYoloMode) {
-                        autoAcceptSuggestion();
+                if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
+                    // Double yolo via polling: Tab+Enter to accept suggestion
+                    qDebug() << "ClaudeSession: Idle detected via polling - auto-accepting suggestion (double yolo)";
+                    QTimer::singleShot(500, this, [this]() {
+                        if (m_doubleYoloMode) {
+                            autoAcceptSuggestion();
 
-                        // If triple yolo is also on, schedule fallback
-                        if (m_tripleYoloMode) {
-                            scheduleSuggestionFallback();
+                            // If triple yolo is also on, schedule fallback
+                            if (m_tripleYoloMode) {
+                                scheduleSuggestionFallback();
+                            }
                         }
-                    }
-
-                    // Cooldown to avoid rapid-fire on stale output
-                    QTimer::singleShot(5000, this, [this]() {
-                        m_idlePromptDetected = false;
-                    });
-                });
-            } else if (m_tripleYoloMode) {
-                // Triple yolo fires directly (trySuggestionsFirst off, or double yolo off)
-                qDebug() << "ClaudeSession: Idle detected via polling - auto-continuing (triple yolo)";
-                QTimer::singleShot(500, this, [this]() {
-                    if (m_tripleYoloMode) {
-                        sendPrompt(m_autoContinuePrompt);
-                        incrementTripleYoloApproval();
 
                         // Cooldown to avoid rapid-fire on stale output
                         QTimer::singleShot(5000, this, [this]() {
                             m_idlePromptDetected = false;
                         });
-                    }
-                });
+                    });
+                } else if (m_tripleYoloMode) {
+                    // Triple yolo fires directly (trySuggestionsFirst off, or double yolo off)
+                    qDebug() << "ClaudeSession: Idle detected via polling - auto-continuing (triple yolo)";
+                    QTimer::singleShot(500, this, [this]() {
+                        if (m_tripleYoloMode) {
+                            sendPrompt(m_autoContinuePrompt);
+                            incrementTripleYoloApproval();
+
+                            // Cooldown to avoid rapid-fire on stale output
+                            QTimer::singleShot(5000, this, [this]() {
+                                m_idlePromptDetected = false;
+                            });
+                        }
+                    });
+                }
             }
+        } else {
+            m_idlePromptDetected = false;
         }
-    } else {
-        m_idlePromptDetected = false;
-    }
+    });
 }
 
 bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
@@ -895,6 +920,13 @@ void ClaudeSession::refreshTokenUsage()
         return;
     }
 
+    // If the file changed, reset incremental state
+    if (newestFile != m_lastTokenFile) {
+        m_lastTokenFile = newestFile;
+        m_lastTokenFilePos = 0;
+        m_tokenUsage = TokenUsage();
+    }
+
     TokenUsage usage = parseConversationTokens(newestFile);
     if (usage.totalTokens() != m_tokenUsage.totalTokens()) {
         m_tokenUsage = usage;
@@ -907,11 +939,22 @@ void ClaudeSession::refreshTokenUsage()
 
 TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
 {
-    TokenUsage usage;
+    // Incremental parsing: start from where we left off last time.
+    // m_tokenUsage holds the accumulated total; we add new lines to it.
+    TokenUsage usage = m_tokenUsage;
 
     QFile file(jsonlPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return usage;
+    }
+
+    // Seek to last known position to avoid re-parsing the entire file
+    if (m_lastTokenFilePos > 0 && m_lastTokenFilePos <= file.size()) {
+        file.seek(m_lastTokenFilePos);
+    } else if (m_lastTokenFilePos > file.size()) {
+        // File was truncated/replaced — re-parse from scratch
+        m_lastTokenFilePos = 0;
+        usage = TokenUsage();
     }
 
     while (!file.atEnd()) {
@@ -944,6 +987,9 @@ TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
         usage.cacheReadTokens += usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger();
         usage.cacheCreationTokens += usageObj.value(QStringLiteral("cache_creation_input_tokens")).toInteger();
     }
+
+    // Save position for next incremental parse
+    m_lastTokenFilePos = file.pos();
 
     return usage;
 }

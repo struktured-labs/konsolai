@@ -245,6 +245,86 @@ QString TmuxManager::executeCommand(const QStringList &args, bool *ok) const
     return QString::fromUtf8(process.readAllStandardOutput());
 }
 
+void TmuxManager::executeCommandAsync(const QStringList &args, std::function<void(bool, const QString &)> callback)
+{
+    auto *process = new QProcess(this);
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process, callback](int exitCode, QProcess::ExitStatus) {
+        bool ok = (exitCode == 0);
+        QString output = QString::fromUtf8(process->readAllStandardOutput());
+        if (!ok) {
+            QString errorOutput = QString::fromUtf8(process->readAllStandardError());
+            if (!errorOutput.isEmpty()) {
+                Q_EMIT errorOccurred(errorOutput);
+            }
+        }
+        if (callback) {
+            callback(ok, output);
+        }
+        process->deleteLater();
+    });
+    process->start(QStringLiteral("tmux"), args);
+}
+
+void TmuxManager::capturePaneAsync(const QString &sessionName, int startLine, int endLine, std::function<void(bool, const QString &)> callback)
+{
+    executeCommandAsync({QStringLiteral("capture-pane"),
+                         QStringLiteral("-t"),
+                         sessionName,
+                         QStringLiteral("-p"),
+                         QStringLiteral("-S"),
+                         QString::number(startLine),
+                         QStringLiteral("-E"),
+                         QString::number(endLine)},
+                        callback);
+}
+
+void TmuxManager::sessionExistsAsync(const QString &sessionName, std::function<void(bool)> callback)
+{
+    executeCommandAsync({QStringLiteral("has-session"), QStringLiteral("-t"), sessionName}, [callback](bool ok, const QString &) {
+        if (callback) {
+            callback(ok);
+        }
+    });
+}
+
+void TmuxManager::listKonsolaiSessionsAsync(std::function<void(const QList<SessionInfo> &)> callback)
+{
+    executeCommandAsync(
+        {QStringLiteral("list-sessions"), QStringLiteral("-F"), QStringLiteral("#{session_name}:#{session_windows}:#{session_created}:#{session_attached}")},
+        [this, callback](bool ok, const QString &output) {
+            QList<SessionInfo> result;
+            if (ok) {
+                QList<SessionInfo> all = parseSessionList(output);
+                static const QRegularExpression pattern(QStringLiteral("^konsolai-"));
+                for (const auto &session : all) {
+                    if (pattern.match(session.name).hasMatch()) {
+                        result.append(session);
+                    }
+                }
+            }
+            if (callback) {
+                callback(result);
+            }
+        });
+}
+
+void TmuxManager::sendKeysAsync(const QString &sessionName, const QString &keys)
+{
+    QString text = keys;
+    if (text.endsWith(QLatin1Char('\n'))) {
+        text.chop(1);
+        text.append(QLatin1Char('\r'));
+    }
+    if (!text.isEmpty()) {
+        executeCommandAsync({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, QStringLiteral("-l"), text}, nullptr);
+    }
+}
+
+void TmuxManager::sendKeySequenceAsync(const QString &sessionName, const QString &keyName)
+{
+    executeCommandAsync({QStringLiteral("send-keys"), QStringLiteral("-t"), sessionName, keyName}, nullptr);
+}
+
 QList<TmuxManager::SessionInfo> TmuxManager::parseSessionList(const QString &output) const
 {
     QList<SessionInfo> sessions;

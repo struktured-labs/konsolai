@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QStandardPaths>
 
 namespace Konsolai
@@ -126,11 +127,18 @@ void ClaudeSessionRegistry::markDetached(const QString &sessionName)
 
 QList<ClaudeSessionState> ClaudeSessionRegistry::orphanedSessions() const
 {
-    QList<ClaudeSessionState> orphans;
+    // Use a single list-sessions call instead of per-session has-session
+    // to avoid spawning N synchronous processes on the GUI thread.
+    QList<TmuxManager::SessionInfo> liveSessions = m_tmuxManager->listKonsolaiSessions();
+    QSet<QString> liveNames;
+    for (const auto &info : liveSessions) {
+        liveNames.insert(info.name);
+    }
 
+    QList<ClaudeSessionState> orphans;
     for (const ClaudeSessionState &state : m_sessionStates) {
         // Orphaned = exists in tmux but not attached to Konsolai
-        if (!state.isAttached && m_tmuxManager->sessionExists(state.sessionName)) {
+        if (!state.isAttached && liveNames.contains(state.sessionName)) {
             orphans.append(state);
         }
     }

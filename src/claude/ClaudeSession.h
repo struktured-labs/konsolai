@@ -542,12 +542,15 @@ private:
     // Token usage tracking
     TokenUsage m_tokenUsage;
     QTimer *m_tokenRefreshTimer = nullptr;
+    QString m_lastTokenFile; // path of JSONL file being tracked
+    qint64 m_lastTokenFilePos = 0; // byte offset for incremental parsing
     void startTokenTracking();
     TokenUsage parseConversationTokens(const QString &jsonlPath);
 
     // Permission prompt polling for yolo mode
     QTimer *m_permissionPollTimer = nullptr;
     bool m_permissionPromptDetected = false;
+    bool m_permissionPollInFlight = false; // true while async capturePane is running
     void startPermissionPolling();
     void stopPermissionPolling();
     void pollForPermissionPrompt();
@@ -559,9 +562,10 @@ private:
     QTimer *m_suggestionFallbackTimer = nullptr;
     void scheduleSuggestionFallback();
 
-    // Idle polling for triple yolo when hooks aren't delivering state
+    // Idle polling for double/triple yolo when hooks aren't delivering state
     QTimer *m_idlePollTimer = nullptr;
     bool m_idlePromptDetected = false;
+    bool m_idlePollInFlight = false; // true while async capturePane is running
     void startIdlePolling();
     void stopIdlePolling();
     void pollForIdlePrompt();
