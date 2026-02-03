@@ -338,8 +338,8 @@ void ClaudeSession::run()
     // Start token usage tracking (parses Claude conversation JSONL files)
     startTokenTracking();
 
-    // Start idle polling if triple yolo is already enabled (from persisted settings)
-    if (m_tripleYoloMode) {
+    // Start idle polling if double or triple yolo is already enabled (from persisted settings)
+    if (m_doubleYoloMode || m_tripleYoloMode) {
         startIdlePolling();
     }
 }
@@ -390,10 +390,10 @@ void ClaudeSession::connectSignals()
             return;
         }
 
-        // Hooks are delivering Idle events — stop polling (signal handler is sufficient)
-        stopIdlePolling();
-
         // State is Idle — decide what to fire
+        // NOTE: We no longer call stopIdlePolling() here. The poller's own guards
+        // (state checks, cooldown flag) prevent spam, and polling must stay alive so
+        // it can re-attempt Tab+Enter when Claude stays Idle on background tabs.
         if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
             // Double yolo fires first: Tab + Enter to accept suggestion
             qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode)";
@@ -749,20 +749,23 @@ void ClaudeSession::stopIdlePolling()
 
 void ClaudeSession::pollForIdlePrompt()
 {
-    if (!m_tripleYoloMode || !m_tmuxManager) {
+    if (!m_doubleYoloMode && !m_tripleYoloMode) {
+        return;
+    }
+    if (!m_tmuxManager) {
         return;
     }
 
-    // If hooks have established Idle state, stop polling — the signal handler covers it
-    if (claudeState() == ClaudeProcess::State::Idle) {
-        return;
-    }
-
-    // Skip if Claude is actively working (hook confirmed)
+    // Skip if Claude is actively working or waiting for permission input (hook confirmed)
     if (claudeState() == ClaudeProcess::State::Working || claudeState() == ClaudeProcess::State::WaitingInput) {
         m_idlePromptDetected = false;
         return;
     }
+
+    // NOTE: We no longer skip when claudeState() == Idle. That's precisely
+    // the case we need to handle — hooks delivered Idle once, but the signal
+    // handler's Tab+Enter was a no-op (no suggestion present at the time).
+    // Polling can re-detect idle and retry.
 
     // Capture bottom of terminal to check for Claude's input prompt
     QString output = m_tmuxManager->capturePane(m_sessionName, -3, 0);
@@ -770,19 +773,40 @@ void ClaudeSession::pollForIdlePrompt()
     if (detectIdlePrompt(output)) {
         if (!m_idlePromptDetected) {
             m_idlePromptDetected = true;
-            qDebug() << "ClaudeSession: Idle prompt detected via polling - auto-continuing (triple yolo)";
 
-            QTimer::singleShot(500, this, [this]() {
-                if (m_tripleYoloMode) {
-                    sendPrompt(m_autoContinuePrompt);
-                    incrementTripleYoloApproval();
+            if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
+                // Double yolo via polling: Tab+Enter to accept suggestion
+                qDebug() << "ClaudeSession: Idle detected via polling - auto-accepting suggestion (double yolo)";
+                QTimer::singleShot(500, this, [this]() {
+                    if (m_doubleYoloMode) {
+                        autoAcceptSuggestion();
+
+                        // If triple yolo is also on, schedule fallback
+                        if (m_tripleYoloMode) {
+                            scheduleSuggestionFallback();
+                        }
+                    }
 
                     // Cooldown to avoid rapid-fire on stale output
                     QTimer::singleShot(5000, this, [this]() {
                         m_idlePromptDetected = false;
                     });
-                }
-            });
+                });
+            } else if (m_tripleYoloMode) {
+                // Triple yolo fires directly (trySuggestionsFirst off, or double yolo off)
+                qDebug() << "ClaudeSession: Idle detected via polling - auto-continuing (triple yolo)";
+                QTimer::singleShot(500, this, [this]() {
+                    if (m_tripleYoloMode) {
+                        sendPrompt(m_autoContinuePrompt);
+                        incrementTripleYoloApproval();
+
+                        // Cooldown to avoid rapid-fire on stale output
+                        QTimer::singleShot(5000, this, [this]() {
+                            m_idlePromptDetected = false;
+                        });
+                    }
+                });
+            }
         }
     } else {
         m_idlePromptDetected = false;
@@ -937,7 +961,15 @@ void ClaudeSession::autoAcceptSuggestion()
     m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Tab"));
     QTimer::singleShot(100, this, [this]() {
         approvePermission(); // sends Enter
-        incrementDoubleYoloApproval();
+
+        // Defer approval counter: wait 1.5s then check if Claude left Idle.
+        // Only count it as a real approval if the suggestion was actually
+        // accepted (i.e., Claude started working on it).
+        QTimer::singleShot(1500, this, [this]() {
+            if (claudeState() != ClaudeProcess::State::Idle && claudeState() != ClaudeProcess::State::NotRunning) {
+                incrementDoubleYoloApproval();
+            }
+        });
     });
 }
 
@@ -967,8 +999,11 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
         m_doubleYoloMode = enabled;
         Q_EMIT doubleYoloModeChanged(enabled);
 
-        // If Claude appears idle, apply immediately with new precedence
         if (enabled) {
+            // Start idle polling so double yolo can re-fire on background tabs
+            startIdlePolling();
+
+            // If Claude appears idle, apply immediately with new precedence
             auto state = claudeState();
             if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
                 if (m_trySuggestionsFirst || !m_tripleYoloMode) {
@@ -982,6 +1017,11 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
                         scheduleSuggestionFallback();
                     }
                 }
+            }
+        } else {
+            // Only stop polling if triple yolo doesn't also need it
+            if (!m_tripleYoloMode) {
+                stopIdlePolling();
             }
         }
     }
@@ -1009,7 +1049,10 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
                 });
             }
         } else {
-            stopIdlePolling();
+            // Only stop polling if double yolo doesn't also need it
+            if (!m_doubleYoloMode) {
+                stopIdlePolling();
+            }
         }
     }
 }
