@@ -177,6 +177,18 @@ public:
      */
     QString getPaneWorkingDirectory(const QString &sessionName) const;
 
+    /**
+     * Get the PID of the shell process in the tmux pane (synchronous).
+     * Returns 0 on failure.
+     */
+    qint64 getPanePid(const QString &sessionName) const;
+
+    /**
+     * Get the PID of the shell process in the tmux pane (asynchronous).
+     * The callback receives the PID (0 on failure).
+     */
+    void getPanePidAsync(const QString &sessionName, std::function<void(qint64)> callback);
+
 Q_SIGNALS:
     /**
      * Emitted when an error occurs during tmux operations

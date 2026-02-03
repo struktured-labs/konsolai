@@ -63,6 +63,42 @@ struct KONSOLEPRIVATE_EXPORT TokenUsage {
 };
 
 /**
+ * Per-session CPU and memory resource usage
+ */
+struct KONSOLEPRIVATE_EXPORT ResourceUsage {
+    double cpuPercent = 0.0;
+    quint64 rssBytes = 0;
+
+    /**
+     * Format as compact string: "67% 1.1G"
+     */
+    QString formatCompact() const
+    {
+        // CPU: integer for >= 10%, one decimal for < 10%
+        QString cpu;
+        if (cpuPercent >= 10.0) {
+            cpu = QStringLiteral("%1%").arg(qRound(cpuPercent));
+        } else {
+            cpu = QStringLiteral("%1%").arg(cpuPercent, 0, 'f', 1);
+        }
+
+        // RSS: same K/M/G scaling as TokenUsage::formatCompact
+        QString mem;
+        if (rssBytes >= 1073741824ULL) { // >= 1G
+            mem = QStringLiteral("%1G").arg(rssBytes / 1073741824.0, 0, 'f', 1);
+        } else if (rssBytes >= 1048576ULL) { // >= 1M
+            mem = QStringLiteral("%1M").arg(rssBytes / 1048576.0, 0, 'f', 0);
+        } else if (rssBytes >= 1024ULL) {
+            mem = QStringLiteral("%1K").arg(rssBytes / 1024.0, 0, 'f', 0);
+        } else {
+            mem = QStringLiteral("%1B").arg(rssBytes);
+        }
+
+        return QStringLiteral("%1 %2").arg(cpu, mem);
+    }
+};
+
+/**
  * Log entry for auto-approved actions
  */
 struct KONSOLEPRIVATE_EXPORT ApprovalLogEntry {
@@ -312,6 +348,14 @@ public:
     void refreshTokenUsage();
 
     /**
+     * Get current resource usage (CPU%, RSS) for this session's Claude process
+     */
+    const ResourceUsage &resourceUsage() const
+    {
+        return m_resourceUsage;
+    }
+
+    /**
      * Set a Claude CLI conversation ID to resume when starting this session.
      * When set, the session will pass --resume <id> to the Claude CLI.
      */
@@ -505,6 +549,11 @@ Q_SIGNALS:
      */
     void tokenUsageChanged();
 
+    /**
+     * Emitted when CPU/memory resource usage is updated
+     */
+    void resourceUsageChanged();
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -546,6 +595,17 @@ private:
     qint64 m_lastTokenFilePos = 0; // byte offset for incremental parsing
     void startTokenTracking();
     TokenUsage parseConversationTokens(const QString &jsonlPath);
+
+    // Resource usage tracking (CPU%, RSS via /proc)
+    ResourceUsage m_resourceUsage;
+    QTimer *m_resourceTimer = nullptr;
+    qint64 m_claudePid = 0;
+    quint64 m_lastCpuTicks = 0;
+    qint64 m_lastCpuTime = 0; // msec since epoch
+    void startResourceTracking();
+    void refreshResourceUsage();
+    qint64 findClaudePid(qint64 panePid);
+    ResourceUsage readProcessResources(qint64 pid);
 
     // Permission prompt polling for yolo mode
     QTimer *m_permissionPollTimer = nullptr;

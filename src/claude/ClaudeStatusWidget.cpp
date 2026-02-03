@@ -61,6 +61,7 @@ void ClaudeStatusWidget::setSession(ClaudeSession *session)
                 this, [this]() { updateTask(QString()); });
         connect(m_session, &ClaudeSession::approvalCountChanged, this, &ClaudeStatusWidget::updateDisplay);
         connect(m_session, &ClaudeSession::tokenUsageChanged, this, &ClaudeStatusWidget::updateDisplay);
+        connect(m_session, &ClaudeSession::resourceUsageChanged, this, &ClaudeStatusWidget::updateDisplay);
         connect(m_session, &QObject::destroyed,
                 this, &ClaudeStatusWidget::onSessionDestroyed);
 
@@ -153,6 +154,9 @@ void ClaudeStatusWidget::updateDisplay()
     if (m_session && m_session->tokenUsage().totalTokens() > 0) {
         const auto &usage = m_session->tokenUsage();
         statusText += QStringLiteral(" │ %1 ($%2)").arg(usage.formatCompact(), QString::number(usage.estimatedCostUSD(), 'f', 2));
+    }
+    if (m_session && (m_session->resourceUsage().rssBytes > 0 || m_session->resourceUsage().cpuPercent > 0.0)) {
+        statusText += QStringLiteral(" │ %1").arg(m_session->resourceUsage().formatCompact());
     }
     m_stateLabel->setText(statusText);
 

@@ -19,6 +19,8 @@
 #include <QRegularExpression>
 #include <QTimer>
 
+#include <unistd.h> // sysconf(_SC_CLK_TCK)
+
 namespace Konsolai
 {
 
@@ -338,7 +340,17 @@ void ClaudeSession::run()
     // Start token usage tracking (parses Claude conversation JSONL files)
     startTokenTracking();
 
-    // Start idle polling if double or triple yolo is already enabled (from persisted settings)
+    // Start resource tracking (CPU%, RSS via /proc)
+    startResourceTracking();
+
+    // Start polling fallbacks for persisted yolo state.
+    // After a konsolai restart, hook-based paths are broken (Claude CLI snapshots
+    // hooks at startup, so rewritten settings.local.json with new socket paths
+    // won't take effect until the Claude session is restarted).  Polling is the
+    // reliable fallback.
+    if (m_yoloMode) {
+        startPermissionPolling();
+    }
     if (m_doubleYoloMode || m_tripleYoloMode) {
         startIdlePolling();
     }
@@ -1100,6 +1112,226 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
                 stopIdlePolling();
             }
         }
+    }
+}
+
+void ClaudeSession::startResourceTracking()
+{
+#ifndef Q_OS_LINUX
+    // /proc filesystem is Linux-only; skip on other platforms
+    return;
+#else
+    if (!QFile::exists(QStringLiteral("/proc"))) {
+        return;
+    }
+
+    if (!m_resourceTimer) {
+        m_resourceTimer = new QTimer(this);
+        connect(m_resourceTimer, &QTimer::timeout, this, &ClaudeSession::refreshResourceUsage);
+    }
+    m_resourceTimer->start(5000); // 5s interval
+
+    // Resolve the Claude PID asynchronously from the tmux pane PID
+    if (m_tmuxManager) {
+        m_tmuxManager->getPanePidAsync(m_sessionName, [this](qint64 panePid) {
+            if (panePid > 0) {
+                m_claudePid = findClaudePid(panePid);
+                if (m_claudePid > 0) {
+                    qDebug() << "ClaudeSession: Resolved Claude PID:" << m_claudePid << "from pane PID:" << panePid;
+                    refreshResourceUsage();
+                } else {
+                    qDebug() << "ClaudeSession: Could not find Claude process under pane PID:" << panePid;
+                }
+            }
+        });
+    }
+#endif
+}
+
+qint64 ClaudeSession::findClaudePid(qint64 panePid)
+{
+    // First check if the pane PID itself is the Claude process.
+    // tmux's #{pane_pid} often IS the claude process directly (not a wrapper shell).
+    {
+        QFile cmdlineFile(QStringLiteral("/proc/%1/cmdline").arg(panePid));
+        if (cmdlineFile.open(QIODevice::ReadOnly)) {
+            QString cmdline = QString::fromUtf8(cmdlineFile.readAll());
+            cmdlineFile.close();
+            if (cmdline.contains(QStringLiteral("claude"), Qt::CaseInsensitive)) {
+                return panePid;
+            }
+        }
+    }
+
+    // Otherwise walk children: try /proc/{pid}/task/{pid}/children first,
+    // then fall back to scanning /proc for matching ppid
+    QStringList childPids;
+
+    QFile childrenFile(QStringLiteral("/proc/%1/task/%1/children").arg(panePid));
+    if (childrenFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QString childrenStr = QString::fromUtf8(childrenFile.readAll()).trimmed();
+        childrenFile.close();
+        if (!childrenStr.isEmpty()) {
+            childPids = childrenStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        }
+    }
+
+    // Fallback: scan /proc for processes whose ppid matches panePid
+    if (childPids.isEmpty()) {
+        QDir procDir(QStringLiteral("/proc"));
+        const QStringList entries = procDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &entry : entries) {
+            bool isNum = false;
+            qint64 pid = entry.toLongLong(&isNum);
+            if (!isNum || pid <= 0) {
+                continue;
+            }
+            QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
+            if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                continue;
+            }
+            QString statLine = QString::fromUtf8(statFile.readAll()).trimmed();
+            statFile.close();
+            // ppid is field 4 (1-indexed); skip past comm "(name)" which may contain spaces
+            int closeParenIdx = statLine.lastIndexOf(QLatin1Char(')'));
+            if (closeParenIdx < 0) {
+                continue;
+            }
+            QStringList fields = statLine.mid(closeParenIdx + 2).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            // fields[0]=state, fields[1]=ppid
+            if (fields.size() > 1 && fields[1].toLongLong() == panePid) {
+                childPids.append(entry);
+            }
+        }
+    }
+
+    for (const QString &childPidStr : childPids) {
+        qint64 childPid = childPidStr.toLongLong();
+        if (childPid <= 0) {
+            continue;
+        }
+
+        QFile cmdlineFile(QStringLiteral("/proc/%1/cmdline").arg(childPid));
+        if (!cmdlineFile.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        QString cmdline = QString::fromUtf8(cmdlineFile.readAll());
+        cmdlineFile.close();
+
+        if (cmdline.contains(QStringLiteral("claude"), Qt::CaseInsensitive)) {
+            return childPid;
+        }
+
+        // Recurse one level: child might be a shell wrapping Claude
+        qint64 grandchild = findClaudePid(childPid);
+        if (grandchild > 0) {
+            return grandchild;
+        }
+    }
+
+    return 0;
+}
+
+ResourceUsage ClaudeSession::readProcessResources(qint64 pid)
+{
+    ResourceUsage usage;
+
+    // Read /proc/{pid}/stat for CPU ticks (fields 14=utime, 15=stime, 1-indexed)
+    QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QString statLine = QString::fromUtf8(statFile.readAll()).trimmed();
+        statFile.close();
+
+        // Skip past the comm field "(name)" which may contain spaces
+        int closeParenIdx = statLine.lastIndexOf(QLatin1Char(')'));
+        if (closeParenIdx > 0) {
+            QString afterComm = statLine.mid(closeParenIdx + 2); // skip ") "
+            QStringList fields = afterComm.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            // After comm: state(0), ppid(1), pgrp(2), session(3), tty(4), tpgid(5),
+            //             flags(6), minflt(7), cminflt(8), majflt(9), cmajflt(10),
+            //             utime(11), stime(12)
+            if (fields.size() > 12) {
+                quint64 utime = fields[11].toULongLong();
+                quint64 stime = fields[12].toULongLong();
+                quint64 totalTicks = utime + stime;
+
+                qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (m_lastCpuTime > 0 && now > m_lastCpuTime) {
+                    double deltaTicks = static_cast<double>(totalTicks - m_lastCpuTicks);
+                    double deltaTimeSec = (now - m_lastCpuTime) / 1000.0;
+                    long clkTck = sysconf(_SC_CLK_TCK);
+                    if (clkTck > 0 && deltaTimeSec > 0) {
+                        usage.cpuPercent = (deltaTicks / (deltaTimeSec * clkTck)) * 100.0;
+                        if (usage.cpuPercent < 0.0) {
+                            usage.cpuPercent = 0.0;
+                        }
+                    }
+                }
+                m_lastCpuTicks = totalTicks;
+                m_lastCpuTime = now;
+            }
+        }
+    }
+
+    // Read /proc/{pid}/status for VmRSS (in kB).
+    // Read the whole file at once — /proc pseudo-files report size 0 which
+    // can confuse QFile's buffered readLine() in text mode.
+    QFile statusFile(QStringLiteral("/proc/%1/status").arg(pid));
+    if (statusFile.open(QIODevice::ReadOnly)) {
+        const QByteArray statusData = statusFile.readAll();
+        statusFile.close();
+        const QList<QByteArray> statusLines = statusData.split('\n');
+        for (const QByteArray &line : statusLines) {
+            if (line.startsWith("VmRSS:")) {
+                // Format: "VmRSS:\t  12345 kB"
+                QString val = QString::fromUtf8(line).mid(6).trimmed();
+                val = val.split(QLatin1Char(' ')).first();
+                bool ok = false;
+                quint64 kB = val.toULongLong(&ok);
+                if (ok) {
+                    usage.rssBytes = kB * 1024ULL;
+                }
+                break;
+            }
+        }
+    }
+
+    return usage;
+}
+
+void ClaudeSession::refreshResourceUsage()
+{
+#ifndef Q_OS_LINUX
+    return;
+#endif
+
+    // If we don't have a PID or the process is gone, try to re-resolve.
+    // Use QDir::exists() not QFile::exists() — /proc/{pid} is a directory.
+    if (m_claudePid <= 0 || !QDir(QStringLiteral("/proc/%1").arg(m_claudePid)).exists()) {
+        m_claudePid = 0;
+        m_lastCpuTicks = 0;
+        m_lastCpuTime = 0;
+
+        if (m_tmuxManager) {
+            m_tmuxManager->getPanePidAsync(m_sessionName, [this](qint64 panePid) {
+                if (panePid > 0) {
+                    m_claudePid = findClaudePid(panePid);
+                    if (m_claudePid > 0) {
+                        qDebug() << "ClaudeSession: Re-resolved Claude PID:" << m_claudePid;
+                    }
+                }
+            });
+        }
+        return;
+    }
+
+    ResourceUsage usage = readProcessResources(m_claudePid);
+
+    // Only emit if something changed meaningfully
+    if (qAbs(usage.cpuPercent - m_resourceUsage.cpuPercent) > 0.5 || usage.rssBytes != m_resourceUsage.rssBytes) {
+        m_resourceUsage = usage;
+        qDebug() << "ClaudeSession: Resource usage updated - cpu:" << usage.cpuPercent << "% rss:" << (usage.rssBytes / 1048576) << "MB pid:" << m_claudePid;
+        Q_EMIT resourceUsageChanged();
     }
 }
 

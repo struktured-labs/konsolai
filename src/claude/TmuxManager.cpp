@@ -221,6 +221,36 @@ QString TmuxManager::getPaneWorkingDirectory(const QString &sessionName) const
     return ok ? output.trimmed() : QString();
 }
 
+qint64 TmuxManager::getPanePid(const QString &sessionName) const
+{
+    bool ok = false;
+    QString output =
+        executeCommand({QStringLiteral("display-message"), QStringLiteral("-p"), QStringLiteral("-t"), sessionName, QStringLiteral("#{pane_pid}")}, &ok);
+
+    if (!ok) {
+        return 0;
+    }
+    bool converted = false;
+    qint64 pid = output.trimmed().toLongLong(&converted);
+    return converted ? pid : 0;
+}
+
+void TmuxManager::getPanePidAsync(const QString &sessionName, std::function<void(qint64)> callback)
+{
+    executeCommandAsync({QStringLiteral("display-message"), QStringLiteral("-p"), QStringLiteral("-t"), sessionName, QStringLiteral("#{pane_pid}")},
+                        [callback](bool ok, const QString &output) {
+                            if (!ok || !callback) {
+                                if (callback) {
+                                    callback(0);
+                                }
+                                return;
+                            }
+                            bool converted = false;
+                            qint64 pid = output.trimmed().toLongLong(&converted);
+                            callback(converted ? pid : 0);
+                        });
+}
+
 QString TmuxManager::executeCommand(const QStringList &args, bool *ok) const
 {
     QProcess process;
