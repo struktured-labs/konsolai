@@ -223,6 +223,7 @@ void ClaudeSessionWizard::setupUi()
                 m_folderNameEdit->setText(d.dirName());
                 m_projectRootEdit->setText(QDir(dir).filePath(QStringLiteral("..")));
             }
+            m_selectedDirectory = dir;
             m_useExistingDir = true;
         }
     });

@@ -308,6 +308,11 @@ void TmuxManager::capturePaneAsync(const QString &sessionName, int startLine, in
                         callback);
 }
 
+void TmuxManager::capturePaneAsync(const QString &sessionName, std::function<void(bool, const QString &)> callback)
+{
+    executeCommandAsync({QStringLiteral("capture-pane"), QStringLiteral("-t"), sessionName, QStringLiteral("-p")}, callback);
+}
+
 void TmuxManager::sessionExistsAsync(const QString &sessionName, std::function<void(bool)> callback)
 {
     executeCommandAsync({QStringLiteral("has-session"), QStringLiteral("-t"), sessionName}, [callback](bool ok, const QString &) {

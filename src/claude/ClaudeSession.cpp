@@ -688,17 +688,30 @@ void ClaudeSession::pollForPermissionPrompt()
         return;
     }
 
-    // Only capture the last 5 lines — the permission prompt UI appears at the
-    // very bottom of the terminal.  Scanning more risks false positives from
-    // earlier output that happens to contain "Yes" or "❯".
+    // Capture the full visible pane then check only the last 5 lines.
+    // The permission prompt UI appears at the very bottom of the terminal.
+    // NOTE: We must NOT pass -S/-E with negative values — tmux treats those
+    // as scrollback history lines, not bottom-of-screen lines.
     m_permissionPollInFlight = true;
-    m_tmuxManager->capturePaneAsync(m_sessionName, -5, 0, [this](bool ok, const QString &output) {
+    m_tmuxManager->capturePaneAsync(m_sessionName, [this](bool ok, const QString &output) {
         m_permissionPollInFlight = false;
         if (!ok || !m_yoloMode) {
             return;
         }
 
-        if (detectPermissionPrompt(output)) {
+        // Extract last 5 lines from the full capture
+        const auto allLines = output.split(QLatin1Char('\n'));
+        const int bottomCount = 5;
+        const int startIdx = qMax(0, allLines.size() - bottomCount);
+        QString bottomLines;
+        for (int i = startIdx; i < allLines.size(); ++i) {
+            if (!bottomLines.isEmpty()) {
+                bottomLines += QLatin1Char('\n');
+            }
+            bottomLines += allLines[i];
+        }
+
+        if (detectPermissionPrompt(bottomLines)) {
             if (!m_permissionPromptDetected) {
                 m_permissionPromptDetected = true;
                 qDebug() << "ClaudeSession: Permission prompt detected - auto-approving (yolo mode)";
@@ -795,9 +808,11 @@ void ClaudeSession::pollForIdlePrompt()
     // handler's Tab+Enter was a no-op (no suggestion present at the time).
     // Polling can re-detect idle and retry.
 
-    // Capture bottom of terminal to check for Claude's input prompt (async)
+    // Capture full visible pane then check the last 3 lines for the idle prompt.
+    // NOTE: We must NOT pass -S/-E with negative values — tmux treats those
+    // as scrollback history lines, not bottom-of-screen lines.
     m_idlePollInFlight = true;
-    m_tmuxManager->capturePaneAsync(m_sessionName, -3, 0, [this](bool ok, const QString &output) {
+    m_tmuxManager->capturePaneAsync(m_sessionName, [this](bool ok, const QString &output) {
         m_idlePollInFlight = false;
         if (!ok) {
             return;
@@ -806,7 +821,19 @@ void ClaudeSession::pollForIdlePrompt()
             return;
         }
 
-        if (detectIdlePrompt(output)) {
+        // Extract last 3 lines from the full capture
+        const auto allLines = output.split(QLatin1Char('\n'));
+        const int bottomCount = 3;
+        const int startIdx = qMax(0, allLines.size() - bottomCount);
+        QString bottomLines;
+        for (int i = startIdx; i < allLines.size(); ++i) {
+            if (!bottomLines.isEmpty()) {
+                bottomLines += QLatin1Char('\n');
+            }
+            bottomLines += allLines[i];
+        }
+
+        if (detectIdlePrompt(bottomLines)) {
             if (!m_idlePromptDetected) {
                 m_idlePromptDetected = true;
 

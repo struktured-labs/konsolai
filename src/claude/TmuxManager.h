@@ -151,6 +151,12 @@ public:
     void capturePaneAsync(const QString &sessionName, int startLine, int endLine, std::function<void(bool, const QString &)> callback);
 
     /**
+     * Capture full visible pane content asynchronously (non-blocking).
+     * Does not pass -S/-E flags so tmux captures the entire visible area.
+     */
+    void capturePaneAsync(const QString &sessionName, std::function<void(bool, const QString &)> callback);
+
+    /**
      * Check session existence asynchronously (non-blocking).
      * The callback receives (bool exists).
      */
