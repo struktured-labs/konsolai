@@ -215,6 +215,11 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this](bool) {
         scheduleTreeUpdate();
     });
+
+    // Connect to task description changes to update display
+    connect(session, &ClaudeSession::taskDescriptionChanged, this, [this]() {
+        scheduleTreeUpdate();
+    });
 }
 
 void SessionManagerPanel::unregisterSession(ClaudeSession *session)

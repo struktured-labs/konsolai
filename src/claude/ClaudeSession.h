@@ -567,6 +567,11 @@ Q_SIGNALS:
      */
     void resourceUsageChanged();
 
+    /**
+     * Emitted when task description is set/changed
+     */
+    void taskDescriptionChanged();
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 

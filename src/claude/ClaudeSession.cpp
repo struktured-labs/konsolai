@@ -486,6 +486,16 @@ void ClaudeSession::setTaskDescription(const QString &desc)
         setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
         tabTitleSetByUser(true);
     }
+
+    // Update the registry so the description persists
+    if (auto *registry = ClaudeSessionRegistry::instance()) {
+        if (registry->findSession(m_sessionName)) {
+            // Re-register to update state (including taskDescription)
+            registry->registerSession(this);
+        }
+    }
+
+    Q_EMIT taskDescriptionChanged();
 }
 
 ClaudeProcess::State ClaudeSession::claudeState() const
