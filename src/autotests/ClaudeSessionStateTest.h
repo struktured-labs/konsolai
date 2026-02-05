@@ -51,6 +51,11 @@ private Q_SLOTS:
     void testYoloModeSerialization();
     void testYoloModeRoundTrip();
     void testYoloModeDefaultsFalse();
+
+    // Task description persistence
+    void testTaskDescriptionRoundTrip();
+    void testTaskDescriptionEmptyNotInJson();
+    void testTaskDescriptionMissingFromJson();
 };
 
 }

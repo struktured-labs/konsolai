@@ -1276,7 +1276,14 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     }
                 }
 
-                createSession(profile, workDir);
+                Session *session = createSession(profile, workDir);
+                // Pass task description from wizard to the Claude session
+                if (auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session)) {
+                    QString taskPrompt = wizard.taskPrompt();
+                    if (!taskPrompt.isEmpty()) {
+                        claudeSession->setTaskDescription(taskPrompt);
+                    }
+                }
                 qDebug() << "Session created via wizard";
                 return;
             }

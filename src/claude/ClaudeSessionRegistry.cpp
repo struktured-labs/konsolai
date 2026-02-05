@@ -73,6 +73,7 @@ void ClaudeSessionRegistry::registerSession(ClaudeSession *session)
                     m_sessionStates[name].created : QDateTime::currentDateTime();
     state.lastAccessed = QDateTime::currentDateTime();
     state.isAttached = true;
+    state.taskDescription = session->taskDescription();
     state.autoContinuePrompt = session->autoContinuePrompt();
     state.yoloMode = session->yoloMode();
     state.doubleYoloMode = session->doubleYoloMode();
@@ -93,10 +94,11 @@ void ClaudeSessionRegistry::unregisterSession(ClaudeSession *session)
     QString name = session->sessionName();
     m_activeSessions.remove(name);
 
-    // Mark as detached but keep state (including per-session prompt)
+    // Mark as detached but keep state (including per-session prompt and task description)
     if (m_sessionStates.contains(name)) {
         m_sessionStates[name].isAttached = false;
         m_sessionStates[name].lastAccessed = QDateTime::currentDateTime();
+        m_sessionStates[name].taskDescription = session->taskDescription();
         m_sessionStates[name].autoContinuePrompt = session->autoContinuePrompt();
         m_sessionStates[name].yoloMode = session->yoloMode();
         m_sessionStates[name].doubleYoloMode = session->doubleYoloMode();

@@ -664,8 +664,24 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName = meta.sessionName;
     }
 
-    // Add yolo mode and approval count indicators for active sessions
+    // Add task description or session ID for disambiguation
     bool isActive = m_activeSessions.contains(meta.sessionId);
+    if (isActive) {
+        ClaudeSession *session = m_activeSessions[meta.sessionId];
+        if (session && !session->taskDescription().isEmpty()) {
+            QString desc = session->taskDescription();
+            if (desc.length() > 30) {
+                desc = desc.left(27) + QStringLiteral("...");
+            }
+            displayName += QStringLiteral(" (%1)").arg(desc);
+        } else if (!meta.sessionId.isEmpty()) {
+            displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
+        }
+    } else if (!meta.sessionId.isEmpty()) {
+        displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
+    }
+
+    // Add yolo mode and approval count indicators for active sessions
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {

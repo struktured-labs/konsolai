@@ -195,6 +195,19 @@ public:
     QString workingDirectory() const { return m_workingDir; }
 
     /**
+     * Get the task description (from wizard)
+     */
+    QString taskDescription() const
+    {
+        return m_taskDescription;
+    }
+
+    /**
+     * Set the task description (from wizard)
+     */
+    void setTaskDescription(const QString &desc);
+
+    /**
      * Get the Claude model being used
      */
     ClaudeProcess::Model claudeModel() const { return m_claudeModel; }
@@ -565,6 +578,7 @@ private:
     QString m_sessionId;
     QString m_profileName;
     QString m_workingDir;
+    QString m_taskDescription;
     ClaudeProcess::Model m_claudeModel = ClaudeProcess::Model::Default;
     QString m_resumeSessionId;
     bool m_isReattach = false;

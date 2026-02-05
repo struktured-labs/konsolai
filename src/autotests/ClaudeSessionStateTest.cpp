@@ -326,6 +326,48 @@ void ClaudeSessionStateTest::testYoloModeDefaultsFalse()
     QCOMPARE(state.tripleYoloMode, false);
 }
 
+void ClaudeSessionStateTest::testTaskDescriptionRoundTrip()
+{
+    ClaudeSessionState original;
+    original.sessionName = QStringLiteral("konsolai-test-task0001");
+    original.sessionId = QStringLiteral("task0001");
+    original.workingDirectory = QStringLiteral("/home/user/myproject");
+    original.taskDescription = QStringLiteral("cc3dfs claude wrapper");
+
+    QJsonObject json = original.toJson();
+    QVERIFY(json.contains(QStringLiteral("taskDescription")));
+    QCOMPARE(json[QStringLiteral("taskDescription")].toString(), QStringLiteral("cc3dfs claude wrapper"));
+
+    ClaudeSessionState restored = ClaudeSessionState::fromJson(json);
+    QCOMPARE(restored.taskDescription, original.taskDescription);
+}
+
+void ClaudeSessionStateTest::testTaskDescriptionEmptyNotInJson()
+{
+    ClaudeSessionState state;
+    state.sessionName = QStringLiteral("konsolai-test-task0002");
+    state.sessionId = QStringLiteral("task0002");
+    // taskDescription left empty
+
+    QJsonObject json = state.toJson();
+
+    // Empty task description should NOT be serialized (saves space)
+    QVERIFY(!json.contains(QStringLiteral("taskDescription")));
+}
+
+void ClaudeSessionStateTest::testTaskDescriptionMissingFromJson()
+{
+    QJsonObject json;
+    json[QStringLiteral("sessionName")] = QStringLiteral("konsolai-test-task0003");
+    json[QStringLiteral("sessionId")] = QStringLiteral("task0003");
+    // No taskDescription key
+
+    ClaudeSessionState state = ClaudeSessionState::fromJson(json);
+
+    QVERIFY(state.isValid());
+    QVERIFY(state.taskDescription.isEmpty());
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionStateTest)
 
 #include "moc_ClaudeSessionStateTest.cpp"

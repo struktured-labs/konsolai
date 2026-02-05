@@ -24,6 +24,22 @@
 namespace Konsolai
 {
 
+// Build a display name for tabs/panels: "project (task desc)" or "project (sessionId)" fallback
+static QString buildDisplayName(const QString &projectName, const QString &taskDescription, const QString &sessionId)
+{
+    if (!taskDescription.isEmpty()) {
+        QString desc = taskDescription;
+        if (desc.length() > 30) {
+            desc = desc.left(27) + QStringLiteral("...");
+        }
+        return QStringLiteral("%1 (%2)").arg(projectName, desc);
+    }
+    if (!sessionId.isEmpty()) {
+        return QStringLiteral("%1 (%2)").arg(projectName, sessionId.left(8));
+    }
+    return projectName;
+}
+
 ClaudeSession::ClaudeSession(const QString &profileName, const QString &workingDir, QObject *parent)
     : Konsole::Session(parent)
 {
@@ -75,15 +91,16 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     // Set initial working directory (may be overridden by ViewManager later)
     setInitialWorkingDirectory(m_workingDir);
 
-    // Set tab title based on working directory name
+    // Set tab title based on working directory name + task description
     QString projectName = QDir(m_workingDir).dirName();
     if (!projectName.isEmpty()) {
-        setTitle(Konsole::Session::NameRole, projectName);
-        setTitle(Konsole::Session::DisplayedTitleRole, projectName);
-        // Use literal project name - format codes like %d (cwd) and %n (process name)
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+        setTitle(Konsole::Session::NameRole, displayName);
+        setTitle(Konsole::Session::DisplayedTitleRole, displayName);
+        // Use literal display name - format codes like %d (cwd) and %n (process name)
         // resolve to the tmux client process, not the Claude session's project
-        setTabTitleFormat(Konsole::Session::LocalTabTitle, projectName);
-        setTabTitleFormat(Konsole::Session::RemoteTabTitle, projectName);
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
         tabTitleSetByUser(true);
     }
 
@@ -179,6 +196,20 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
                 m_workingDir = saved->workingDirectory;
                 setInitialWorkingDirectory(m_workingDir);
             }
+            m_taskDescription = saved->taskDescription;
+        }
+    }
+
+    // Update tab title with task description if available
+    if (!m_taskDescription.isEmpty() && !m_workingDir.isEmpty()) {
+        QString projectName = QDir(m_workingDir).dirName();
+        if (!projectName.isEmpty()) {
+            QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+            setTitle(Konsole::Session::NameRole, displayName);
+            setTitle(Konsole::Session::DisplayedTitleRole, displayName);
+            setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
+            setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
+            tabTitleSetByUser(true);
         }
     }
 
@@ -249,17 +280,18 @@ void ClaudeSession::run()
         m_workingDir = QDir::currentPath();
     }
 
-    // Update tab title to project name (directory basename)
+    // Update tab title to project name (directory basename) + task description
     // We use a literal string (no format codes) because format codes like %d and %n
     // resolve to the tmux client process info, not the Claude session's project.
     // We also set tabTitleSetByUser to prevent OSC 30 escape sequences from tmux/shell
     // from overriding the title (they would set it to the build directory name).
     QString projectName = QDir(m_workingDir).dirName();
     if (!projectName.isEmpty() && projectName != QStringLiteral(".")) {
-        setTitle(Konsole::Session::NameRole, projectName);
-        setTitle(Konsole::Session::DisplayedTitleRole, projectName);
-        setTabTitleFormat(Konsole::Session::LocalTabTitle, projectName);
-        setTabTitleFormat(Konsole::Session::RemoteTabTitle, projectName);
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+        setTitle(Konsole::Session::NameRole, displayName);
+        setTitle(Konsole::Session::DisplayedTitleRole, displayName);
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
         tabTitleSetByUser(true);
     }
 
@@ -439,6 +471,21 @@ void ClaudeSession::connectSignals()
             refreshTokenUsage();
         }
     });
+}
+
+void ClaudeSession::setTaskDescription(const QString &desc)
+{
+    m_taskDescription = desc;
+    // Update tab title to include task description
+    QString projectName = QDir(m_workingDir).dirName();
+    if (!projectName.isEmpty()) {
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+        setTitle(Konsole::Session::NameRole, displayName);
+        setTitle(Konsole::Session::DisplayedTitleRole, displayName);
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
+        tabTitleSetByUser(true);
+    }
 }
 
 ClaudeProcess::State ClaudeSession::claudeState() const

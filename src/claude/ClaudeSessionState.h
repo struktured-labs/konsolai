@@ -44,6 +44,7 @@ public:
     // Session properties
     QString workingDirectory;   // Initial working directory
     QString claudeModel;        // Claude model name (empty for default)
+    QString taskDescription; // From wizard Task Description field
 
     // Status
     bool isAttached = false;    // Whether Konsolai is currently attached
