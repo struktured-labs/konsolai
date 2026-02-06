@@ -7,6 +7,7 @@
 #include "ClaudeSessionWizard.h"
 #include "KonsolaiSettings.h"
 
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
@@ -14,6 +15,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileSystemModel>
 #include <QGridLayout>
@@ -24,8 +26,10 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QRegularExpression>
 #include <QStringListModel>
+#include <QTextStream>
 #include <QVBoxLayout>
 
 #include <KLocalizedString>
@@ -67,6 +71,9 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
 
     // Populate folder completer from workspace root
     updateFolderCompleter();
+
+    // Load SSH config hosts
+    loadSshConfigHosts();
 
     // Focus the prompt field
     m_promptEdit->setFocus();
@@ -152,13 +159,130 @@ QString ClaudeSessionWizard::taskPrompt() const
     return m_taskPrompt;
 }
 
+bool ClaudeSessionWizard::isRemoteSession() const
+{
+    return m_remoteRadio && m_remoteRadio->isChecked();
+}
+
+QString ClaudeSessionWizard::sshHost() const
+{
+    if (!isRemoteSession()) {
+        return QString();
+    }
+    if (m_useSshConfigCheck && m_useSshConfigCheck->isChecked() && m_sshConfigCombo) {
+        return m_sshConfigCombo->currentText();
+    }
+    return m_sshHostEdit ? m_sshHostEdit->text() : QString();
+}
+
+QString ClaudeSessionWizard::sshUsername() const
+{
+    if (!isRemoteSession() || !m_sshUsernameEdit) {
+        return QString();
+    }
+    return m_sshUsernameEdit->text();
+}
+
+int ClaudeSessionWizard::sshPort() const
+{
+    if (!isRemoteSession() || !m_sshPortEdit) {
+        return 22;
+    }
+    bool ok = false;
+    int port = m_sshPortEdit->text().toInt(&ok);
+    return ok ? port : 22;
+}
+
+QString ClaudeSessionWizard::sshConfigEntry() const
+{
+    if (!isRemoteSession() || !m_useSshConfigCheck || !m_useSshConfigCheck->isChecked()) {
+        return QString();
+    }
+    return m_sshConfigCombo ? m_sshConfigCombo->currentText() : QString();
+}
+
 void ClaudeSessionWizard::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // --- Workspace root (top) ---
+    // --- Location: Local / Remote (SSH) ---
+    auto *locationRow = new QHBoxLayout();
+    locationRow->addWidget(new QLabel(i18n("Location:"), this));
+    m_locationGroup = new QButtonGroup(this);
+    m_localRadio = new QRadioButton(i18n("Local"), this);
+    m_remoteRadio = new QRadioButton(i18n("Remote (SSH)"), this);
+    m_localRadio->setChecked(true);
+    m_locationGroup->addButton(m_localRadio, 0);
+    m_locationGroup->addButton(m_remoteRadio, 1);
+    connect(m_locationGroup, &QButtonGroup::idClicked, this, &ClaudeSessionWizard::onLocationChanged);
+    locationRow->addWidget(m_localRadio);
+    locationRow->addWidget(m_remoteRadio);
+    locationRow->addStretch();
+    mainLayout->addLayout(locationRow);
+
+    mainLayout->addSpacing(4);
+
+    // --- SSH Connection group (visible when Remote is selected) ---
+    m_sshGroup = new QGroupBox(i18n("SSH Connection"), this);
+    auto *sshLayout = new QGridLayout(m_sshGroup);
+
+    // Host
+    sshLayout->addWidget(new QLabel(i18n("Host:"), this), 0, 0);
+    m_sshHostEdit = new QLineEdit(this);
+    m_sshHostEdit->setPlaceholderText(i18n("hostname or IP"));
+    connect(m_sshHostEdit, &QLineEdit::textChanged, this, [this]() {
+        updatePreview();
+    });
+    sshLayout->addWidget(m_sshHostEdit, 0, 1, 1, 2);
+
+    // Username and Port on same row
+    sshLayout->addWidget(new QLabel(i18n("Username:"), this), 1, 0);
+    m_sshUsernameEdit = new QLineEdit(this);
+    m_sshUsernameEdit->setPlaceholderText(QString::fromLocal8Bit(qgetenv("USER")));
+    sshLayout->addWidget(m_sshUsernameEdit, 1, 1);
+
+    auto *portLayout = new QHBoxLayout();
+    portLayout->addWidget(new QLabel(i18n("Port:"), this));
+    m_sshPortEdit = new QLineEdit(this);
+    m_sshPortEdit->setPlaceholderText(QStringLiteral("22"));
+    m_sshPortEdit->setMaximumWidth(60);
+    portLayout->addWidget(m_sshPortEdit);
+    sshLayout->addLayout(portLayout, 1, 2);
+
+    // SSH Config checkbox and dropdown
+    m_useSshConfigCheck = new QCheckBox(i18n("Use ~/.ssh/config entry:"), this);
+    connect(m_useSshConfigCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        m_sshConfigCombo->setEnabled(checked);
+        m_sshHostEdit->setEnabled(!checked);
+        m_sshUsernameEdit->setEnabled(!checked);
+        m_sshPortEdit->setEnabled(!checked);
+        updatePreview();
+    });
+    sshLayout->addWidget(m_useSshConfigCheck, 2, 0, 1, 2);
+
+    m_sshConfigCombo = new QComboBox(this);
+    m_sshConfigCombo->setEnabled(false);
+    connect(m_sshConfigCombo, &QComboBox::currentTextChanged, this, [this]() {
+        updatePreview();
+    });
+    sshLayout->addWidget(m_sshConfigCombo, 2, 2);
+
+    // Test Connection button and status
+    m_testConnectionButton = new QPushButton(i18n("Test Connection"), this);
+    connect(m_testConnectionButton, &QPushButton::clicked, this, &ClaudeSessionWizard::onTestConnectionClicked);
+    sshLayout->addWidget(m_testConnectionButton, 3, 0);
+
+    m_connectionStatusLabel = new QLabel(this);
+    m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    sshLayout->addWidget(m_connectionStatusLabel, 3, 1, 1, 2);
+
+    m_sshGroup->setVisible(false); // Hidden by default (Local selected)
+    mainLayout->addWidget(m_sshGroup);
+
+    // --- Workspace root / Remote path ---
     auto *rootRow = new QHBoxLayout();
-    rootRow->addWidget(new QLabel(i18n("Workspace root:"), this));
+    m_pathLabel = new QLabel(i18n("Workspace root:"), this);
+    rootRow->addWidget(m_pathLabel);
     m_projectRootEdit = new QLineEdit(this);
     m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
     connect(m_projectRootEdit, &QLineEdit::textChanged, this, &ClaudeSessionWizard::onProjectRootChanged);
@@ -666,6 +790,22 @@ void ClaudeSessionWizard::updatePreview()
     }
 
     QString preview;
+
+    // SSH remote session preview
+    if (isRemoteSession()) {
+        QString host = sshHost();
+        if (host.isEmpty()) {
+            preview = i18n("Configure SSH connection above");
+        } else {
+            QString user = sshUsername();
+            QString target = user.isEmpty() ? host : QStringLiteral("%1@%2").arg(user, host);
+            preview = i18n("Will connect to: %1\nRemote path: %2\nCommand: ssh -t %3 tmux ... claude", host, dir, target);
+        }
+        m_previewLabel->setText(preview);
+        return;
+    }
+
+    // Local session preview
     switch (m_gitModeCombo->currentIndex()) {
     case GitInit:
         preview = i18n("Will create: %1 (git init)", dir);
@@ -689,6 +829,115 @@ void ClaudeSessionWizard::updatePreview()
         break;
     }
     m_previewLabel->setText(preview);
+}
+
+void ClaudeSessionWizard::onLocationChanged()
+{
+    updateSshVisibility();
+    updatePreview();
+}
+
+void ClaudeSessionWizard::updateSshVisibility()
+{
+    bool remote = isRemoteSession();
+    m_sshGroup->setVisible(remote);
+
+    // Update path label
+    if (remote) {
+        m_pathLabel->setText(i18n("Remote path:"));
+        m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
+        m_browseRootButton->setEnabled(false); // Can't browse remote filesystem
+    } else {
+        m_pathLabel->setText(i18n("Workspace root:"));
+        m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
+        m_browseRootButton->setEnabled(true);
+    }
+}
+
+void ClaudeSessionWizard::onTestConnectionClicked()
+{
+    QString host = sshHost();
+    if (host.isEmpty()) {
+        m_connectionStatusLabel->setText(i18n("Enter a host first"));
+        m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: orange;"));
+        return;
+    }
+
+    m_connectionStatusLabel->setText(i18n("Testing..."));
+    m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    m_testConnectionButton->setEnabled(false);
+
+    // Build SSH command
+    QStringList args;
+    args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes");
+    args << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=5");
+
+    if (m_useSshConfigCheck->isChecked()) {
+        args << host;
+    } else {
+        QString user = sshUsername();
+        int port = sshPort();
+        if (!user.isEmpty()) {
+            args << QStringLiteral("-l") << user;
+        }
+        if (port != 22) {
+            args << QStringLiteral("-p") << QString::number(port);
+        }
+        args << host;
+    }
+    args << QStringLiteral("echo") << QStringLiteral("ok");
+
+    auto *process = new QProcess(this);
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process](int exitCode, QProcess::ExitStatus) {
+        process->deleteLater();
+        m_testConnectionButton->setEnabled(true);
+
+        if (exitCode == 0) {
+            m_connectionStatusLabel->setText(i18n("Connected"));
+            m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: green;"));
+        } else {
+            QString error = QString::fromUtf8(process->readAllStandardError()).trimmed();
+            if (error.isEmpty()) {
+                error = i18n("Connection failed (exit %1)", exitCode);
+            }
+            m_connectionStatusLabel->setText(error.left(50));
+            m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: red;"));
+        }
+    });
+
+    process->start(QStringLiteral("ssh"), args);
+}
+
+void ClaudeSessionWizard::loadSshConfigHosts()
+{
+    m_sshConfigCombo->clear();
+
+    QString configPath = QDir::homePath() + QStringLiteral("/.ssh/config");
+    QFile file(configPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+
+    QTextStream in(&file);
+    static QRegularExpression hostPattern(QStringLiteral("^\\s*Host\\s+(.+)$"), QRegularExpression::CaseInsensitiveOption);
+
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        QRegularExpressionMatch match = hostPattern.match(line);
+        if (match.hasMatch()) {
+            QString hosts = match.captured(1).trimmed();
+            // Skip wildcard entries
+            if (!hosts.contains(QLatin1Char('*')) && !hosts.contains(QLatin1Char('?'))) {
+                // May have multiple hosts on one line
+                const QStringList hostList = hosts.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+                for (const QString &h : hostList) {
+                    if (!h.contains(QLatin1Char('*')) && !h.contains(QLatin1Char('?'))) {
+                        m_sshConfigCombo->addItem(h);
+                    }
+                }
+            }
+        }
+    }
 }
 
 } // namespace Konsolai

@@ -24,20 +24,28 @@
 namespace Konsolai
 {
 
-// Build a display name for tabs/panels: "project (task desc)" or "project (sessionId)" fallback
-static QString buildDisplayName(const QString &projectName, const QString &taskDescription, const QString &sessionId)
+// Build a display name for tabs/panels: "project (task desc) @host" for remote or "project (sessionId)" fallback
+static QString buildDisplayName(const QString &projectName, const QString &taskDescription, const QString &sessionId, const QString &sshHost = QString())
 {
+    QString name;
     if (!taskDescription.isEmpty()) {
         QString desc = taskDescription;
         if (desc.length() > 30) {
             desc = desc.left(27) + QStringLiteral("...");
         }
-        return QStringLiteral("%1 (%2)").arg(projectName, desc);
+        name = QStringLiteral("%1 (%2)").arg(projectName, desc);
+    } else if (!sessionId.isEmpty()) {
+        name = QStringLiteral("%1 (%2)").arg(projectName, sessionId.left(8));
+    } else {
+        name = projectName;
     }
-    if (!sessionId.isEmpty()) {
-        return QStringLiteral("%1 (%2)").arg(projectName, sessionId.left(8));
+
+    // Append @host for remote sessions
+    if (!sshHost.isEmpty()) {
+        name += QStringLiteral(" @%1").arg(sshHost);
     }
-    return projectName;
+
+    return name;
 }
 
 ClaudeSession::ClaudeSession(const QString &profileName, const QString &workingDir, QObject *parent)
@@ -94,7 +102,7 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     // Set tab title based on working directory name + task description
     QString projectName = QDir(m_workingDir).dirName();
     if (!projectName.isEmpty()) {
-        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);
         setTitle(Konsole::Session::NameRole, displayName);
         setTitle(Konsole::Session::DisplayedTitleRole, displayName);
         // Use literal display name - format codes like %d (cwd) and %n (process name)
@@ -204,7 +212,7 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     if (!m_taskDescription.isEmpty() && !m_workingDir.isEmpty()) {
         QString projectName = QDir(m_workingDir).dirName();
         if (!projectName.isEmpty()) {
-            QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+            QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);
             setTitle(Konsole::Session::NameRole, displayName);
             setTitle(Konsole::Session::DisplayedTitleRole, displayName);
             setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
@@ -287,7 +295,7 @@ void ClaudeSession::run()
     // from overriding the title (they would set it to the build directory name).
     QString projectName = QDir(m_workingDir).dirName();
     if (!projectName.isEmpty() && projectName != QStringLiteral(".")) {
-        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);
         setTitle(Konsole::Session::NameRole, displayName);
         setTitle(Konsole::Session::DisplayedTitleRole, displayName);
         setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
@@ -479,7 +487,7 @@ void ClaudeSession::setTaskDescription(const QString &desc)
     // Update tab title to include task description
     QString projectName = QDir(m_workingDir).dirName();
     if (!projectName.isEmpty()) {
-        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId);
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);
         setTitle(Konsole::Session::NameRole, displayName);
         setTitle(Konsole::Session::DisplayedTitleRole, displayName);
         setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);

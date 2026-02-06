@@ -39,6 +39,12 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     bool isExpired = false;
     QDateTime lastAccessed;
     QDateTime createdAt;
+
+    // SSH remote session fields
+    bool isRemote = false;
+    QString sshHost;
+    QString sshUsername;
+    int sshPort = 22;
 };
 
 /**

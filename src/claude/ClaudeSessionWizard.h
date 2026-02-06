@@ -21,6 +21,8 @@ class QComboBox;
 class QCheckBox;
 class QLabel;
 class QGroupBox;
+class QRadioButton;
+class QButtonGroup;
 
 namespace Konsolai
 {
@@ -58,11 +60,20 @@ public:
     QString claudeArgs() const;
     QString taskPrompt() const;
 
+    // SSH remote session support
+    bool isRemoteSession() const;
+    QString sshHost() const;
+    QString sshUsername() const;
+    int sshPort() const;
+    QString sshConfigEntry() const;
+
 private Q_SLOTS:
     void onPromptChanged();
     void onFolderNameChanged(const QString &name);
     void onProjectRootChanged(const QString &path);
     void onCreatePressed();
+    void onLocationChanged();
+    void onTestConnectionClicked();
 
 private:
     void setupUi();
@@ -72,6 +83,8 @@ private:
     void detectGitState(const QString &path);
     QStringList getWorktrees(const QString &repoRoot);
     void updatePreview();
+    void updateSshVisibility();
+    void loadSshConfigHosts();
 
     // Git mode enum
     enum GitMode {
@@ -84,6 +97,22 @@ private:
     void updateGitSubFields();
 
     // Widgets
+    QButtonGroup *m_locationGroup = nullptr;
+    QRadioButton *m_localRadio = nullptr;
+    QRadioButton *m_remoteRadio = nullptr;
+
+    // SSH Connection widgets
+    QGroupBox *m_sshGroup = nullptr;
+    QLineEdit *m_sshHostEdit = nullptr;
+    QLineEdit *m_sshUsernameEdit = nullptr;
+    QLineEdit *m_sshPortEdit = nullptr;
+    QCheckBox *m_useSshConfigCheck = nullptr;
+    QComboBox *m_sshConfigCombo = nullptr;
+    QPushButton *m_testConnectionButton = nullptr;
+    QLabel *m_connectionStatusLabel = nullptr;
+
+    // Local/shared widgets
+    QLabel *m_pathLabel = nullptr;
     QLineEdit *m_projectRootEdit = nullptr;
     QPushButton *m_browseRootButton = nullptr;
     QLineEdit *m_promptEdit = nullptr;

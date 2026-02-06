@@ -722,9 +722,24 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
     }
 
+    // Add @host suffix for remote sessions
+    if (meta.isRemote && !meta.sshHost.isEmpty()) {
+        displayName += QStringLiteral(" @%1").arg(meta.sshHost);
+    }
+
     item->setText(0, displayName);
     item->setData(0, Qt::UserRole, meta.sessionId);
-    item->setToolTip(0, QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString()));
+
+    // Enhanced tooltip for remote sessions
+    QString tooltip;
+    if (meta.isRemote) {
+        QString userHost = meta.sshUsername.isEmpty() ? meta.sshHost : QStringLiteral("%1@%2").arg(meta.sshUsername, meta.sshHost);
+        tooltip =
+            QStringLiteral("%1\nRemote: %2\nPath: %3\nLast accessed: %4").arg(meta.sessionName, userHost, meta.workingDirectory, meta.lastAccessed.toString());
+    } else {
+        tooltip = QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString());
+    }
+    item->setToolTip(0, tooltip);
 
     // Add yolo mode and approval count indicators in column 1 (always visible)
     if (isActive) {
@@ -758,11 +773,18 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // Set icon based on state
+    // Set icon based on state (remote sessions use network icons)
     if (meta.isArchived && meta.isExpired) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-warning")));
     } else if (meta.isArchived) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-grey")));
+    } else if (meta.isRemote) {
+        // Remote sessions use network icons
+        if (isActive) {
+            item->setIcon(0, QIcon::fromTheme(QStringLiteral("network-server"), QIcon::fromTheme(QStringLiteral("folder-remote"))));
+        } else {
+            item->setIcon(0, QIcon::fromTheme(QStringLiteral("network-server"), QIcon::fromTheme(QStringLiteral("folder-remote"))));
+        }
     } else if (isActive) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-open")));
     } else {
@@ -770,9 +792,13 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder")));
     }
 
-    // Add status indicator
+    // Add status indicator (green for local, blue for remote)
     if (isActive) {
-        item->setForeground(0, QBrush(Qt::darkGreen));
+        if (meta.isRemote) {
+            item->setForeground(0, QBrush(Qt::darkBlue));
+        } else {
+            item->setForeground(0, QBrush(Qt::darkGreen));
+        }
     }
 }
 
@@ -806,6 +832,12 @@ void SessionManagerPanel::loadMetadata()
         meta.lastAccessed = QDateTime::fromString(obj[QStringLiteral("lastAccessed")].toString(), Qt::ISODate);
         meta.createdAt = QDateTime::fromString(obj[QStringLiteral("createdAt")].toString(), Qt::ISODate);
 
+        // SSH remote session fields
+        meta.isRemote = obj[QStringLiteral("isRemote")].toBool();
+        meta.sshHost = obj[QStringLiteral("sshHost")].toString();
+        meta.sshUsername = obj[QStringLiteral("sshUsername")].toString();
+        meta.sshPort = obj[QStringLiteral("sshPort")].toInt(22);
+
         if (!meta.sessionId.isEmpty()) {
             m_metadata[meta.sessionId] = meta;
         }
@@ -830,6 +862,15 @@ void SessionManagerPanel::saveMetadata()
         obj[QStringLiteral("isExpired")] = meta.isExpired;
         obj[QStringLiteral("lastAccessed")] = meta.lastAccessed.toString(Qt::ISODate);
         obj[QStringLiteral("createdAt")] = meta.createdAt.toString(Qt::ISODate);
+
+        // SSH remote session fields
+        if (meta.isRemote) {
+            obj[QStringLiteral("isRemote")] = true;
+            obj[QStringLiteral("sshHost")] = meta.sshHost;
+            obj[QStringLiteral("sshUsername")] = meta.sshUsername;
+            obj[QStringLiteral("sshPort")] = meta.sshPort;
+        }
+
         array.append(obj);
     }
 

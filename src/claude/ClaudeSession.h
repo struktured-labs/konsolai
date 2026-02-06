@@ -207,6 +207,56 @@ public:
      */
     void setTaskDescription(const QString &desc);
 
+    // ========== SSH Remote Session Fields ==========
+
+    /**
+     * Whether this is a remote SSH session
+     */
+    bool isRemote() const
+    {
+        return m_isRemote;
+    }
+    void setIsRemote(bool remote)
+    {
+        m_isRemote = remote;
+    }
+
+    /**
+     * SSH host (for remote sessions)
+     */
+    QString sshHost() const
+    {
+        return m_sshHost;
+    }
+    void setSshHost(const QString &host)
+    {
+        m_sshHost = host;
+    }
+
+    /**
+     * SSH username (for remote sessions)
+     */
+    QString sshUsername() const
+    {
+        return m_sshUsername;
+    }
+    void setSshUsername(const QString &user)
+    {
+        m_sshUsername = user;
+    }
+
+    /**
+     * SSH port (for remote sessions)
+     */
+    int sshPort() const
+    {
+        return m_sshPort;
+    }
+    void setSshPort(int port)
+    {
+        m_sshPort = port;
+    }
+
     /**
      * Get the Claude model being used
      */
@@ -587,6 +637,12 @@ private:
     ClaudeProcess::Model m_claudeModel = ClaudeProcess::Model::Default;
     QString m_resumeSessionId;
     bool m_isReattach = false;
+
+    // SSH remote session fields
+    bool m_isRemote = false;
+    QString m_sshHost;
+    QString m_sshUsername;
+    int m_sshPort = 22;
 
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;
