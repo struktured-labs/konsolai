@@ -455,10 +455,11 @@ void ClaudeSession::connectSignals()
         // it can re-attempt Tab+Enter when Claude stays Idle on background tabs.
         if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
             // Double yolo fires first: Tab + Enter to accept suggestion
-            // Use 2s delay to give Claude's inline suggestion time to appear
-            // and give user time to start typing (which cancels via state change)
-            qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode) in 2s";
-            QTimer::singleShot(2000, this, [this]() {
+            // Use 5s delay to give Claude's inline suggestion time to appear
+            // (suggestions can take several seconds depending on API latency)
+            // Also gives user time to start typing, which cancels via state change
+            qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode) in 5s";
+            QTimer::singleShot(5000, this, [this]() {
                 autoAcceptSuggestion();
             });
 
