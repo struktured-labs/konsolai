@@ -548,6 +548,17 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             }
         }
 
+        // Restart option for active sessions
+        if (isActive && m_activeSessions.contains(sessionId)) {
+            ClaudeSession *activeSession = m_activeSessions[sessionId];
+            if (activeSession) {
+                QAction *restartAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart Claude"));
+                connect(restartAction, &QAction::triggered, this, [activeSession]() {
+                    activeSession->restart();
+                });
+            }
+        }
+
         menu.addSeparator();
 
         QAction *archiveAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-remove")), i18n("Archive"));
