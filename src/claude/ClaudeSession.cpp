@@ -228,38 +228,42 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
 
 void ClaudeSession::run()
 {
-    qDebug() << "ClaudeSession::run() called";
+    qDebug() << "ClaudeSession::run() called" << (m_isRemote ? "(remote SSH session)" : "(local session)");
 
-    // Validate prerequisites
-    if (!TmuxManager::isAvailable()) {
-        qWarning() << "tmux is NOT available!";
-        qWarning() << "Showing error dialog...";
-        QMessageBox msgBox;
-        msgBox.setIcon(QMessageBox::Critical);
-        msgBox.setWindowTitle(QStringLiteral("Claude Session Error"));
-        msgBox.setText(QStringLiteral("tmux is not installed or not in PATH."));
-        msgBox.setInformativeText(
-            QStringLiteral("Please install tmux to use Claude sessions:\n"
-                           "  sudo apt install tmux  # Debian/Ubuntu\n"
-                           "  sudo dnf install tmux  # Fedora\n"
-                           "  sudo pacman -S tmux    # Arch"));
-        msgBox.exec();
-        qWarning() << "Error dialog closed, returning from run()";
-        return;
-    }
+    // For remote sessions, skip local prerequisite checks
+    // (tmux and claude must be installed on the remote host)
+    if (!m_isRemote) {
+        // Validate prerequisites
+        if (!TmuxManager::isAvailable()) {
+            qWarning() << "tmux is NOT available!";
+            qWarning() << "Showing error dialog...";
+            QMessageBox msgBox;
+            msgBox.setIcon(QMessageBox::Critical);
+            msgBox.setWindowTitle(QStringLiteral("Claude Session Error"));
+            msgBox.setText(QStringLiteral("tmux is not installed or not in PATH."));
+            msgBox.setInformativeText(
+                QStringLiteral("Please install tmux to use Claude sessions:\n"
+                               "  sudo apt install tmux  # Debian/Ubuntu\n"
+                               "  sudo dnf install tmux  # Fedora\n"
+                               "  sudo pacman -S tmux    # Arch"));
+            msgBox.exec();
+            qWarning() << "Error dialog closed, returning from run()";
+            return;
+        }
 
-    if (!ClaudeProcess::isAvailable()) {
-        qWarning() << "Claude CLI is NOT available!";
-        QMessageBox msgBox;
-        msgBox.setIcon(QMessageBox::Critical);
-        msgBox.setWindowTitle(QStringLiteral("Claude Session Error"));
-        msgBox.setText(QStringLiteral("Claude CLI is not installed or not in PATH."));
-        msgBox.setInformativeText(
-            QStringLiteral("Please install Claude CLI:\n"
-                           "  npm install -g @anthropic-ai/claude-code\n\n"
-                           "Or visit: https://claude.ai/download"));
-        msgBox.exec();
-        return;
+        if (!ClaudeProcess::isAvailable()) {
+            qWarning() << "Claude CLI is NOT available!";
+            QMessageBox msgBox;
+            msgBox.setIcon(QMessageBox::Critical);
+            msgBox.setWindowTitle(QStringLiteral("Claude Session Error"));
+            msgBox.setText(QStringLiteral("Claude CLI is not installed or not in PATH."));
+            msgBox.setInformativeText(
+                QStringLiteral("Please install Claude CLI:\n"
+                               "  npm install -g @anthropic-ai/claude-code\n\n"
+                               "Or visit: https://claude.ai/download"));
+            msgBox.exec();
+            return;
+        }
     }
 
     // Use the current initialWorkingDirectory (may have been updated by ViewManager)
@@ -278,8 +282,8 @@ void ClaudeSession::run()
         }
     }
 
-    // Validate working directory
-    if (!m_workingDir.isEmpty() && !QDir(m_workingDir).exists()) {
+    // Validate working directory (skip for remote sessions - path is on remote host)
+    if (!m_isRemote && !m_workingDir.isEmpty() && !QDir(m_workingDir).exists()) {
         QMessageBox::warning(nullptr,
                              QStringLiteral("Claude Session Warning"),
                              QStringLiteral("Working directory does not exist:\n%1\n\n"
@@ -307,7 +311,8 @@ void ClaudeSession::run()
     Q_EMIT workingDirectoryChanged(m_workingDir);
 
     // Start the hook handler to receive Claude events
-    if (m_hookHandler) {
+    // Skip for remote sessions - hooks require SSH tunnel (Phase 2)
+    if (!m_isRemote && m_hookHandler) {
         if (m_hookHandler->start()) {
             qDebug() << "ClaudeSession::run() - Hook handler started on:" << m_hookHandler->socketPath();
 
@@ -358,6 +363,8 @@ void ClaudeSession::run()
         } else {
             qWarning() << "ClaudeSession::run() - Failed to start hook handler";
         }
+    } else if (m_isRemote) {
+        qDebug() << "ClaudeSession::run() - Skipping hook handler for remote SSH session (Phase 2 feature)";
     }
 
     // Build the tmux command now that we have the correct working directory
@@ -513,6 +520,11 @@ ClaudeProcess::State ClaudeSession::claudeState() const
 
 QString ClaudeSession::shellCommand() const
 {
+    // Remote SSH session: wrap everything in ssh -t
+    if (m_isRemote) {
+        return buildRemoteSshCommand();
+    }
+
     if (m_isReattach) {
         // Attach to existing session
         return m_tmuxManager->buildAttachCommand(m_sessionName);
@@ -532,6 +544,56 @@ QString ClaudeSession::shellCommand() const
         true,  // attachExisting
         m_workingDir
     );
+}
+
+QString ClaudeSession::buildRemoteSshCommand() const
+{
+    // Build: ssh -t [options] host "tmux new-session -A -s name -c /path -- claude [args]"
+    QStringList sshArgs;
+    sshArgs << QStringLiteral("-t"); // Force TTY allocation
+
+    // Add port if non-default
+    if (m_sshPort != 22 && m_sshPort > 0) {
+        sshArgs << QStringLiteral("-p") << QString::number(m_sshPort);
+    }
+
+    // Build target: user@host or just host
+    QString target;
+    if (!m_sshUsername.isEmpty()) {
+        target = QStringLiteral("%1@%2").arg(m_sshUsername, m_sshHost);
+    } else {
+        target = m_sshHost;
+    }
+    sshArgs << target;
+
+    // Build remote tmux command
+    // tmux new-session -A -s konsolai-{name} -c {workdir} -- claude [args]
+    QString remoteCmd;
+
+    // Use the working directory on the remote
+    QString remoteWorkDir = m_workingDir;
+    if (remoteWorkDir.isEmpty()) {
+        remoteWorkDir = QStringLiteral("~");
+    }
+
+    // Build claude args
+    QStringList claudeArgs;
+    if (!m_resumeSessionId.isEmpty()) {
+        claudeArgs << QStringLiteral("--resume") << m_resumeSessionId;
+    }
+    QString claudeCmd = QStringLiteral("claude");
+    if (!claudeArgs.isEmpty()) {
+        claudeCmd += QStringLiteral(" ") + claudeArgs.join(QStringLiteral(" "));
+    }
+
+    // Escape quotes in the remote command
+    remoteCmd = QStringLiteral("tmux new-session -A -s %1 -c %2 -- %3").arg(m_sessionName, remoteWorkDir, claudeCmd);
+
+    // Quote the entire remote command
+    sshArgs << remoteCmd;
+
+    // Build full ssh command
+    return QStringLiteral("ssh ") + sshArgs.join(QStringLiteral(" "));
 }
 
 void ClaudeSession::detach()

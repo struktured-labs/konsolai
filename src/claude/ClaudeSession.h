@@ -444,8 +444,14 @@ public:
      * Get the command to start/attach to this session
      *
      * This returns the tmux command that should be run in the terminal.
+     * For remote sessions, returns an SSH-wrapped command.
      */
     QString shellCommand() const;
+
+    /**
+     * Build SSH command for remote sessions
+     */
+    QString buildRemoteSshCommand() const;
 
     /**
      * Override run() to build the tmux command just before starting.

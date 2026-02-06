@@ -1277,11 +1277,20 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                 }
 
                 Session *session = createSession(profile, workDir);
-                // Pass task description from wizard to the Claude session
+                // Pass task description and SSH config from wizard to the Claude session
                 if (auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session)) {
                     QString taskPrompt = wizard.taskPrompt();
                     if (!taskPrompt.isEmpty()) {
                         claudeSession->setTaskDescription(taskPrompt);
+                    }
+
+                    // Set SSH remote session fields if applicable
+                    if (wizard.isRemoteSession()) {
+                        claudeSession->setIsRemote(true);
+                        claudeSession->setSshHost(wizard.sshHost());
+                        claudeSession->setSshUsername(wizard.sshUsername());
+                        claudeSession->setSshPort(wizard.sshPort());
+                        qDebug() << "MainWindow: Created remote SSH session to" << wizard.sshHost();
                     }
                 }
                 qDebug() << "Session created via wizard";
