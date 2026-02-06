@@ -106,6 +106,12 @@ void SessionManagerPanel::setupUi()
     m_activeCategory->setFlags(Qt::ItemIsEnabled);
     m_activeCategory->setExpanded(true);
 
+    m_detachedCategory = new QTreeWidgetItem(m_treeWidget);
+    m_detachedCategory->setText(0, i18n("Detached"));
+    m_detachedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
+    m_detachedCategory->setFlags(Qt::ItemIsEnabled);
+    m_detachedCategory->setExpanded(true);
+
     m_closedCategory = new QTreeWidgetItem(m_treeWidget);
     m_closedCategory->setText(0, i18n("Closed"));
     m_closedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("window-close")));
@@ -590,6 +596,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     while (m_activeCategory->childCount() > 0) {
         delete m_activeCategory->takeChild(0);
     }
+    while (m_detachedCategory->childCount() > 0) {
+        delete m_detachedCategory->takeChild(0);
+    }
     while (m_closedCategory->childCount() > 0) {
         delete m_closedCategory->takeChild(0);
     }
@@ -597,15 +606,8 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         delete m_archivedCategory->takeChild(0);
     }
 
-    // Pre-pass: detect sessions with dead tmux backends and mark them expired.
-    for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
-        if (!it->isArchived && !m_activeSessions.contains(it->sessionId)) {
-            if (!liveNames.contains(it->sessionName)) {
-                it->isArchived = true;
-                it->isExpired = true;
-            }
-        }
-    }
+    // Note: We no longer auto-archive dead tmux sessions.
+    // Dead sessions go to "Closed", user-archived sessions go to "Archived".
 
     // Sort sessions by last accessed (most recent first)
     QList<SessionMetadata> sortedMeta = m_metadata.values();
@@ -614,9 +616,10 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     });
 
     // Add sessions to appropriate categories
-    // Priority: Archived > Pinned > Active (has tab) > Closed (no tab)
+    // Priority: Archived > Pinned > Active (has tab) > Detached (tmux alive) > Closed (tmux dead)
     for (const auto &meta : sortedMeta) {
         bool isActive = m_activeSessions.contains(meta.sessionId);
+        bool tmuxAlive = liveNames.contains(meta.sessionName);
 
         if (meta.isArchived) {
             addSessionToTree(meta, m_archivedCategory);
@@ -624,8 +627,11 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             addSessionToTree(meta, m_pinnedCategory);
         } else if (isActive) {
             addSessionToTree(meta, m_activeCategory);
+        } else if (tmuxAlive) {
+            // Tab closed but tmux still running → Detached
+            addSessionToTree(meta, m_detachedCategory);
         } else {
-            // Not active (tab closed) but not archived - goes to Closed
+            // tmux session is dead → Closed
             addSessionToTree(meta, m_closedCategory);
         }
     }
@@ -657,6 +663,7 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 
     // Update category visibility
     m_pinnedCategory->setHidden(m_pinnedCategory->childCount() == 0);
+    m_detachedCategory->setHidden(m_detachedCategory->childCount() == 0);
     m_closedCategory->setHidden(m_closedCategory->childCount() == 0);
     m_archivedCategory->setHidden(m_archivedCategory->childCount() == 0);
     m_discoveredCategory->setHidden(m_discoveredCategory->childCount() == 0);

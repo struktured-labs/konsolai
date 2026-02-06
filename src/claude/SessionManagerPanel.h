@@ -172,6 +172,7 @@ private:
     QPushButton *m_collapseButton = nullptr;
     QTreeWidgetItem *m_pinnedCategory = nullptr;
     QTreeWidgetItem *m_activeCategory = nullptr;
+    QTreeWidgetItem *m_detachedCategory = nullptr;
     QTreeWidgetItem *m_closedCategory = nullptr;
     QTreeWidgetItem *m_archivedCategory = nullptr;
     QTreeWidgetItem *m_discoveredCategory = nullptr;
