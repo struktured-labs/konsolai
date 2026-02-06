@@ -11,6 +11,7 @@
 
 #include <KLocalizedString>
 #include <QAction>
+#include <QColor>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -82,11 +83,16 @@ void SessionManagerPanel::setupUi()
 
     // Tree widget for sessions
     m_treeWidget = new QTreeWidget(this);
+    m_treeWidget->setColumnCount(2);
     m_treeWidget->setHeaderHidden(true);
     m_treeWidget->setRootIsDecorated(true);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     m_treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
     m_treeWidget->setIndentation(12);
+    // Column 0: session name (stretches), Column 1: indicators (fixed width, right-aligned)
+    m_treeWidget->header()->setStretchLastSection(false);
+    m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
 
     connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, &SessionManagerPanel::onItemDoubleClicked);
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionManagerPanel::onContextMenu);
@@ -362,13 +368,14 @@ void SessionManagerPanel::markExpired(const QString &sessionName)
     // Find metadata by session name
     for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
         if (it->sessionName == sessionName) {
-            it->isArchived = true;
+            // Mark as expired but NOT archived - let it go to Closed category
+            // User must explicitly archive if they don't want to see it
             it->isExpired = true;
             it->lastAccessed = QDateTime::currentDateTime();
             m_activeSessions.remove(it->sessionId);
             saveMetadata();
             updateTreeWidget();
-            qDebug() << "SessionManagerPanel: Marked session as expired:" << sessionName;
+            qDebug() << "SessionManagerPanel: Marked session as expired (tmux dead):" << sessionName;
             return;
         }
     }
@@ -715,30 +722,41 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
     }
 
-    // Add yolo mode and approval count indicators for active sessions
+    item->setText(0, displayName);
+    item->setData(0, Qt::UserRole, meta.sessionId);
+    item->setToolTip(0, QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString()));
+
+    // Add yolo mode and approval count indicators in column 1 (always visible)
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {
+            QString indicators;
+
             // Add yolo mode indicator
             if (session->tripleYoloMode()) {
-                displayName += QStringLiteral(" ⚡⚡⚡");
+                indicators = QStringLiteral("⚡⚡⚡");
             } else if (session->doubleYoloMode()) {
-                displayName += QStringLiteral(" ⚡⚡");
+                indicators = QStringLiteral("⚡⚡");
             } else if (session->yoloMode()) {
-                displayName += QStringLiteral(" ⚡");
+                indicators = QStringLiteral("⚡");
             }
 
             // Add approval count
             int count = session->totalApprovalCount();
             if (count > 0) {
-                displayName += QStringLiteral(" [%1]").arg(count);
+                if (!indicators.isEmpty()) {
+                    indicators += QStringLiteral(" ");
+                }
+                indicators += QStringLiteral("[%1]").arg(count);
+            }
+
+            if (!indicators.isEmpty()) {
+                item->setText(1, indicators);
+                // Use a distinct color for the count (blue-ish)
+                item->setForeground(1, QBrush(QColor(0x3d, 0x9d, 0xf3))); // Light blue
             }
         }
     }
-
-    item->setText(0, displayName);
-    item->setData(0, Qt::UserRole, meta.sessionId);
-    item->setToolTip(0, QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString()));
 
     // Set icon based on state
     if (meta.isArchived && meta.isExpired) {
