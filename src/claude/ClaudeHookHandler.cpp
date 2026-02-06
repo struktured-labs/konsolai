@@ -7,12 +7,13 @@
 
 #include "ClaudeHookHandler.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
-#include <QJsonDocument>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QNetworkInterface>
 #include <QStandardPaths>
-#include <QCoreApplication>
 
 namespace Konsolai
 {
@@ -91,7 +92,18 @@ void ClaudeHookHandler::ensureDirectoryExists()
 bool ClaudeHookHandler::start()
 {
     qDebug() << "ClaudeHookHandler::start() called for session:" << m_sessionId;
-    qDebug() << "  Socket path:" << m_socketPath;
+    qDebug() << "  Mode:" << (m_mode == TCP ? "TCP" : "UnixSocket");
+
+    if (m_mode == TCP) {
+        return startTcp();
+    } else {
+        return startUnixSocket();
+    }
+}
+
+bool ClaudeHookHandler::startUnixSocket()
+{
+    qDebug() << "ClaudeHookHandler::startUnixSocket() - path:" << m_socketPath;
 
     if (m_server && m_server->isListening()) {
         qDebug() << "  Already listening";
@@ -110,8 +122,7 @@ bool ClaudeHookHandler::start()
     m_server = new QLocalServer(this);
     m_server->setSocketOptions(QLocalServer::UserAccessOption);
 
-    connect(m_server, &QLocalServer::newConnection,
-            this, &ClaudeHookHandler::onNewConnection);
+    connect(m_server, &QLocalServer::newConnection, this, &ClaudeHookHandler::onNewConnection);
 
     if (!m_server->listen(m_socketPath)) {
         qWarning() << "ClaudeHookHandler: Failed to start hook server:" << m_server->errorString();
@@ -125,15 +136,61 @@ bool ClaudeHookHandler::start()
     return true;
 }
 
+bool ClaudeHookHandler::startTcp()
+{
+    qDebug() << "ClaudeHookHandler::startTcp()";
+
+    if (m_tcpServer && m_tcpServer->isListening()) {
+        qDebug() << "  Already listening on port" << m_tcpPort;
+        return true;
+    }
+
+    m_tcpServer = new QTcpServer(this);
+
+    connect(m_tcpServer, &QTcpServer::newConnection, this, &ClaudeHookHandler::onTcpNewConnection);
+
+    // Listen on localhost only (will be tunneled via SSH -R)
+    if (!m_tcpServer->listen(QHostAddress::LocalHost, 0)) {
+        qWarning() << "ClaudeHookHandler: Failed to start TCP server:" << m_tcpServer->errorString();
+        Q_EMIT errorOccurred(QStringLiteral("Failed to start TCP hook server: ") + m_tcpServer->errorString());
+        delete m_tcpServer;
+        m_tcpServer = nullptr;
+        return false;
+    }
+
+    m_tcpPort = m_tcpServer->serverPort();
+    qDebug() << "ClaudeHookHandler: Started TCP server on port" << m_tcpPort;
+    return true;
+}
+
+bool ClaudeHookHandler::isRunning() const
+{
+    if (m_mode == TCP) {
+        return m_tcpServer && m_tcpServer->isListening();
+    } else {
+        return m_server && m_server->isListening();
+    }
+}
+
+QString ClaudeHookHandler::connectionString() const
+{
+    if (m_mode == TCP) {
+        return QStringLiteral("localhost:%1").arg(m_tcpPort);
+    } else {
+        return m_socketPath;
+    }
+}
+
 void ClaudeHookHandler::stop()
 {
+    // Stop Unix socket server
     if (m_server) {
         m_server->close();
         delete m_server;
         m_server = nullptr;
     }
 
-    // Close all client connections
+    // Close all Unix socket client connections
     for (QLocalSocket *client : std::as_const(m_clients)) {
         client->disconnectFromServer();
         client->deleteLater();
@@ -144,6 +201,21 @@ void ClaudeHookHandler::stop()
     if (QFile::exists(m_socketPath)) {
         QFile::remove(m_socketPath);
     }
+
+    // Stop TCP server
+    if (m_tcpServer) {
+        m_tcpServer->close();
+        delete m_tcpServer;
+        m_tcpServer = nullptr;
+    }
+
+    // Close all TCP client connections
+    for (QTcpSocket *client : std::as_const(m_tcpClients)) {
+        client->disconnectFromHost();
+        client->deleteLater();
+    }
+    m_tcpClients.clear();
+    m_tcpPort = 0;
 }
 
 void ClaudeHookHandler::onNewConnection()
@@ -180,9 +252,49 @@ void ClaudeHookHandler::onClientReadyRead()
 
 void ClaudeHookHandler::onClientDisconnected()
 {
-    QLocalSocket *client = qobject_cast<QLocalSocket*>(sender());
+    QLocalSocket *client = qobject_cast<QLocalSocket *>(sender());
     if (client) {
         m_clients.remove(client);
+        client->deleteLater();
+        Q_EMIT clientDisconnected();
+    }
+}
+
+void ClaudeHookHandler::onTcpNewConnection()
+{
+    qDebug() << "ClaudeHookHandler: New TCP connection received";
+    while (m_tcpServer && m_tcpServer->hasPendingConnections()) {
+        QTcpSocket *client = m_tcpServer->nextPendingConnection();
+        if (client) {
+            m_tcpClients.insert(client);
+
+            connect(client, &QTcpSocket::readyRead, this, &ClaudeHookHandler::onTcpClientReadyRead);
+            connect(client, &QTcpSocket::disconnected, this, &ClaudeHookHandler::onTcpClientDisconnected);
+
+            qDebug() << "ClaudeHookHandler: TCP client connected, total clients:" << m_tcpClients.size();
+            Q_EMIT clientConnected();
+        }
+    }
+}
+
+void ClaudeHookHandler::onTcpClientReadyRead()
+{
+    QTcpSocket *client = qobject_cast<QTcpSocket *>(sender());
+    if (!client) {
+        return;
+    }
+
+    while (client->canReadLine()) {
+        QByteArray line = client->readLine();
+        handleMessage(line);
+    }
+}
+
+void ClaudeHookHandler::onTcpClientDisconnected()
+{
+    QTcpSocket *client = qobject_cast<QTcpSocket *>(sender());
+    if (client) {
+        m_tcpClients.remove(client);
         client->deleteLater();
         Q_EMIT clientDisconnected();
     }
@@ -272,6 +384,89 @@ QString ClaudeHookHandler::generateHooksConfig() const
     return QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
 }
 
+QString ClaudeHookHandler::generateRemoteHookScript(quint16 tunnelPort) const
+{
+    // Generate a shell script that sends hook events via netcat to the SSH tunnel
+    // This script runs on the remote machine and communicates back to local Konsolai
+    QString script = QStringLiteral(R"(#!/bin/bash
+# Konsolai remote hook handler - sends events through SSH reverse tunnel
+# Usage: konsolai-remote-hook --event <event_type>
+# Reads hook data from stdin, forwards to local Konsolai via SSH tunnel
+
+EVENT_TYPE=""
+TUNNEL_PORT=%1
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --event)
+            EVENT_TYPE="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$EVENT_TYPE" ]]; then
+    echo "Error: --event required" >&2
+    exit 0  # Always exit 0 to not break Claude
+fi
+
+# Read hook data from stdin
+HOOK_DATA=$(cat)
+
+# Build JSON message
+JSON_MSG=$(cat <<EOF
+{"event_type":"${EVENT_TYPE}","data":${HOOK_DATA}}
+EOF
+)
+
+# Send via netcat to the SSH tunnel port (timeout 2s, suppress errors)
+echo "$JSON_MSG" | nc -w 2 localhost $TUNNEL_PORT 2>/dev/null || true
+
+# Always exit 0 to not break Claude
+exit 0
+)")
+                         .arg(tunnelPort);
+
+    return script;
+}
+
+QString ClaudeHookHandler::generateRemoteHooksConfig(quint16 tunnelPort, const QString &scriptPath) const
+{
+    Q_UNUSED(tunnelPort); // Port is embedded in the script
+
+    qDebug() << "ClaudeHookHandler: Generating remote hooks config";
+    qDebug() << "  Script path:" << scriptPath;
+
+    QJsonObject hooks;
+
+    // Build command string for each hook type
+    auto makeHookEntry = [&](const QString &eventType) -> QJsonArray {
+        QString cmdStr = QStringLiteral("'%1' --event '%2'").arg(scriptPath, eventType);
+        QJsonObject hookDef;
+        hookDef[QStringLiteral("type")] = QStringLiteral("command");
+        hookDef[QStringLiteral("command")] = cmdStr;
+
+        QJsonObject entry;
+        entry[QStringLiteral("matcher")] = QStringLiteral("*");
+        entry[QStringLiteral("hooks")] = QJsonArray{hookDef};
+        return QJsonArray{entry};
+    };
+
+    hooks[QStringLiteral("Notification")] = makeHookEntry(QStringLiteral("Notification"));
+    hooks[QStringLiteral("Stop")] = makeHookEntry(QStringLiteral("Stop"));
+    hooks[QStringLiteral("PreToolUse")] = makeHookEntry(QStringLiteral("PreToolUse"));
+    hooks[QStringLiteral("PostToolUse")] = makeHookEntry(QStringLiteral("PostToolUse"));
+    hooks[QStringLiteral("PermissionRequest")] = makeHookEntry(QStringLiteral("PermissionRequest"));
+
+    QJsonObject root;
+    root[QStringLiteral("hooks")] = hooks;
+
+    QJsonDocument doc(root);
+    return QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
+}
 
 // ============================================================================
 // ClaudeHookClient
