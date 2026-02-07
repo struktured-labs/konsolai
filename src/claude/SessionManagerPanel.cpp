@@ -24,6 +24,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPointer>
 #include <QSet>
 #include <QStandardPaths>
 #include <QVBoxLayout>
@@ -594,14 +595,25 @@ void SessionManagerPanel::updateTreeWidget()
     // then call updateTreeWidgetWithLiveSessions() with the result.
     // Use a heap-allocated TmuxManager so it outlives this stack frame.
     auto *tmux = new TmuxManager(this);
-    tmux->listKonsolaiSessionsAsync([this, tmux](const QList<TmuxManager::SessionInfo> &liveSessions) {
+
+    // Use QPointer to guard against the panel being destroyed before callback fires
+    QPointer<SessionManagerPanel> guard(this);
+
+    tmux->listKonsolaiSessionsAsync([guard, tmux](const QList<TmuxManager::SessionInfo> &liveSessions) {
+        tmux->deleteLater();
+
+        // Check if the panel was destroyed while waiting for async result
+        if (!guard) {
+            qDebug() << "SessionManagerPanel: Panel destroyed during async tmux query, skipping update";
+            return;
+        }
+
         QSet<QString> liveNames;
         for (const auto &info : liveSessions) {
             liveNames.insert(info.name);
         }
-        m_cachedLiveNames = liveNames;
-        updateTreeWidgetWithLiveSessions(liveNames);
-        tmux->deleteLater();
+        guard->m_cachedLiveNames = liveNames;
+        guard->updateTreeWidgetWithLiveSessions(liveNames);
     });
 }
 
