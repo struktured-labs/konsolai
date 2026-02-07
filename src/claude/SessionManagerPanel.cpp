@@ -184,12 +184,23 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         meta.createdAt = QDateTime::currentDateTime();
         meta.lastAccessed = meta.createdAt;
         meta.isArchived = false;
+        // New session - capture initial yolo mode from session (which comes from global settings)
+        meta.yoloMode = session->yoloMode();
+        meta.doubleYoloMode = session->doubleYoloMode();
+        meta.tripleYoloMode = session->tripleYoloMode();
         m_metadata[sessionId] = meta;
     } else {
-        // Session was archived/expired, now unarchived
+        // Session was archived/expired, now unarchived - restore yolo mode from metadata
         m_metadata[sessionId].isArchived = false;
         m_metadata[sessionId].isExpired = false;
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
+
+        // Restore per-session yolo mode settings from saved metadata
+        session->setYoloMode(m_metadata[sessionId].yoloMode);
+        session->setDoubleYoloMode(m_metadata[sessionId].doubleYoloMode);
+        session->setTripleYoloMode(m_metadata[sessionId].tripleYoloMode);
+        qDebug() << "SessionManagerPanel: Restored yolo mode for" << sessionId << "- yolo:" << m_metadata[sessionId].yoloMode
+                 << "double:" << m_metadata[sessionId].doubleYoloMode << "triple:" << m_metadata[sessionId].tripleYoloMode;
     }
 
     saveMetadata();
@@ -220,14 +231,26 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         scheduleTreeUpdate();
     });
 
-    // Connect to all yolo mode changes to update display (debounced)
-    connect(session, &ClaudeSession::yoloModeChanged, this, [this](bool) {
+    // Connect to all yolo mode changes to update display and persist per-session settings
+    connect(session, &ClaudeSession::yoloModeChanged, this, [this, sessionId](bool enabled) {
+        if (m_metadata.contains(sessionId)) {
+            m_metadata[sessionId].yoloMode = enabled;
+            saveMetadata();
+        }
         scheduleTreeUpdate();
     });
-    connect(session, &ClaudeSession::doubleYoloModeChanged, this, [this](bool) {
+    connect(session, &ClaudeSession::doubleYoloModeChanged, this, [this, sessionId](bool enabled) {
+        if (m_metadata.contains(sessionId)) {
+            m_metadata[sessionId].doubleYoloMode = enabled;
+            saveMetadata();
+        }
         scheduleTreeUpdate();
     });
-    connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this](bool) {
+    connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this, sessionId](bool enabled) {
+        if (m_metadata.contains(sessionId)) {
+            m_metadata[sessionId].tripleYoloMode = enabled;
+            saveMetadata();
+        }
         scheduleTreeUpdate();
     });
 
@@ -244,10 +267,12 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
     }
 
     QString sessionId = session->sessionId();
-    m_activeSessions.remove(sessionId);
 
-    // Update last accessed time
+    // Save yolo mode settings before removing session reference
     if (m_metadata.contains(sessionId)) {
+        m_metadata[sessionId].yoloMode = session->yoloMode();
+        m_metadata[sessionId].doubleYoloMode = session->doubleYoloMode();
+        m_metadata[sessionId].tripleYoloMode = session->tripleYoloMode();
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
         saveMetadata();
     }
@@ -940,6 +965,11 @@ void SessionManagerPanel::loadMetadata()
         meta.sshUsername = obj[QStringLiteral("sshUsername")].toString();
         meta.sshPort = obj[QStringLiteral("sshPort")].toInt(22);
 
+        // Per-session yolo mode settings
+        meta.yoloMode = obj[QStringLiteral("yoloMode")].toBool();
+        meta.doubleYoloMode = obj[QStringLiteral("doubleYoloMode")].toBool();
+        meta.tripleYoloMode = obj[QStringLiteral("tripleYoloMode")].toBool();
+
         if (!meta.sessionId.isEmpty()) {
             m_metadata[meta.sessionId] = meta;
         }
@@ -971,6 +1001,17 @@ void SessionManagerPanel::saveMetadata()
             obj[QStringLiteral("sshHost")] = meta.sshHost;
             obj[QStringLiteral("sshUsername")] = meta.sshUsername;
             obj[QStringLiteral("sshPort")] = meta.sshPort;
+        }
+
+        // Per-session yolo mode settings (only save if enabled to keep JSON clean)
+        if (meta.yoloMode) {
+            obj[QStringLiteral("yoloMode")] = true;
+        }
+        if (meta.doubleYoloMode) {
+            obj[QStringLiteral("doubleYoloMode")] = true;
+        }
+        if (meta.tripleYoloMode) {
+            obj[QStringLiteral("tripleYoloMode")] = true;
         }
 
         array.append(obj);

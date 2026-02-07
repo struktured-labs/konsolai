@@ -45,6 +45,11 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     QString sshHost;
     QString sshUsername;
     int sshPort = 22;
+
+    // Per-session yolo mode settings (persisted across restarts)
+    bool yoloMode = false;
+    bool doubleYoloMode = false;
+    bool tripleYoloMode = false;
 };
 
 /**
