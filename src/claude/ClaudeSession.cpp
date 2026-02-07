@@ -19,7 +19,9 @@
 #include <QRegularExpression>
 #include <QTimer>
 
+#ifdef Q_OS_LINUX
 #include <unistd.h> // sysconf(_SC_CLK_TCK)
+#endif
 
 namespace Konsolai
 {
@@ -1441,6 +1443,7 @@ ResourceUsage ClaudeSession::readProcessResources(qint64 pid)
 {
     ResourceUsage usage;
 
+#ifdef Q_OS_LINUX
     // Read /proc/{pid}/stat for CPU ticks (fields 14=utime, 15=stime, 1-indexed)
     QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
     if (statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -1500,6 +1503,9 @@ ResourceUsage ClaudeSession::readProcessResources(qint64 pid)
             }
         }
     }
+#else
+    Q_UNUSED(pid)
+#endif
 
     return usage;
 }
