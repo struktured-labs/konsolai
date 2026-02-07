@@ -176,6 +176,7 @@ private:
     void showApprovalLog(ClaudeSession *session);
     void editSessionDescription(const QString &sessionId);
     void cleanupStaleSockets();
+    void ensureHooksConfigured(ClaudeSession *session);
     SessionMetadata *findMetadata(const QString &sessionId);
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
 

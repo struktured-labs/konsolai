@@ -165,6 +165,91 @@ void SessionManagerPanel::setCollapsed(bool collapsed)
     Q_EMIT collapsedChanged(collapsed);
 }
 
+void SessionManagerPanel::ensureHooksConfigured(ClaudeSession *session)
+{
+    if (!session || session->isRemote()) {
+        return; // Skip for null or remote sessions
+    }
+
+    QString workDir = session->workingDirectory();
+    if (workDir.isEmpty()) {
+        return;
+    }
+
+    QString settingsPath = workDir + QStringLiteral("/.claude/settings.local.json");
+    QString sessionId = session->sessionId();
+    QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
+    QString handlerPath = ClaudeHookHandler::hookHandlerPath();
+
+    if (handlerPath.isEmpty()) {
+        return; // No hook handler available
+    }
+
+    // Check if hooks are already configured for this session
+    QFile file(settingsPath);
+    if (file.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+        file.close();
+
+        if (doc.isObject()) {
+            QJsonObject settings = doc.object();
+            if (settings.contains(QStringLiteral("hooks"))) {
+                QJsonObject hooks = settings[QStringLiteral("hooks")].toObject();
+                // Check if any hook points to our socket
+                QByteArray hooksBytes = QJsonDocument(hooks).toJson();
+                if (hooksBytes.contains(socketPath.toUtf8())) {
+                    return; // Hooks already configured correctly
+                }
+            }
+        }
+    }
+
+    // Hooks missing or pointing to wrong socket - repair them
+    qDebug() << "SessionManagerPanel: Repairing missing/stale hooks for session" << sessionId;
+
+    // Read existing settings
+    QJsonObject settings;
+    if (file.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+        if (doc.isObject()) {
+            settings = doc.object();
+        }
+        file.close();
+    }
+
+    // Generate hooks config
+    auto makeHookEntry = [&](const QString &eventType) -> QJsonArray {
+        QString cmdStr = QStringLiteral("'%1' --socket '%2' --event '%3'").arg(handlerPath, socketPath, eventType);
+        QJsonObject hookDef;
+        hookDef[QStringLiteral("type")] = QStringLiteral("command");
+        hookDef[QStringLiteral("command")] = cmdStr;
+
+        QJsonObject entry;
+        entry[QStringLiteral("matcher")] = QStringLiteral("*");
+        entry[QStringLiteral("hooks")] = QJsonArray{hookDef};
+        return QJsonArray{entry};
+    };
+
+    QJsonObject hooks;
+    hooks[QStringLiteral("Notification")] = makeHookEntry(QStringLiteral("Notification"));
+    hooks[QStringLiteral("Stop")] = makeHookEntry(QStringLiteral("Stop"));
+    hooks[QStringLiteral("PreToolUse")] = makeHookEntry(QStringLiteral("PreToolUse"));
+    hooks[QStringLiteral("PostToolUse")] = makeHookEntry(QStringLiteral("PostToolUse"));
+    hooks[QStringLiteral("PermissionRequest")] = makeHookEntry(QStringLiteral("PermissionRequest"));
+
+    settings[QStringLiteral("hooks")] = hooks;
+
+    // Ensure .claude directory exists
+    QDir().mkpath(workDir + QStringLiteral("/.claude"));
+
+    // Write settings
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
+        file.close();
+        qDebug() << "SessionManagerPanel: Repaired hooks for session" << sessionId;
+    }
+}
+
 void SessionManagerPanel::registerSession(ClaudeSession *session)
 {
     if (!session) {
@@ -173,6 +258,9 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
 
     QString sessionId = session->sessionId();
     m_activeSessions[sessionId] = session;
+
+    // Ensure hooks are configured for this session's project
+    ensureHooksConfigured(session);
 
     // Update or create metadata
     if (!m_metadata.contains(sessionId)) {
