@@ -170,6 +170,7 @@ private:
     void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent);
     void showApprovalLog(ClaudeSession *session);
     void editSessionDescription(const QString &sessionId);
+    void cleanupStaleSockets();
     SessionMetadata *findMetadata(const QString &sessionId);
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
 
@@ -190,6 +191,10 @@ private:
 
     // Debounce timer for updateTreeWidget — coalesces rapid-fire signals
     QTimer *m_updateDebounce = nullptr;
+
+    // Guard against overlapping async tmux queries
+    bool m_asyncQueryInFlight = false;
+    bool m_asyncQueryPending = false;
 
     // Cached live session names from last async tmux query
     QSet<QString> m_cachedLiveNames;

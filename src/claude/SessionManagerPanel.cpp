@@ -40,6 +40,7 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
 {
     setupUi();
     loadMetadata();
+    cleanupStaleSockets();
     refresh();
 }
 
@@ -281,6 +282,48 @@ QList<SessionMetadata> SessionManagerPanel::archivedSessions() const
     return result;
 }
 
+void SessionManagerPanel::cleanupStaleSockets()
+{
+    // Remove stale socket and yolo files from sessions that no longer have live tmux sessions
+    QString sessionsDir = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions");
+    QDir dir(sessionsDir);
+    if (!dir.exists()) {
+        return;
+    }
+
+    // Get live tmux session names
+    TmuxManager tmux;
+    QList<TmuxManager::SessionInfo> liveSessions = tmux.listKonsolaiSessions();
+    QSet<QString> liveIds;
+    for (const auto &info : liveSessions) {
+        // Extract ID from session name: konsolai-{profile}-{id}
+        QStringList parts = info.name.split(QLatin1Char('-'));
+        if (parts.size() >= 3) {
+            liveIds.insert(parts.last());
+        }
+    }
+
+    // Clean up socket and yolo files for dead sessions
+    int cleaned = 0;
+    const auto sockFiles = dir.entryList({QStringLiteral("*.sock")}, QDir::Files);
+    for (const QString &sockFile : sockFiles) {
+        QString id = sockFile.left(sockFile.length() - 5); // Remove .sock
+        if (!liveIds.contains(id)) {
+            QFile::remove(dir.filePath(sockFile));
+            // Also remove matching .yolo file
+            QString yoloFile = id + QStringLiteral(".yolo");
+            if (dir.exists(yoloFile)) {
+                QFile::remove(dir.filePath(yoloFile));
+            }
+            cleaned++;
+        }
+    }
+
+    if (cleaned > 0) {
+        qDebug() << "SessionManagerPanel: Cleaned up" << cleaned << "stale socket/yolo files";
+    }
+}
+
 void SessionManagerPanel::refresh()
 {
     // Discover tmux sessions that aren't tracked
@@ -329,27 +372,46 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
         return;
     }
 
-    // Kill the tmux session if it exists
-    TmuxManager tmux;
     QString sessionName = m_metadata[sessionId].sessionName;
-    if (tmux.sessionExists(sessionName)) {
-        tmux.killSession(sessionName);
+
+    // Disconnect any active session signals before removal
+    if (m_activeSessions.contains(sessionId)) {
+        ClaudeSession *session = m_activeSessions[sessionId];
+        if (session) {
+            disconnect(session, nullptr, this, nullptr);
+        }
     }
 
-    // Remove from active sessions
+    // Remove from active sessions first
     m_activeSessions.remove(sessionId);
 
     // Mark as archived
     m_metadata[sessionId].isArchived = true;
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-
     saveMetadata();
-    updateTreeWidget();
 
-    // Refresh registry
-    if (m_registry) {
-        m_registry->refreshOrphanedSessions();
+    // Kill the tmux session asynchronously to avoid blocking the event loop
+    auto *tmux = new TmuxManager(nullptr);
+    tmux->sessionExistsAsync(sessionName, [tmux, sessionName](bool exists) {
+        if (exists) {
+            // Use sync kill since we're already in an async context
+            tmux->killSession(sessionName);
+        }
+        tmux->deleteLater();
+    });
+
+    // Clean up stale socket and yolo files
+    QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
+    if (QFile::exists(socketPath)) {
+        QFile::remove(socketPath);
     }
+    QString yoloPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".yolo");
+    if (QFile::exists(yoloPath)) {
+        QFile::remove(yoloPath);
+    }
+
+    // Update the tree widget (async tmux query will run)
+    updateTreeWidget();
 }
 
 void SessionManagerPanel::unarchiveSession(const QString &sessionId)
@@ -591,10 +653,20 @@ void SessionManagerPanel::scheduleTreeUpdate()
 
 void SessionManagerPanel::updateTreeWidget()
 {
+    // Guard against overlapping async tmux queries - if one is already running,
+    // mark that we need another update after it finishes
+    if (m_asyncQueryInFlight) {
+        m_asyncQueryPending = true;
+        return;
+    }
+
+    m_asyncQueryInFlight = true;
+    m_asyncQueryPending = false;
+
     // Async pre-pass: query tmux for live sessions without blocking the GUI,
     // then call updateTreeWidgetWithLiveSessions() with the result.
-    // Use a heap-allocated TmuxManager so it outlives this stack frame.
-    auto *tmux = new TmuxManager(this);
+    // TmuxManager is NOT parented to this, so it survives panel destruction.
+    auto *tmux = new TmuxManager(nullptr);
 
     // Use QPointer to guard against the panel being destroyed before callback fires
     QPointer<SessionManagerPanel> guard(this);
@@ -608,12 +680,19 @@ void SessionManagerPanel::updateTreeWidget()
             return;
         }
 
+        guard->m_asyncQueryInFlight = false;
+
         QSet<QString> liveNames;
         for (const auto &info : liveSessions) {
             liveNames.insert(info.name);
         }
         guard->m_cachedLiveNames = liveNames;
         guard->updateTreeWidgetWithLiveSessions(liveNames);
+
+        // If another update was requested while we were querying, run it now
+        if (guard->m_asyncQueryPending) {
+            guard->updateTreeWidget();
+        }
     });
 }
 
