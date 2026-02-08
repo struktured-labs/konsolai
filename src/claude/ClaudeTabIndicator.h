@@ -60,10 +60,17 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override;
 
+public:
+    bool suggestionAvailable() const
+    {
+        return m_suggestionAvailable;
+    }
+
 private Q_SLOTS:
     void updateState(ClaudeProcess::State state);
     void updateAnimation();
     void onSessionDestroyed();
+    void onSuggestionDelayElapsed();
 
 private:
     QColor stateColor(ClaudeProcess::State state) const;
@@ -75,8 +82,12 @@ private:
     QTimer *m_animationTimer = nullptr;
     qreal m_animationPhase = 0.0;
 
-    static constexpr int SIZE = 12;
-    static constexpr int DOT_SIZE = 8;
+    // Suggestion-available detection (idle for 3s)
+    QTimer *m_suggestionDelayTimer = nullptr;
+    bool m_suggestionAvailable = false;
+
+    static constexpr int SIZE = 16;
+    static constexpr int DOT_SIZE = 10;
 };
 
 } // namespace Konsolai

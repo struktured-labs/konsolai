@@ -20,6 +20,11 @@ class QPoint;
 class QToolButton;
 class QMenu;
 
+namespace Konsolai
+{
+class ClaudeTabIndicator;
+}
+
 namespace Konsole
 {
 class ViewProperties;
@@ -242,7 +247,10 @@ private:
 
     bool _stylesheetSet = false;
 
+    void setupClaudeIndicator(int tabIndex, QWidget *splitterWidget);
+
     QHash<const QWidget *, TabIconState> _tabIconState;
+    QHash<const QWidget *, Konsolai::ClaudeTabIndicator *> _claudeIndicators;
     ViewManager *_connectedViewManager;
     QMenu *_contextPopupMenu;
     QToolButton *_newTabButton;

@@ -21,6 +21,10 @@
 #include <KColorUtils>
 #include <KLocalizedString>
 
+// Konsolai (Claude integration)
+#include "claude/ClaudeSession.h"
+#include "claude/ClaudeTabIndicator.h"
+
 // Konsole
 #include "DetachableTabBar.h"
 #include "KonsoleSettings.h"
@@ -278,18 +282,39 @@ void TabbedViewContainer::moveActiveView(MoveDirection direction)
     auto swappedWidget = viewSplitterAt(newIndex);
     auto swappedTitle = tabBar()->tabText(newIndex);
     auto swappedIcon = tabBar()->tabIcon(newIndex);
+    bool swappedHasIndicator = _claudeIndicators.contains(swappedWidget);
 
     auto currentWidget = viewSplitterAt(currentIndex);
     auto currentTitle = tabBar()->tabText(currentIndex);
     auto currentIcon = tabBar()->tabIcon(currentIndex);
+    bool currentHasIndicator = _claudeIndicators.contains(currentWidget);
 
+    // insertTab destroys existing tab button widgets, so forget our pointers
+    _claudeIndicators.remove(swappedWidget);
+    _claudeIndicators.remove(currentWidget);
+
+    int idx1, idx2;
     if (newIndex < currentIndex) {
-        insertTab(newIndex, currentWidget, currentIcon, currentTitle);
-        insertTab(currentIndex, swappedWidget, swappedIcon, swappedTitle);
+        idx1 = insertTab(newIndex, currentWidget, currentIcon, currentTitle);
+        idx2 = insertTab(currentIndex, swappedWidget, swappedIcon, swappedTitle);
     } else {
-        insertTab(currentIndex, swappedWidget, swappedIcon, swappedTitle);
-        insertTab(newIndex, currentWidget, currentIcon, currentTitle);
+        idx1 = insertTab(currentIndex, swappedWidget, swappedIcon, swappedTitle);
+        idx2 = insertTab(newIndex, currentWidget, currentIcon, currentTitle);
     }
+
+    // Recreate indicators at their new positions
+    if (newIndex < currentIndex) {
+        if (currentHasIndicator)
+            setupClaudeIndicator(idx1, currentWidget);
+        if (swappedHasIndicator)
+            setupClaudeIndicator(idx2, swappedWidget);
+    } else {
+        if (swappedHasIndicator)
+            setupClaudeIndicator(idx1, swappedWidget);
+        if (currentHasIndicator)
+            setupClaudeIndicator(idx2, currentWidget);
+    }
+
     setCurrentIndex(newIndex);
 }
 
@@ -344,6 +369,7 @@ QSize TabbedViewContainer::sizeHint() const
 void TabbedViewContainer::addSplitter(ViewSplitter *viewSplitter, int index)
 {
     index = insertTab(index, viewSplitter, QString());
+    setupClaudeIndicator(index, viewSplitter);
     connect(viewSplitter, &ViewSplitter::destroyed, this, &TabbedViewContainer::viewDestroyed);
 
     disconnect(viewSplitter, &ViewSplitter::terminalDisplayDropped, nullptr, nullptr);
@@ -360,6 +386,27 @@ void TabbedViewContainer::addSplitter(ViewSplitter *viewSplitter, int index)
     setCurrentIndex(index);
 }
 
+void TabbedViewContainer::setupClaudeIndicator(int tabIndex, QWidget *splitterWidget)
+{
+    auto *splitter = qobject_cast<ViewSplitter *>(splitterWidget);
+    if (!splitter) {
+        return;
+    }
+    auto *display = splitter->activeTerminalDisplay();
+    if (!display || !display->sessionController() || !display->sessionController()->session()) {
+        return;
+    }
+    auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(display->sessionController()->session().data());
+    if (!claudeSession) {
+        return;
+    }
+
+    auto *indicator = new Konsolai::ClaudeTabIndicator(tabBar());
+    indicator->setSession(claudeSession);
+    tabBar()->setTabButton(tabIndex, QTabBar::LeftSide, indicator);
+    _claudeIndicators[splitterWidget] = indicator;
+}
+
 void TabbedViewContainer::addView(TerminalDisplay *view)
 {
     auto viewSplitter = new ViewSplitter();
@@ -367,6 +414,7 @@ void TabbedViewContainer::addView(TerminalDisplay *view)
     auto item = view->sessionController();
     int index = _newTabBehavior == PutNewTabAfterCurrentTab ? currentIndex() + 1 : -1;
     index = insertTab(index, viewSplitter, item->icon(), item->title());
+    setupClaudeIndicator(index, viewSplitter);
 
     connectTerminalDisplay(view);
     connect(viewSplitter, &ViewSplitter::destroyed, this, &TabbedViewContainer::viewDestroyed);
@@ -424,6 +472,7 @@ void TabbedViewContainer::viewDestroyed(QObject *view)
     removeTab(idx);
     forgetView();
     _tabIconState.remove(widget);
+    _claudeIndicators.remove(widget);
 
     Q_EMIT viewRemoved();
 }
@@ -600,6 +649,15 @@ void TabbedViewContainer::updateIcon(ViewProperties *item)
     auto controller = qobject_cast<SessionController *>(item);
     auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
     const int index = indexOf(topLevelSplitter);
+
+    // Claude tabs use the ClaudeTabIndicator widget instead of a static icon
+    if (_claudeIndicators.contains(topLevelSplitter)) {
+        if (!tabIcon(index).isNull()) {
+            setTabIcon(index, QIcon());
+        }
+        return;
+    }
+
     const auto &state = _tabIconState[topLevelSplitter];
 
     // Tab icon priority (from highest to lowest):

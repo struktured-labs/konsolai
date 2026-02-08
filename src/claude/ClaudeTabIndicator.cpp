@@ -15,11 +15,16 @@ namespace Konsolai
 ClaudeTabIndicator::ClaudeTabIndicator(QWidget *parent)
     : QWidget(parent)
     , m_animationTimer(new QTimer(this))
+    , m_suggestionDelayTimer(new QTimer(this))
 {
     setFixedSize(SIZE, SIZE);
 
     m_animationTimer->setInterval(100); // 10 FPS
     connect(m_animationTimer, &QTimer::timeout, this, &ClaudeTabIndicator::updateAnimation);
+
+    m_suggestionDelayTimer->setSingleShot(true);
+    m_suggestionDelayTimer->setInterval(3000); // 3s idle → suggestion available
+    connect(m_suggestionDelayTimer, &QTimer::timeout, this, &ClaudeTabIndicator::onSuggestionDelayElapsed);
 }
 
 ClaudeTabIndicator::~ClaudeTabIndicator() = default;
@@ -57,7 +62,9 @@ void ClaudeTabIndicator::setSession(ClaudeSession *session)
         updateState(m_session->claudeState());
     } else {
         m_currentState = ClaudeProcess::State::NotRunning;
+        m_suggestionAvailable = false;
         m_animationTimer->stop();
+        m_suggestionDelayTimer->stop();
         update();
     }
 }
@@ -93,6 +100,9 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
 
     // Draw colored dot
     QColor color = stateColor(m_currentState);
+    if (m_currentState == ClaudeProcess::State::Idle && m_suggestionAvailable) {
+        color = QColor(0, 188, 212); // Cyan/teal for suggestion available
+    }
     painter.setBrush(color);
     painter.setPen(Qt::NoPen);
 
@@ -147,16 +157,30 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
 void ClaudeTabIndicator::updateState(ClaudeProcess::State state)
 {
     m_currentState = state;
+    m_suggestionAvailable = false;
 
-    // Start/stop animation based on state
     if (state == ClaudeProcess::State::Working) {
         m_animationTimer->start();
+        m_suggestionDelayTimer->stop();
+    } else if (state == ClaudeProcess::State::Idle) {
+        m_animationTimer->stop();
+        m_animationPhase = 0.0;
+        m_suggestionDelayTimer->start();
     } else {
         m_animationTimer->stop();
         m_animationPhase = 0.0;
+        m_suggestionDelayTimer->stop();
     }
 
     update();
+}
+
+void ClaudeTabIndicator::onSuggestionDelayElapsed()
+{
+    if (m_currentState == ClaudeProcess::State::Idle) {
+        m_suggestionAvailable = true;
+        update();
+    }
 }
 
 void ClaudeTabIndicator::updateAnimation()
@@ -172,7 +196,9 @@ void ClaudeTabIndicator::onSessionDestroyed()
 {
     m_session = nullptr;
     m_currentState = ClaudeProcess::State::NotRunning;
+    m_suggestionAvailable = false;
     m_animationTimer->stop();
+    m_suggestionDelayTimer->stop();
     update();
 }
 

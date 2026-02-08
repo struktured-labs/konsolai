@@ -66,3 +66,8 @@ ecm_add_tests(
     TokenUsageTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )
+
+ecm_add_tests(
+    ClaudeTabIndicatorTest.cpp
+    LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS} Qt::Widgets
+)
