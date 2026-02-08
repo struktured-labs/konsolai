@@ -72,6 +72,9 @@ ClaudeSession* ClaudeSession::createForReattach(const QString &existingSessionNa
 
 ClaudeSession::~ClaudeSession()
 {
+    if (auto *registry = ClaudeSessionRegistry::instance()) {
+        registry->unregisterSession(this);
+    }
     removeHooksFromProjectSettings();
 }
 
