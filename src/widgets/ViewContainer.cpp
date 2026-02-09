@@ -704,6 +704,9 @@ void TabbedViewContainer::updateIcon(ViewProperties *item)
 void TabbedViewContainer::updateActivity(ViewProperties *item)
 {
     auto controller = qobject_cast<SessionController *>(item);
+    if (!controller || !controller->view() || !controller->view()->parentWidget()) {
+        return;
+    }
     auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
 
     const int index = indexOf(topLevelSplitter);
@@ -715,6 +718,9 @@ void TabbedViewContainer::updateActivity(ViewProperties *item)
 void TabbedViewContainer::updateNotification(ViewProperties *item, Session::Notification notification, bool enabled)
 {
     auto controller = qobject_cast<SessionController *>(item);
+    if (!controller || !controller->view() || !controller->view()->parentWidget()) {
+        return;
+    }
     auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
     const int index = indexOf(topLevelSplitter);
     auto &state = _tabIconState[topLevelSplitter];
