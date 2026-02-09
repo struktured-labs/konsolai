@@ -8,3 +8,5 @@ install(FILES org.kde.konsolai.desktop DESTINATION ${KDE_INSTALL_DATADIR}/kgloba
 
 install(FILES konsolai.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR})
 install( PROGRAMS konsolairun.desktop  DESTINATION ${KDE_INSTALL_DATADIR}/kio/servicemenus )
+
+install(FILES ${CMAKE_SOURCE_DIR}/data/profiles/Claude.profile DESTINATION ${KDE_INSTALL_DATADIR}/konsole)
