@@ -257,6 +257,11 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     }
 
     QString sessionId = session->sessionId();
+    qDebug() << "SessionManagerPanel::registerSession" << sessionId
+             << "name:" << session->sessionName()
+             << "activeBefore:" << m_activeSessions.size()
+             << "metaBefore:" << m_metadata.size()
+             << "asyncInFlight:" << m_asyncQueryInFlight;
     m_activeSessions[sessionId] = session;
 
     // Ensure hooks are configured for this session's project
@@ -770,11 +775,15 @@ void SessionManagerPanel::updateTreeWidget()
     // mark that we need another update after it finishes
     if (m_asyncQueryInFlight) {
         m_asyncQueryPending = true;
+        qDebug() << "SessionManagerPanel::updateTreeWidget DEFERRED (async in flight)"
+                 << "metadata:" << m_metadata.size() << "active:" << m_activeSessions.size();
         return;
     }
 
     m_asyncQueryInFlight = true;
     m_asyncQueryPending = false;
+    qDebug() << "SessionManagerPanel::updateTreeWidget STARTED"
+             << "metadata:" << m_metadata.size() << "active:" << m_activeSessions.size();
 
     // Async pre-pass: query tmux for live sessions without blocking the GUI,
     // then call updateTreeWidgetWithLiveSessions() with the result.
@@ -799,6 +808,11 @@ void SessionManagerPanel::updateTreeWidget()
         for (const auto &info : liveSessions) {
             liveNames.insert(info.name);
         }
+        qDebug() << "SessionManagerPanel::updateTreeWidget CALLBACK"
+                 << "liveTmux:" << liveNames.size() << liveNames
+                 << "metadata:" << guard->m_metadata.size()
+                 << "active:" << guard->m_activeSessions.size()
+                 << "pending:" << guard->m_asyncQueryPending;
         guard->m_cachedLiveNames = liveNames;
         guard->updateTreeWidgetWithLiveSessions(liveNames);
 
@@ -843,19 +857,28 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         bool isActive = m_activeSessions.contains(meta.sessionId);
         bool tmuxAlive = liveNames.contains(meta.sessionName);
 
+        QString category;
         if (meta.isArchived) {
+            category = QStringLiteral("Archived");
             addSessionToTree(meta, m_archivedCategory);
         } else if (meta.isPinned) {
+            category = QStringLiteral("Pinned");
             addSessionToTree(meta, m_pinnedCategory);
         } else if (isActive) {
+            category = QStringLiteral("Active");
             addSessionToTree(meta, m_activeCategory);
         } else if (tmuxAlive) {
+            category = QStringLiteral("Detached");
             // Tab closed but tmux still running → Detached
             addSessionToTree(meta, m_detachedCategory);
         } else {
+            category = QStringLiteral("Closed");
             // tmux session is dead → Closed
             addSessionToTree(meta, m_closedCategory);
         }
+        qDebug() << "SessionManagerPanel: session" << meta.sessionId
+                 << "name:" << meta.sessionName << "→" << category
+                 << "(isActive:" << isActive << "tmuxAlive:" << tmuxAlive << ")";
     }
 
     // Add discovered sessions (from project folder scanning)

@@ -278,7 +278,7 @@ QString TmuxManager::executeCommand(const QStringList &args, bool *ok) const
 void TmuxManager::executeCommandAsync(const QStringList &args, std::function<void(bool, const QString &)> callback)
 {
     auto *process = new QProcess(this);
-    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process, callback](int exitCode, QProcess::ExitStatus) {
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process, callback](int exitCode, QProcess::ExitStatus exitStatus) {
         bool ok = (exitCode == 0);
         QString output = QString::fromUtf8(process->readAllStandardOutput());
         if (!ok) {
@@ -286,11 +286,24 @@ void TmuxManager::executeCommandAsync(const QStringList &args, std::function<voi
             if (!errorOutput.isEmpty()) {
                 Q_EMIT errorOccurred(errorOutput);
             }
+            qDebug() << "TmuxManager::executeCommandAsync FAILED exit:" << exitCode
+                     << "status:" << exitStatus << "stderr:" << errorOutput;
         }
         if (callback) {
             callback(ok, output);
         }
         process->deleteLater();
+    });
+    // Handle FailedToStart - finished signal won't fire in this case
+    connect(process, &QProcess::errorOccurred, this, [process, callback, args](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            qWarning() << "TmuxManager::executeCommandAsync FAILED TO START"
+                       << "args:" << args;
+            if (callback) {
+                callback(false, QString());
+            }
+            process->deleteLater();
+        }
     });
     process->start(QStringLiteral("tmux"), args);
 }
