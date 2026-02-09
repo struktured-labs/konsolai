@@ -84,6 +84,7 @@ private:
     QStringList getWorktrees(const QString &repoRoot);
     void updatePreview();
     void updateSshVisibility();
+    void updateRemoteProjectRoot();
     void loadSshConfigHosts();
 
     // Git mode enum
