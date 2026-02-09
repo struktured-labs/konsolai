@@ -751,18 +751,53 @@ void ClaudeSession::approvePermission()
 
 void ClaudeSession::approvePermissionAlways()
 {
-    // Claude Code's permission UI typically shows:
-    //   ❯ Allow once        (option 1, pre-selected)
-    //     Always allow       (option 2)
-    //     Deny               (option 3)
-    // Navigate Down to option 2 ("Always allow") then press Enter.
-    // This reduces future permission prompts for the same tool.
-    if (m_tmuxManager) {
-        m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Down"));
-        QTimer::singleShot(100, this, [this]() {
+    if (!m_tmuxManager) {
+        return;
+    }
+
+    // Capture the terminal to find where the cursor (❯) is and where the
+    // "Always allow" option is, then navigate precisely.
+    m_tmuxManager->capturePaneAsync(m_sessionName, [this](bool ok, const QString &output) {
+        if (!ok || !m_tmuxManager) {
+            return;
+        }
+
+        // Parse the bottom of the terminal for the permission menu.
+        // Claude Code's permission UI looks like:
+        //   ❯ Allow once           (or "Yes")
+        //     Always allow          (target)
+        //     Deny                  (or "No")
+        // The ❯ marks the currently selected line.
+        const auto lines = output.split(QLatin1Char('\n'));
+
+        int cursorLine = -1;
+        int alwaysLine = -1;
+
+        // Scan from the bottom (prompt is at the bottom of the terminal)
+        for (int i = lines.size() - 1; i >= 0 && i >= lines.size() - 15; --i) {
+            const QString &line = lines[i];
+            if (cursorLine < 0 && line.contains(QStringLiteral("❯"))) {
+                cursorLine = i;
+            }
+            if (alwaysLine < 0 && line.contains(QStringLiteral("Always"), Qt::CaseInsensitive)) {
+                alwaysLine = i;
+            }
+        }
+
+        if (cursorLine >= 0 && alwaysLine >= 0) {
+            int delta = alwaysLine - cursorLine;
+            QString key = delta > 0 ? QStringLiteral("Down") : QStringLiteral("Up");
+            int steps = qAbs(delta);
+            for (int i = 0; i < steps; ++i) {
+                m_tmuxManager->sendKeySequence(m_sessionName, key);
+            }
+        }
+
+        // Confirm selection
+        QTimer::singleShot(50, this, [this]() {
             sendText(QStringLiteral("\n"));
         });
-    }
+    });
 }
 
 void ClaudeSession::denyPermission()
