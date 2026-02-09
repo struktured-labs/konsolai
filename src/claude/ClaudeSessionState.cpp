@@ -24,6 +24,12 @@ QJsonObject ClaudeSessionState::toJson() const
         obj[QStringLiteral("taskDescription")] = taskDescription;
     }
     obj[QStringLiteral("isAttached")] = isAttached;
+    if (isRemote) {
+        obj[QStringLiteral("isRemote")] = true;
+        obj[QStringLiteral("sshHost")] = sshHost;
+        obj[QStringLiteral("sshUsername")] = sshUsername;
+        obj[QStringLiteral("sshPort")] = sshPort;
+    }
     if (!autoContinuePrompt.isEmpty()) {
         obj[QStringLiteral("autoContinuePrompt")] = autoContinuePrompt;
     }
@@ -45,6 +51,10 @@ ClaudeSessionState ClaudeSessionState::fromJson(const QJsonObject &obj)
     state.claudeModel = obj.value(QStringLiteral("claudeModel")).toString();
     state.taskDescription = obj.value(QStringLiteral("taskDescription")).toString();
     state.isAttached = obj.value(QStringLiteral("isAttached")).toBool();
+    state.isRemote = obj.value(QStringLiteral("isRemote")).toBool();
+    state.sshHost = obj.value(QStringLiteral("sshHost")).toString();
+    state.sshUsername = obj.value(QStringLiteral("sshUsername")).toString();
+    state.sshPort = obj.value(QStringLiteral("sshPort")).toInt(22);
     state.autoContinuePrompt = obj.value(QStringLiteral("autoContinuePrompt")).toString();
     state.yoloMode = obj.value(QStringLiteral("yoloMode")).toBool();
     state.doubleYoloMode = obj.value(QStringLiteral("doubleYoloMode")).toBool();

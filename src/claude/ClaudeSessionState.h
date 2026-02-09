@@ -49,6 +49,12 @@ public:
     // Status
     bool isAttached = false;    // Whether Konsolai is currently attached
 
+    // Remote session fields
+    bool isRemote = false;
+    QString sshHost;
+    QString sshUsername;
+    int sshPort = 22;
+
     // Per-session settings
     QString autoContinuePrompt; // empty = use global default
     bool yoloMode = false;

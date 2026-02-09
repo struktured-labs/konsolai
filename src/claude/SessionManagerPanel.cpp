@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QPointer>
 #include <QSet>
@@ -580,7 +581,19 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
     // Check if this is a discovered session (parent is m_discoveredCategory)
     if (item->parent() == m_discoveredCategory) {
         QString workDir = item->data(0, Qt::UserRole + 1).toString();
-        if (!workDir.isEmpty()) {
+        if (workDir.isEmpty()) {
+            return;
+        }
+        // Check if this is a remote discovered item
+        QString remoteHost = item->data(0, Qt::UserRole + 2).toString();
+        if (!remoteHost.isEmpty()) {
+            QString remoteUser = item->data(0, Qt::UserRole + 3).toString();
+            int remotePort = item->data(0, Qt::UserRole + 4).toInt();
+            if (remotePort <= 0) {
+                remotePort = 22;
+            }
+            Q_EMIT remoteSessionRequested(remoteHost, remoteUser, remotePort, workDir);
+        } else {
             Q_EMIT unarchiveRequested(sessionId, workDir);
         }
         return;
@@ -604,8 +617,85 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 void SessionManagerPanel::onContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
-        || item == m_discoveredCategory) {
+    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory) {
+        return;
+    }
+
+    // Context menu on the Discovered category header — SSH host management
+    if (item == m_discoveredCategory) {
+        QMenu menu(this);
+        QAction *addHostAction = menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("Add SSH Host..."));
+        connect(addHostAction, &QAction::triggered, this, [this]() {
+            bool ok = false;
+            QString host = QInputDialog::getText(this, i18n("Add SSH Host"),
+                                                  i18n("Enter SSH target (e.g., user@host or user@host:port):"),
+                                                  QLineEdit::Normal, QString(), &ok);
+            if (!ok || host.trimmed().isEmpty()) {
+                return;
+            }
+            auto *settings = KonsolaiSettings::instance();
+            if (settings) {
+                QStringList hosts = settings->sshDiscoveryHosts();
+                if (!hosts.contains(host.trimmed())) {
+                    hosts.append(host.trimmed());
+                    settings->setSshDiscoveryHosts(hosts);
+                    settings->save();
+                }
+            }
+            updateTreeWidget();
+        });
+
+        auto *settings = KonsolaiSettings::instance();
+        QStringList currentHosts;
+        if (settings) {
+            currentHosts = settings->sshDiscoveryHosts();
+        }
+        if (!currentHosts.isEmpty()) {
+            QAction *manageAction = menu.addAction(QIcon::fromTheme(QStringLiteral("configure")), i18n("Manage SSH Hosts..."));
+            connect(manageAction, &QAction::triggered, this, [this, currentHosts]() {
+                // Simple list dialog with remove option
+                QDialog dialog(this);
+                dialog.setWindowTitle(i18n("Manage SSH Discovery Hosts"));
+                auto *layout = new QVBoxLayout(&dialog);
+
+                auto *listWidget = new QListWidget(&dialog);
+                for (const QString &h : currentHosts) {
+                    listWidget->addItem(h);
+                }
+                layout->addWidget(listWidget);
+
+                auto *removeBtn = new QPushButton(i18n("Remove Selected"), &dialog);
+                layout->addWidget(removeBtn);
+
+                auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                layout->addWidget(buttons);
+
+                connect(removeBtn, &QPushButton::clicked, &dialog, [listWidget]() {
+                    auto *current = listWidget->currentItem();
+                    if (current) {
+                        delete listWidget->takeItem(listWidget->row(current));
+                    }
+                });
+
+                dialog.resize(350, 250);
+                dialog.exec();
+
+                // Save remaining hosts
+                QStringList remaining;
+                for (int i = 0; i < listWidget->count(); ++i) {
+                    remaining.append(listWidget->item(i)->text());
+                }
+                auto *s = KonsolaiSettings::instance();
+                if (s) {
+                    s->setSshDiscoveryHosts(remaining);
+                    s->save();
+                }
+                updateTreeWidget();
+            });
+        }
+
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
     }
 
@@ -621,30 +711,45 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             return;
         }
 
+        QString remoteHost = item->data(0, Qt::UserRole + 2).toString();
+        bool isRemoteItem = !remoteHost.isEmpty();
+
         QMenu menu(this);
         QAction *openAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("Open Session Here"));
-        connect(openAction, &QAction::triggered, this, [this, sessionId, workDir]() {
-            Q_EMIT unarchiveRequested(sessionId, workDir);
-        });
-
-        menu.addSeparator();
-
-        QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
-        connect(trashAction, &QAction::triggered, this, [this, workDir]() {
-            auto answer = QMessageBox::question(this,
-                                                i18n("Move to Trash"),
-                                                i18n("Move this project folder to the trash?\n\n%1", workDir),
-                                                QMessageBox::Yes | QMessageBox::No,
-                                                QMessageBox::No);
-            if (answer == QMessageBox::Yes) {
-                QFile dir(workDir);
-                if (dir.moveToTrash()) {
-                    updateTreeWidget();
-                } else {
-                    QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", workDir));
+        connect(openAction, &QAction::triggered, this, [this, sessionId, workDir, isRemoteItem, item]() {
+            if (isRemoteItem) {
+                QString host = item->data(0, Qt::UserRole + 2).toString();
+                QString user = item->data(0, Qt::UserRole + 3).toString();
+                int port = item->data(0, Qt::UserRole + 4).toInt();
+                if (port <= 0) {
+                    port = 22;
                 }
+                Q_EMIT remoteSessionRequested(host, user, port, workDir);
+            } else {
+                Q_EMIT unarchiveRequested(sessionId, workDir);
             }
         });
+
+        if (!isRemoteItem) {
+            menu.addSeparator();
+
+            QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
+            connect(trashAction, &QAction::triggered, this, [this, workDir]() {
+                auto answer = QMessageBox::question(this,
+                                                    i18n("Move to Trash"),
+                                                    i18n("Move this project folder to the trash?\n\n%1", workDir),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                if (answer == QMessageBox::Yes) {
+                    QFile dir(workDir);
+                    if (dir.moveToTrash()) {
+                        updateTreeWidget();
+                    } else {
+                        QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", workDir));
+                    }
+                }
+            });
+        }
 
         menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
@@ -886,7 +991,7 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         delete m_discoveredCategory->takeChild(0);
     }
     if (m_registry) {
-        // Scan workspace root for Claude footprints
+        // Scan workspace root for Claude footprints (local)
         QString searchRoot;
         auto *settings = KonsolaiSettings::instance();
         if (settings) {
@@ -903,6 +1008,55 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             item->setData(0, Qt::UserRole + 1, state.workingDirectory);
             item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-cloud")));
             item->setToolTip(0, QStringLiteral("%1\n%2\nLast modified: %3").arg(state.profileName, state.workingDirectory, state.lastAccessed.toString()));
+        }
+
+        // Collect unique SSH hosts from metadata (remote sessions) + configured discovery hosts
+        QSet<QString> sshTargets;
+        for (auto it = m_metadata.constBegin(); it != m_metadata.constEnd(); ++it) {
+            if (it->isRemote && !it->sshHost.isEmpty()) {
+                QString target = it->sshUsername.isEmpty()
+                    ? it->sshHost
+                    : QStringLiteral("%1@%2").arg(it->sshUsername, it->sshHost);
+                if (it->sshPort != 22) {
+                    target += QStringLiteral(":%1").arg(it->sshPort);
+                }
+                sshTargets.insert(target);
+            }
+        }
+        if (settings) {
+            const QStringList configuredHosts = settings->sshDiscoveryHosts();
+            for (const QString &h : configuredHosts) {
+                sshTargets.insert(h);
+            }
+        }
+
+        // Launch async remote discovery for each SSH host
+        QPointer<SessionManagerPanel> guard(this);
+        for (const QString &target : sshTargets) {
+            m_registry->discoverRemoteSessionsAsync(target, QStringLiteral("~/projects"),
+                [guard, target](const QList<ClaudeSessionState> &remoteStates) {
+                    if (!guard || remoteStates.isEmpty()) {
+                        return;
+                    }
+                    for (const auto &state : remoteStates) {
+                        auto *item = new QTreeWidgetItem(guard->m_discoveredCategory);
+                        QString displayName = QDir(state.workingDirectory).dirName()
+                            + QStringLiteral(" @%1").arg(state.sshHost);
+                        item->setText(0, displayName);
+                        item->setData(0, Qt::UserRole, state.sessionId);
+                        item->setData(0, Qt::UserRole + 1, state.workingDirectory);
+                        item->setData(0, Qt::UserRole + 2, state.sshHost);
+                        item->setData(0, Qt::UserRole + 3, state.sshUsername);
+                        item->setData(0, Qt::UserRole + 4, state.sshPort);
+                        item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-remote"),
+                                                           QIcon::fromTheme(QStringLiteral("network-server"))));
+                        QString userHost = state.sshUsername.isEmpty()
+                            ? state.sshHost
+                            : QStringLiteral("%1@%2").arg(state.sshUsername, state.sshHost);
+                        item->setToolTip(0, QStringLiteral("Remote: %1\nPath: %2").arg(userHost, state.workingDirectory));
+                    }
+                    guard->m_discoveredCategory->setHidden(false);
+                });
         }
     }
 

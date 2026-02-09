@@ -641,6 +641,46 @@ void MainWindow::setupActions()
         }
     });
 
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::remoteSessionRequested,
+            this, [this](const QString &sshHost, const QString &sshUsername, int sshPort, const QString &workDir) {
+        // Create a remote session with SSH credentials
+        Profile::Ptr claudeProfile;
+        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+        for (const Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+
+        if (!claudeProfile) {
+            qWarning() << "No Claude profile found for remote session";
+            return;
+        }
+
+        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
+        claudeSession->setIsRemote(true);
+        claudeSession->setSshHost(sshHost);
+        claudeSession->setSshUsername(sshUsername);
+        claudeSession->setSshPort(sshPort);
+        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+        claudeSession->setInitialWorkingDirectory(workDir);
+
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
+
+        _sessionPanel->registerSession(claudeSession);
+
+        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+        if (registry) {
+            registry->registerSession(claudeSession);
+        }
+    });
+
     // Connect active view changes to update Claude menu and status
     // Connect notification handlers for Claude sessions on tab switch.
     // Note: setActiveSession/setSession are handled in MainWindow::activeViewChanged() above.

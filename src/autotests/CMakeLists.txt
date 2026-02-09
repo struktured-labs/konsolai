@@ -61,6 +61,7 @@ ecm_add_tests(
     ClaudeSessionRegistryTest.cpp
     ClaudeSessionYoloTest.cpp
     ClaudeHookHandlerTest.cpp
+    ClaudeRemoteDiscoveryTest.cpp
     NotificationManagerTest.cpp
     ProfileClaudeTest.cpp
     TokenUsageTest.cpp

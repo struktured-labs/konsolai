@@ -108,6 +108,12 @@ public:
     void setTrySuggestionsFirst(bool enabled);
 
     /**
+     * SSH discovery hosts (list of "user@host" or "user@host:port" entries)
+     */
+    QStringList sshDiscoveryHosts() const;
+    void setSshDiscoveryHosts(const QStringList &hosts);
+
+    /**
      * Save settings to disk
      */
     void save();

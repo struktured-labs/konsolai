@@ -185,6 +185,19 @@ void KonsolaiSettings::setTrySuggestionsFirst(bool enabled)
     Q_EMIT settingsChanged();
 }
 
+QStringList KonsolaiSettings::sshDiscoveryHosts() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    return group.readEntry("DiscoveryHosts", QStringList());
+}
+
+void KonsolaiSettings::setSshDiscoveryHosts(const QStringList &hosts)
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    group.writeEntry("DiscoveryHosts", hosts);
+    Q_EMIT settingsChanged();
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

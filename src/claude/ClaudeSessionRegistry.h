@@ -15,8 +15,11 @@
 #include <QHash>
 #include <QList>
 #include <QObject>
+#include <QProcess>
 #include <QString>
 #include <QTimer>
+
+#include <functional>
 
 namespace Konsolai
 {
@@ -157,6 +160,35 @@ public:
      * @return List of conversations, empty if none found
      */
     static QList<ClaudeConversation> readClaudeConversations(const QString &projectPath);
+
+    /**
+     * Discover Claude sessions on a remote SSH host asynchronously.
+     *
+     * Runs: ssh -o BatchMode=yes -o ConnectTimeout=5 <sshTarget> "find <remotePath> -maxdepth 2 -name .claude -type d 2>/dev/null"
+     * Parses output: strips /.claude suffix from each line to get project paths.
+     * Creates ClaudeSessionState entries with isRemote=true.
+     *
+     * @param sshTarget SSH target string (e.g., "user@host" or "user@host:port")
+     * @param remotePath Remote directory to scan (e.g., "~/projects")
+     * @param callback Called with the list of discovered remote session states
+     */
+    void discoverRemoteSessionsAsync(const QString &sshTarget, const QString &remotePath,
+                                      std::function<void(const QList<ClaudeSessionState> &)> callback);
+
+    /**
+     * Parse SSH find output into discovered session states.
+     * Visible for testing.
+     *
+     * @param sshOutput Output from ssh find command (newline-separated paths ending in /.claude)
+     * @param sshHost The SSH host
+     * @param sshUsername The SSH username
+     * @param sshPort The SSH port
+     * @return List of discovered session states
+     */
+    static QList<ClaudeSessionState> parseRemoteDiscoveryOutput(const QString &sshOutput,
+                                                                 const QString &sshHost,
+                                                                 const QString &sshUsername,
+                                                                 int sshPort);
 
     /**
      * Get path to sessions state file

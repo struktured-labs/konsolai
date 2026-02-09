@@ -156,6 +156,11 @@ Q_SIGNALS:
     void unarchiveRequested(const QString &sessionId, const QString &workingDirectory);
 
     /**
+     * Emitted when user wants to open a remote SSH session
+     */
+    void remoteSessionRequested(const QString &sshHost, const QString &sshUsername, int sshPort, const QString &workDir);
+
+    /**
      * Emitted when collapsed state changes
      */
     void collapsedChanged(bool collapsed);

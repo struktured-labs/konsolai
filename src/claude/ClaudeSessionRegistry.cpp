@@ -478,6 +478,119 @@ QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString 
     return discovered;
 }
 
+void ClaudeSessionRegistry::discoverRemoteSessionsAsync(const QString &sshTarget, const QString &remotePath,
+                                                          std::function<void(const QList<ClaudeSessionState> &)> callback)
+{
+    if (sshTarget.isEmpty() || remotePath.isEmpty()) {
+        if (callback) {
+            callback({});
+        }
+        return;
+    }
+
+    // Parse sshTarget: "user@host" or "user@host:port"
+    QString host = sshTarget;
+    QString username;
+    int port = 22;
+
+    int atIdx = host.indexOf(QLatin1Char('@'));
+    if (atIdx >= 0) {
+        username = host.left(atIdx);
+        host = host.mid(atIdx + 1);
+    }
+    int colonIdx = host.indexOf(QLatin1Char(':'));
+    if (colonIdx >= 0) {
+        bool ok = false;
+        int parsedPort = host.mid(colonIdx + 1).toInt(&ok);
+        if (ok && parsedPort > 0) {
+            port = parsedPort;
+        }
+        host = host.left(colonIdx);
+    }
+
+    QString findCmd = QStringLiteral("find %1 -maxdepth 2 -name .claude -type d 2>/dev/null").arg(remotePath);
+
+    QStringList args;
+    args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes")
+         << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=5");
+    if (port != 22) {
+        args << QStringLiteral("-p") << QString::number(port);
+    }
+    // Reconstruct target as user@host (without port)
+    QString target = username.isEmpty() ? host : QStringLiteral("%1@%2").arg(username, host);
+    args << target << findCmd;
+
+    auto *process = new QProcess(this);
+    QString capturedHost = host;
+    QString capturedUser = username;
+    int capturedPort = port;
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [process, callback, capturedHost, capturedUser, capturedPort](int exitCode, QProcess::ExitStatus) {
+        QString output = QString::fromUtf8(process->readAllStandardOutput());
+        QList<ClaudeSessionState> results;
+        if (exitCode == 0 && !output.trimmed().isEmpty()) {
+            results = parseRemoteDiscoveryOutput(output, capturedHost, capturedUser, capturedPort);
+        }
+        if (callback) {
+            callback(results);
+        }
+        process->deleteLater();
+    });
+    connect(process, &QProcess::errorOccurred, this, [process, callback](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            if (callback) {
+                callback({});
+            }
+            process->deleteLater();
+        }
+    });
+
+    process->start(QStringLiteral("ssh"), args);
+}
+
+QList<ClaudeSessionState> ClaudeSessionRegistry::parseRemoteDiscoveryOutput(const QString &sshOutput,
+                                                                             const QString &sshHost,
+                                                                             const QString &sshUsername,
+                                                                             int sshPort)
+{
+    QList<ClaudeSessionState> results;
+    const auto lines = sshOutput.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+
+    for (const QString &line : lines) {
+        QString trimmed = line.trimmed();
+        if (trimmed.isEmpty()) {
+            continue;
+        }
+
+        // Strip /.claude suffix to get project path
+        if (trimmed.endsWith(QStringLiteral("/.claude"))) {
+            trimmed.chop(8); // Remove "/.claude"
+        }
+
+        QString dirName = trimmed.section(QLatin1Char('/'), -1);
+        if (dirName.isEmpty()) {
+            continue;
+        }
+
+        ClaudeSessionState state;
+        state.sessionName = QStringLiteral("discovered-remote-%1-%2").arg(sshHost, dirName);
+        state.sessionId = QStringLiteral("r-%1").arg(dirName.left(6));
+        state.workingDirectory = trimmed;
+        state.profileName = QStringLiteral("Remote");
+        state.isAttached = false;
+        state.isRemote = true;
+        state.sshHost = sshHost;
+        state.sshUsername = sshUsername;
+        state.sshPort = sshPort;
+        state.lastAccessed = QDateTime::currentDateTime();
+
+        results.append(state);
+    }
+
+    return results;
+}
+
 void ClaudeSessionRegistry::onPeriodicRefresh()
 {
     refreshOrphanedSessions();
