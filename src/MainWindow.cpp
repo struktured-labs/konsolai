@@ -1316,21 +1316,45 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     }
                 }
 
-                Session *session = createSession(profile, workDir);
-                // Pass task description and SSH config from wizard to the Claude session
-                if (auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session)) {
+                // For remote sessions, set SSH fields BEFORE run() since run()
+                // needs isRemote to skip local filesystem checks and build the
+                // correct SSH command. createSession() calls run() internally,
+                // so remote sessions must be set up manually.
+                if (wizard.isRemoteSession()) {
+                    auto *claudeSession = new Konsolai::ClaudeSession(profile->name(), workDir, this);
+                    claudeSession->setIsRemote(true);
+                    claudeSession->setSshHost(wizard.sshHost());
+                    claudeSession->setSshUsername(wizard.sshUsername());
+                    claudeSession->setSshPort(wizard.sshPort());
                     QString taskPrompt = wizard.taskPrompt();
                     if (!taskPrompt.isEmpty()) {
                         claudeSession->setTaskDescription(taskPrompt);
                     }
+                    SessionManager::instance()->setSessionProfile(claudeSession, profile);
+                    claudeSession->setInitialWorkingDirectory(workDir);
 
-                    // Set SSH remote session fields if applicable
-                    if (wizard.isRemoteSession()) {
-                        claudeSession->setIsRemote(true);
-                        claudeSession->setSshHost(wizard.sshHost());
-                        claudeSession->setSshUsername(wizard.sshUsername());
-                        claudeSession->setSshPort(wizard.sshPort());
-                        qDebug() << "MainWindow: Created remote SSH session to" << wizard.sshHost();
+                    auto *view = _viewManager->createView(claudeSession);
+                    _viewManager->activeContainer()->addView(view);
+
+                    if (!claudeSession->isRunning()) {
+                        claudeSession->run();
+                    }
+
+                    _sessionPanel->registerSession(claudeSession);
+                    auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+                    if (registry) {
+                        registry->registerSession(claudeSession);
+                    }
+                    _claudeMenu->setActiveSession(claudeSession);
+                    _claudeStatusWidget->setSession(claudeSession);
+                    qDebug() << "MainWindow: Created remote SSH session to" << wizard.sshHost();
+                } else {
+                    Session *session = createSession(profile, workDir);
+                    if (auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session)) {
+                        QString taskPrompt = wizard.taskPrompt();
+                        if (!taskPrompt.isEmpty()) {
+                            claudeSession->setTaskDescription(taskPrompt);
+                        }
                     }
                 }
                 qDebug() << "Session created via wizard";

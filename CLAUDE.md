@@ -1,5 +1,8 @@
 # Konsolai Project Rules
 
+## Tools
+- Use `uv run python` instead of `python3` for any Python scripting needs.
+
 ## Build
 - Always do a full rebuild (`ninja -j4` in `build/`) and confirm zero errors before considering any task complete.
 - Build directory: `build/`

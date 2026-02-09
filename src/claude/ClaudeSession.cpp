@@ -283,9 +283,9 @@ void ClaudeSession::run()
         }
     }
 
-    // For reattached sessions, get the actual working directory from tmux
+    // For reattached LOCAL sessions, get the actual working directory from tmux
     // This is where Claude is actually running, which may differ from where konsolai started
-    if (m_isReattach && m_tmuxManager && m_tmuxManager->sessionExists(m_sessionName)) {
+    if (!m_isRemote && m_isReattach && m_tmuxManager && m_tmuxManager->sessionExists(m_sessionName)) {
         QString tmuxWorkDir = m_tmuxManager->getPaneWorkingDirectory(m_sessionName);
         if (!tmuxWorkDir.isEmpty() && QDir(tmuxWorkDir).exists()) {
             m_workingDir = tmuxWorkDir;
@@ -665,22 +665,28 @@ void ClaudeSession::detach()
     // Don't emit signals or call close() - let tmux disconnection
     // naturally trigger the session end.
 
-    qDebug() << "ClaudeSession::detach() called for session:" << m_sessionName;
+    qDebug() << "ClaudeSession::detach() called for session:" << m_sessionName << (m_isRemote ? "(remote)" : "(local)");
 
-    if (!m_sessionName.isEmpty()) {
+    // For remote sessions, the tmux session is on the remote host — local tmux
+    // detach-client won't find it. Closing the local terminal (SSH connection)
+    // effectively detaches while the remote tmux session persists.
+    if (!m_sessionName.isEmpty() && !m_isRemote) {
         QProcess process;
         process.start(QStringLiteral("tmux"), {QStringLiteral("detach-client"), QStringLiteral("-s"), m_sessionName});
         process.waitForFinished(5000);
         qDebug() << "ClaudeSession::detach() - tmux detach-client exit code:" << process.exitCode();
     }
 
-    // tmux detach-client will cause the "tmux attach" command in our terminal to exit,
-    // which will naturally trigger session termination through normal Konsole flow
+    // For local: tmux detach-client causes the "tmux attach" command to exit,
+    // naturally triggering session termination through normal Konsole flow.
+    // For remote: close() terminates the SSH connection.
 }
 
 void ClaudeSession::kill()
 {
-    if (m_tmuxManager) {
+    // For remote sessions, killing the local terminal (SSH process) disconnects.
+    // The remote tmux session persists — user must kill it on the remote host.
+    if (m_tmuxManager && !m_isRemote) {
         m_tmuxManager->killSession(m_sessionName);
     }
     Q_EMIT killed();
@@ -688,14 +694,16 @@ void ClaudeSession::kill()
 
 void ClaudeSession::sendText(const QString &text)
 {
-    if (m_tmuxManager) {
+    // Remote: local tmux can't send keys to the remote session
+    if (m_tmuxManager && !m_isRemote) {
         m_tmuxManager->sendKeys(m_sessionName, text);
     }
 }
 
 QString ClaudeSession::transcript(int lines)
 {
-    if (m_tmuxManager) {
+    // Remote: local tmux can't capture the remote pane
+    if (m_tmuxManager && !m_isRemote) {
         return m_tmuxManager->capturePane(m_sessionName, -lines, 0);
     }
     return QString();
@@ -738,7 +746,8 @@ void ClaudeSession::sendPrompt(const QString &prompt)
     // literal \r inside a -l send-keys as a newline within the text field,
     // not as form submission. Sending Enter via sendKeySequence (without -l)
     // correctly triggers the submit action.
-    if (m_tmuxManager) {
+    // Remote: local tmux can't send keys to the remote session
+    if (m_tmuxManager && !m_isRemote) {
         m_tmuxManager->sendKeys(m_sessionName, prompt);
         QTimer::singleShot(150, this, [this]() {
             if (m_tmuxManager) {
@@ -763,7 +772,8 @@ void ClaudeSession::approvePermissionAlways()
     //     Deny               (option 3)
     // Navigate Down to option 2 ("Always allow") then press Enter.
     // This reduces future permission prompts for the same tool.
-    if (m_tmuxManager) {
+    // Remote: local tmux can't send keys to the remote session
+    if (m_tmuxManager && !m_isRemote) {
         m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Down"));
         QTimer::singleShot(100, this, [this]() {
             sendText(QStringLiteral("\n"));
@@ -781,7 +791,8 @@ void ClaudeSession::stop()
 {
     // Send Ctrl+C to stop Claude (use sendKeySequence, not sendKeys,
     // because sendKeys uses -l which would type literal "C-c")
-    if (m_tmuxManager) {
+    // Remote: local tmux can't send keys to the remote session
+    if (m_tmuxManager && !m_isRemote) {
         m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("C-c"));
     }
 }
@@ -868,7 +879,9 @@ void ClaudeSession::stopPermissionPolling()
 
 void ClaudeSession::pollForPermissionPrompt()
 {
-    if (!m_yoloMode || !m_tmuxManager) {
+    // Remote sessions: local tmux can't capture the remote pane.
+    // Hook-based approval (TCP tunnel) is the only path for remote.
+    if (!m_yoloMode || !m_tmuxManager || m_isRemote) {
         return;
     }
 
@@ -977,7 +990,9 @@ void ClaudeSession::pollForIdlePrompt()
     if (!m_doubleYoloMode && !m_tripleYoloMode) {
         return;
     }
-    if (!m_tmuxManager) {
+    // Remote sessions: local tmux can't capture the remote pane.
+    // Hook-based idle detection (TCP tunnel) is the only path for remote.
+    if (!m_tmuxManager || m_isRemote) {
         return;
     }
 
@@ -1117,7 +1132,8 @@ void ClaudeSession::startTokenTracking()
 
 void ClaudeSession::refreshTokenUsage()
 {
-    if (m_workingDir.isEmpty()) {
+    // Token data is stored on the remote host — can't read locally
+    if (m_workingDir.isEmpty() || m_isRemote) {
         return;
     }
 
@@ -1224,7 +1240,8 @@ TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
 
 void ClaudeSession::autoAcceptSuggestion()
 {
-    if (!m_tmuxManager || !m_doubleYoloMode) {
+    // Remote: local tmux can't send keys to the remote session
+    if (!m_tmuxManager || !m_doubleYoloMode || m_isRemote) {
         return;
     }
 
@@ -1337,7 +1354,8 @@ void ClaudeSession::startResourceTracking()
     // /proc filesystem is Linux-only; skip on other platforms
     return;
 #else
-    if (!QFile::exists(QStringLiteral("/proc"))) {
+    // Claude process runs on remote host — local /proc won't have it
+    if (m_isRemote || !QFile::exists(QStringLiteral("/proc"))) {
         return;
     }
 
@@ -1557,7 +1575,8 @@ void ClaudeSession::refreshResourceUsage()
 
 void ClaudeSession::removeHooksFromProjectSettings()
 {
-    if (m_workingDir.isEmpty()) {
+    // Remote sessions have hooks on the remote host — can't clean up locally
+    if (m_workingDir.isEmpty() || m_isRemote) {
         return;
     }
 
