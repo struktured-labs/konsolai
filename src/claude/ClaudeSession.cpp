@@ -272,9 +272,15 @@ void ClaudeSession::run()
     }
 
     // Use the current initialWorkingDirectory (may have been updated by ViewManager)
-    QString workDir = initialWorkingDirectory();
-    if (!workDir.isEmpty()) {
-        m_workingDir = workDir;
+    // Skip for remote sessions: validDirectory() in setInitialWorkingDirectory() checks
+    // local filesystem, so a remote path like /home/struktured/projects/foo would be
+    // replaced with the local home directory. m_workingDir already holds the correct
+    // remote path from initializeNew() / the caller.
+    if (!m_isRemote) {
+        QString workDir = initialWorkingDirectory();
+        if (!workDir.isEmpty()) {
+            m_workingDir = workDir;
+        }
     }
 
     // For reattached sessions, get the actual working directory from tmux
