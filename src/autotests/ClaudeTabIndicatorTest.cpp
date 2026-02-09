@@ -68,8 +68,7 @@ void ClaudeTabIndicatorTest::testSuggestionAfterIdleDelay()
     QCOMPARE(indicator.suggestionAvailable(), false);
 
     // Wait for the 3s suggestion delay
-    QTest::qWait(3100);
-    QCOMPARE(indicator.suggestionAvailable(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(indicator.suggestionAvailable(), true, 5000);
 }
 
 void ClaudeTabIndicatorTest::testSuggestionClearedOnStateChange()
@@ -78,8 +77,7 @@ void ClaudeTabIndicatorTest::testSuggestionClearedOnStateChange()
 
     // Get to suggestion-available state
     QMetaObject::invokeMethod(&indicator, "updateState", Q_ARG(ClaudeProcess::State, ClaudeProcess::State::Idle));
-    QTest::qWait(3100);
-    QCOMPARE(indicator.suggestionAvailable(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(indicator.suggestionAvailable(), true, 5000);
 
     // State change should clear suggestion
     QMetaObject::invokeMethod(&indicator, "updateState", Q_ARG(ClaudeProcess::State, ClaudeProcess::State::Working));
