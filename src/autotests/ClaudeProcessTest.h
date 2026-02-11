@@ -49,6 +49,26 @@ private Q_SLOTS:
     // Signal tests
     void testStateChangedSignal();
     void testTaskSignals();
+
+    // State machine edge cases
+    void testSameStateNoSignal();
+    void testRapidStateTransitions();
+    void testUnknownEventType();
+    void testMalformedJsonEvent();
+    void testEmptyEventData();
+    void testIsRunningAllStates();
+
+    // Notification event variants
+    void testNotificationPermissionRequest();
+    void testNotificationIdlePrompt();
+    void testNotificationGeneric();
+
+    // PermissionRequest event
+    void testPermissionRequestSignals();
+    void testPermissionRequestEmptyToolName();
+
+    // PreToolUse task description
+    void testPreToolUseSetsTask();
 };
 
 }

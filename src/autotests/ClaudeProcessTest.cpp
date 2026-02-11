@@ -255,6 +255,207 @@ void ClaudeProcessTest::testTaskSignals()
     QCOMPARE(taskFinishedSpy.count(), 1);
 }
 
+// ============================================================
+// State machine edge cases
+// ============================================================
+
+void ClaudeProcessTest::testSameStateNoSignal()
+{
+    ClaudeProcess process;
+
+    // Go to Working
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+
+    // Another PreToolUse should stay Working — no signal emitted (same state)
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+    QCOMPARE(stateSpy.count(), 0);
+}
+
+void ClaudeProcessTest::testRapidStateTransitions()
+{
+    ClaudeProcess process;
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+
+    // Rapid Working → Idle → Working → Idle
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+
+    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+    QCOMPARE(stateSpy.count(), 4); // Each transition emits exactly once
+}
+
+void ClaudeProcessTest::testUnknownEventType()
+{
+    ClaudeProcess process;
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+
+    // Unknown event type should be silently ignored
+    process.handleHookEvent(QStringLiteral("SomeNewEvent"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
+    QCOMPARE(stateSpy.count(), 0);
+}
+
+void ClaudeProcessTest::testMalformedJsonEvent()
+{
+    ClaudeProcess process;
+
+    // Malformed JSON should not crash — QJsonDocument::fromJson returns null doc
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("this is not json"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{{{broken"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+}
+
+void ClaudeProcessTest::testEmptyEventData()
+{
+    ClaudeProcess process;
+
+    // Empty string should not crash
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QString());
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+
+    process.handleHookEvent(QStringLiteral("Stop"), QString());
+    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+}
+
+void ClaudeProcessTest::testIsRunningAllStates()
+{
+    ClaudeProcess process;
+
+    // NotRunning → not running
+    QVERIFY(!process.isRunning());
+
+    // Working → running
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QVERIFY(process.isRunning());
+
+    // Idle → running (process is alive but idle)
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QVERIFY(process.isRunning());
+
+    // WaitingInput → running
+    QJsonObject permData;
+    permData[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    permData[QStringLiteral("yolo_approved")] = false;
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(permData).toJson()));
+    QVERIFY(process.isRunning());
+}
+
+// ============================================================
+// Notification event variants
+// ============================================================
+
+void ClaudeProcessTest::testNotificationPermissionRequest()
+{
+    ClaudeProcess process;
+    QSignalSpy permSpy(&process, &ClaudeProcess::permissionRequested);
+    QSignalSpy notifSpy(&process, &ClaudeProcess::notificationReceived);
+
+    QJsonObject data;
+    data[QStringLiteral("type")] = QStringLiteral("permission_request");
+    data[QStringLiteral("action")] = QStringLiteral("file_write");
+    data[QStringLiteral("description")] = QStringLiteral("Write to /tmp/test");
+    data[QStringLiteral("message")] = QStringLiteral("Permission needed");
+
+    process.handleHookEvent(QStringLiteral("Notification"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
+    QCOMPARE(permSpy.count(), 1);
+    QCOMPARE(notifSpy.count(), 1);
+}
+
+void ClaudeProcessTest::testNotificationIdlePrompt()
+{
+    ClaudeProcess process;
+
+    QJsonObject data;
+    data[QStringLiteral("type")] = QStringLiteral("idle_prompt");
+    data[QStringLiteral("message")] = QStringLiteral("Claude is idle");
+
+    process.handleHookEvent(QStringLiteral("Notification"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
+}
+
+void ClaudeProcessTest::testNotificationGeneric()
+{
+    ClaudeProcess process;
+    QSignalSpy notifSpy(&process, &ClaudeProcess::notificationReceived);
+
+    QJsonObject data;
+    data[QStringLiteral("type")] = QStringLiteral("info");
+    data[QStringLiteral("message")] = QStringLiteral("Just an info message");
+
+    process.handleHookEvent(QStringLiteral("Notification"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    // Generic notification should NOT change state to WaitingInput
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
+    QCOMPARE(notifSpy.count(), 1);
+    QCOMPARE(notifSpy.at(0).at(0).toString(), QStringLiteral("info"));
+}
+
+// ============================================================
+// PermissionRequest event
+// ============================================================
+
+void ClaudeProcessTest::testPermissionRequestSignals()
+{
+    ClaudeProcess process;
+    QSignalSpy permSpy(&process, &ClaudeProcess::permissionRequested);
+
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Write");
+    data[QStringLiteral("tool_input")] = QStringLiteral("/path/to/file");
+    data[QStringLiteral("yolo_approved")] = false;
+
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(permSpy.count(), 1);
+    QCOMPARE(permSpy.at(0).at(0).toString(), QStringLiteral("Write"));
+    QCOMPARE(permSpy.at(0).at(1).toString(), QStringLiteral("/path/to/file"));
+}
+
+void ClaudeProcessTest::testPermissionRequestEmptyToolName()
+{
+    ClaudeProcess process;
+    QSignalSpy permSpy(&process, &ClaudeProcess::permissionRequested);
+
+    // Missing tool_name field
+    QJsonObject data;
+    data[QStringLiteral("yolo_approved")] = false;
+
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
+    QCOMPARE(permSpy.count(), 1);
+    QVERIFY(permSpy.at(0).at(0).toString().isEmpty()); // Empty tool name
+}
+
+// ============================================================
+// PreToolUse task description
+// ============================================================
+
+void ClaudeProcessTest::testPreToolUseSetsTask()
+{
+    ClaudeProcess process;
+    QSignalSpy taskSpy(&process, &ClaudeProcess::taskStarted);
+
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(process.currentTask(), QStringLiteral("Using tool: Bash"));
+    QCOMPARE(taskSpy.count(), 1);
+}
+
 QTEST_GUILESS_MAIN(ClaudeProcessTest)
 
 #include "moc_ClaudeProcessTest.cpp"

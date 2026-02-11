@@ -105,7 +105,7 @@ struct KONSOLEPRIVATE_EXPORT ApprovalLogEntry {
     QDateTime timestamp;
     QString toolName;
     QString action;
-    int yoloLevel; // 1=yolo, 2=double, 3=triple
+    int yoloLevel = 0; // 1=yolo, 2=double, 3=triple
 };
 
 /**
