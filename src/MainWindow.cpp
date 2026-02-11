@@ -671,7 +671,7 @@ void MainWindow::setupActions()
                     if (claudeSession->yoloMode()) {
                         qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
                         claudeSession->approvePermission();
-                        claudeSession->incrementYoloApproval();
+                        claudeSession->logApproval(action, QStringLiteral("auto-approved"), 1);
                     } else {
                         // Show notification for permission request
                         notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,

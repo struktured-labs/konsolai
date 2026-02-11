@@ -438,9 +438,9 @@ void ClaudeSession::connectSignals()
         if (m_yoloMode) {
             qDebug() << "ClaudeSession: Auto-approving permission always (yolo mode)";
             // Use a short delay to ensure the prompt is ready
-            QTimer::singleShot(100, this, [this]() {
+            QTimer::singleShot(100, this, [this, action]() {
                 approvePermissionAlways();
-                incrementYoloApproval();
+                logApproval(action, QStringLiteral("auto-approved"), 1);
             });
         }
     });
@@ -486,7 +486,7 @@ void ClaudeSession::connectSignals()
             qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
             QTimer::singleShot(500, this, [this]() {
                 sendPrompt(m_autoContinuePrompt);
-                incrementTripleYoloApproval();
+                logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
             });
         }
     });
@@ -494,7 +494,7 @@ void ClaudeSession::connectSignals()
     // Handle yolo auto-approvals from hook handler
     connect(m_claudeProcess, &ClaudeProcess::yoloApprovalOccurred, this, [this](const QString &toolName) {
         qDebug() << "ClaudeSession: Yolo hook auto-approved:" << toolName;
-        incrementYoloApproval();
+        logApproval(toolName, QStringLiteral("auto-approved"), 1);
     });
 
     // Refresh token usage when Claude finishes a task (state → Idle)
@@ -858,7 +858,7 @@ void ClaudeSession::setYoloMode(bool enabled)
                     qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving always immediately";
                     QTimer::singleShot(100, this, [this]() {
                         approvePermissionAlways();
-                        incrementYoloApproval();
+                        logApproval(QStringLiteral("permission"), QStringLiteral("auto-approved"), 1);
                     });
                 }
             } else {
@@ -937,7 +937,7 @@ void ClaudeSession::pollForPermissionPrompt()
                 // Send approval with small delay to ensure prompt is ready
                 QTimer::singleShot(50, this, [this]() {
                     approvePermissionAlways();
-                    incrementYoloApproval();
+                    logApproval(QStringLiteral("permission"), QStringLiteral("auto-approved"), 1);
 
                     // Reset detection flag after a longer cooldown to avoid
                     // rapid-fire false positives from stale terminal content.
@@ -1079,7 +1079,7 @@ void ClaudeSession::pollForIdlePrompt()
                     QTimer::singleShot(500, this, [this]() {
                         if (m_tripleYoloMode) {
                             sendPrompt(m_autoContinuePrompt);
-                            incrementTripleYoloApproval();
+                            logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
 
                             // Cooldown to avoid rapid-fire on stale output
                             QTimer::singleShot(5000, this, [this]() {
@@ -1270,7 +1270,7 @@ void ClaudeSession::autoAcceptSuggestion()
         // accepted (i.e., Claude started working on it).
         QTimer::singleShot(1500, this, [this]() {
             if (claudeState() != ClaudeProcess::State::Idle && claudeState() != ClaudeProcess::State::NotRunning) {
-                incrementDoubleYoloApproval();
+                logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
             }
         });
     });
@@ -1286,7 +1286,7 @@ void ClaudeSession::scheduleSuggestionFallback()
             if (m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
                 qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
                 sendPrompt(m_autoContinuePrompt);
-                incrementTripleYoloApproval();
+                logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
             }
         });
     }
@@ -1347,7 +1347,7 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
                 QTimer::singleShot(500, this, [this]() {
                     if (m_tripleYoloMode) {
                         sendPrompt(m_autoContinuePrompt);
-                        incrementTripleYoloApproval();
+                        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
                     }
                 });
             }
