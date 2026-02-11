@@ -298,7 +298,13 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     // multiple times for the same session (e.g. on every tab switch).
     disconnect(session, nullptr, this, nullptr);
 
-    // Connect to session destruction
+    // Connect to session finished (PTY died, e.g. tab closed) — fires immediately
+    connect(session, &Konsole::Session::finished, this, [this, sessionId]() {
+        m_activeSessions.remove(sessionId);
+        updateTreeWidget();
+    });
+
+    // Connect to session destruction (backup, fires later via deleteLater)
     connect(session, &QObject::destroyed, this, [this, sessionId]() {
         m_activeSessions.remove(sessionId);
         updateTreeWidget();
@@ -364,6 +370,8 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
         saveMetadata();
     }
+
+    m_activeSessions.remove(sessionId);
 
     updateTreeWidget();
 }
