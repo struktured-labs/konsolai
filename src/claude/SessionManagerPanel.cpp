@@ -535,6 +535,52 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
     updateTreeWidget();
 }
 
+void SessionManagerPanel::closeSession(const QString &sessionId)
+{
+    if (!m_metadata.contains(sessionId)) {
+        return;
+    }
+
+    QString sessionName = m_metadata[sessionId].sessionName;
+
+    // Disconnect any active session signals before removal
+    if (m_activeSessions.contains(sessionId)) {
+        ClaudeSession *session = m_activeSessions[sessionId];
+        if (session) {
+            disconnect(session, nullptr, this, nullptr);
+        }
+    }
+
+    // Remove from active sessions
+    m_activeSessions.remove(sessionId);
+
+    // Update last accessed but do NOT mark as archived — it will appear in Closed
+    m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
+    saveMetadata();
+
+    // Kill the tmux session asynchronously
+    auto *tmux = new TmuxManager(nullptr);
+    tmux->sessionExistsAsync(sessionName, [tmux, sessionName](bool exists) {
+        if (exists) {
+            tmux->killSession(sessionName);
+        }
+        tmux->deleteLater();
+    });
+
+    // Clean up stale socket and yolo files
+    QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
+    if (QFile::exists(socketPath)) {
+        QFile::remove(socketPath);
+    }
+    QString yoloPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".yolo");
+    if (QFile::exists(yoloPath)) {
+        QFile::remove(yoloPath);
+    }
+
+    // Update the tree widget (session will land in "Closed" since tmux is dead and isArchived is false)
+    updateTreeWidget();
+}
+
 void SessionManagerPanel::unarchiveSession(const QString &sessionId)
 {
     if (!m_metadata.contains(sessionId)) {
@@ -744,6 +790,11 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         }
 
         menu.addSeparator();
+
+        QAction *closeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("process-stop")), i18n("Close"));
+        connect(closeAction, &QAction::triggered, this, [this, sessionId]() {
+            closeSession(sessionId);
+        });
 
         QAction *archiveAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-remove")), i18n("Archive"));
         connect(archiveAction, &QAction::triggered, this, [this, sessionId]() {

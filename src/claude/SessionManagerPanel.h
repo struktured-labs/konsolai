@@ -130,6 +130,11 @@ public Q_SLOTS:
     void archiveSession(const QString &sessionId);
 
     /**
+     * Close a session (kills tmux, moves to Closed category without archiving)
+     */
+    void closeSession(const QString &sessionId);
+
+    /**
      * Unarchive a session (restarts Claude with same session ID)
      */
     void unarchiveSession(const QString &sessionId);
