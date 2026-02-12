@@ -1845,8 +1845,8 @@ void Screen::setSelectionEnd(const int x, const int y, const bool trimTrailingWh
         }
     } else {
         size_t line = bottomRow - _history->getLines();
-
-        // Clamp line to valid range before any access to _screenLines
+        // Ensure we are never out of bounds, which can happen if history->getLines is desynced
+        // when there is rapidly moving text.
         if (line >= _screenLines.size()) {
             if (!_screenLines.empty()) {
                 line = _screenLines.size() - 1;
