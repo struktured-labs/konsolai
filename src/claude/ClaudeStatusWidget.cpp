@@ -22,6 +22,7 @@ ClaudeStatusWidget::ClaudeStatusWidget(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
+    m_stateLabel->setTextFormat(Qt::RichText);
     m_stateLabel->setToolTip(QStringLiteral("Claude status"));
     layout->addWidget(m_stateLabel);
 
@@ -137,17 +138,17 @@ void ClaudeStatusWidget::updateDisplay()
         icon = QString::fromUtf8(SPINNER_FRAMES[m_spinnerIndex]);
     }
 
-    // Build status text with approval count and token usage
+    // Build status text with approval count and token usage (using rich text for colored bolts)
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
     if (m_session && m_session->totalApprovalCount() > 0) {
-        // Show bolt count matching the highest active yolo level
+        // Show bolt count matching the highest active yolo level with level-specific color
         QString bolts;
         if (m_session->tripleYoloMode()) {
-            bolts = QStringLiteral("⚡⚡⚡");
+            bolts = QStringLiteral("<span style='color:#AB47BC'>⚡⚡⚡</span>"); // Purple
         } else if (m_session->doubleYoloMode()) {
-            bolts = QStringLiteral("⚡⚡");
+            bolts = QStringLiteral("<span style='color:#42A5F5'>⚡⚡</span>"); // Light blue
         } else {
-            bolts = QStringLiteral("⚡");
+            bolts = QStringLiteral("<span style='color:#FFB300'>⚡</span>"); // Gold
         }
         statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
     }

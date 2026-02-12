@@ -1035,13 +1035,17 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         if (session) {
             QString indicators;
 
-            // Add yolo mode indicator
+            // Add yolo mode indicator with level-specific color
+            QColor yoloColor;
             if (session->tripleYoloMode()) {
                 indicators = QStringLiteral("⚡⚡⚡");
+                yoloColor = QColor(0xAB, 0x47, 0xBC); // Purple
             } else if (session->doubleYoloMode()) {
                 indicators = QStringLiteral("⚡⚡");
+                yoloColor = QColor(0x42, 0xA5, 0xF5); // Light blue
             } else if (session->yoloMode()) {
                 indicators = QStringLiteral("⚡");
+                yoloColor = QColor(0xFF, 0xB3, 0x00); // Gold
             }
 
             // Add approval count
@@ -1055,8 +1059,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
 
             if (!indicators.isEmpty()) {
                 item->setText(1, indicators);
-                // Use a distinct color for the count (blue-ish)
-                item->setForeground(1, QBrush(QColor(0x3d, 0x9d, 0xf3))); // Light blue
+                item->setForeground(1, QBrush(yoloColor));
             }
         }
     }
