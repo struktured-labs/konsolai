@@ -144,13 +144,13 @@ void ClaudeStatusWidget::updateDisplay()
         // Show one bolt per enabled yolo level, each in its own color
         QString bolts;
         if (m_session->yoloMode()) {
-            bolts += QStringLiteral("<span style='color:#FFB300'>⚡</span>"); // Gold
+            bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
         }
         if (m_session->doubleYoloMode()) {
-            bolts += QStringLiteral("<span style='color:#42A5F5'>⚡</span>"); // Light blue
+            bolts += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
         }
         if (m_session->tripleYoloMode()) {
-            bolts += QStringLiteral("<span style='color:#AB47BC'>⚡</span>"); // Purple
+            bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
         }
         if (bolts.isEmpty()) {
             // Approvals exist but no yolo levels active (manual approvals)
