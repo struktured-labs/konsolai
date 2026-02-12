@@ -1036,13 +1036,13 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             // Build rich text with per-bolt colors
             QString boltsHtml;
             if (session->yoloMode()) {
-                boltsHtml += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
+                boltsHtml += QStringLiteral("<span style='color:#FFB300'>⚡</span>"); // Gold
             }
             if (session->doubleYoloMode()) {
-                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
+                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>⚡</span>"); // Light blue
             }
             if (session->tripleYoloMode()) {
-                boltsHtml += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
+                boltsHtml += QStringLiteral("<span style='color:#AB47BC'>⚡</span>"); // Purple
             }
 
             // Add approval count

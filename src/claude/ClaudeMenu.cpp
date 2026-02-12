@@ -16,11 +16,25 @@
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QPlainTextEdit>
 #include <QVBoxLayout>
 
 namespace Konsolai
 {
+
+static QIcon coloredDotIcon(const QColor &color, int size = 16)
+{
+    QPixmap pixmap(size, size);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(color);
+    painter.setPen(Qt::NoPen);
+    painter.drawEllipse(2, 2, size - 4, size - 4);
+    return QIcon(pixmap);
+}
 
 ClaudeMenu::ClaudeMenu(QWidget *parent)
     : QMenu(i18n("&Claude"), parent)
@@ -86,22 +100,22 @@ void ClaudeMenu::createActions()
 
     addSeparator();
 
-    // Yolo Mode - auto-approve all permissions
-    m_yoloModeAction = addAction(QStringLiteral("\u26A1 ") + i18n("&Yolo Mode (Auto-Approve)"));
+    // Yolo Mode - auto-approve all permissions (gold)
+    m_yoloModeAction = addAction(coloredDotIcon(QColor(0xFF, 0xB3, 0x00)), i18n("&Yolo Mode (Auto-Approve)"));
     m_yoloModeAction->setCheckable(true);
     m_yoloModeAction->setChecked(m_yoloMode);
     m_yoloModeAction->setToolTip(i18n("Automatically approve all permission requests"));
     connect(m_yoloModeAction, &QAction::toggled, this, &ClaudeMenu::onYoloModeToggled);
 
-    // Double Yolo Mode - auto-accept completions
-    m_doubleYoloModeAction = addAction(QStringLiteral("\u26A1\u26A1 ") + i18n("Double &Yolo Mode (Auto-Complete)"));
+    // Double Yolo Mode - auto-accept completions (light blue)
+    m_doubleYoloModeAction = addAction(coloredDotIcon(QColor(0x42, 0xA5, 0xF5)), i18n("Double &Yolo Mode (Auto-Complete)"));
     m_doubleYoloModeAction->setCheckable(true);
     m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
     m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
     connect(m_doubleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onDoubleYoloModeToggled);
 
-    // Triple Yolo Mode - auto-continue with prompt
-    m_tripleYoloModeAction = addAction(QStringLiteral("\u26A1\u26A1\u26A1 ") + i18n("&Triple Yolo Mode (Auto-Continue)"));
+    // Triple Yolo Mode - auto-continue with prompt (purple)
+    m_tripleYoloModeAction = addAction(coloredDotIcon(QColor(0xAB, 0x47, 0xBC)), i18n("&Triple Yolo Mode (Auto-Continue)"));
     m_tripleYoloModeAction->setCheckable(true);
     m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
     m_tripleYoloModeAction->setToolTip(i18n("Automatically send continue prompt when Claude becomes idle"));
