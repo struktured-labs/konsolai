@@ -585,6 +585,14 @@ void MainWindow::setupActions()
         Q_EMIT _claudeMenu->reattachRequested(sessionName);
     });
 
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::focusSessionRequested, this, [this](Konsolai::ClaudeSession *session) {
+        if (session) {
+            // ClaudeSession::sessionId() returns QString (hex ID), but ViewManager needs
+            // the Konsole Session integer ID from the base class
+            _viewManager->setCurrentSession(static_cast<Konsole::Session *>(session)->sessionId());
+        }
+    });
+
     connect(_sessionPanel, &Konsolai::SessionManagerPanel::newSessionRequested, this, [this]() {
         // Trigger new Claude tab action
         triggerAction(QStringLiteral("new-tab"));

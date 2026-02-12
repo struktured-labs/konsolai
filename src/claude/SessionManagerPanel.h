@@ -151,6 +151,11 @@ Q_SIGNALS:
     void attachRequested(const QString &sessionName);
 
     /**
+     * Emitted when user wants to focus/select the tab for an active session
+     */
+    void focusSessionRequested(ClaudeSession *session);
+
+    /**
      * Emitted when user wants to create a new session
      */
     void newSessionRequested();

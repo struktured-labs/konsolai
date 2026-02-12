@@ -644,8 +644,14 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
     if (meta.isArchived) {
         // Unarchive and attach
         unarchiveSession(sessionId);
+    } else if (m_activeSessions.contains(sessionId)) {
+        // Active session — focus its tab
+        ClaudeSession *session = m_activeSessions[sessionId];
+        if (session) {
+            Q_EMIT focusSessionRequested(session);
+        }
     } else {
-        // Attach to existing session
+        // Detached session — reattach
         Q_EMIT attachRequested(meta.sessionName);
     }
 }
@@ -739,7 +745,15 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         // Active or detached session
         bool isActive = m_activeSessions.contains(sessionId);
 
-        if (!isActive) {
+        if (isActive) {
+            ClaudeSession *activeSession = m_activeSessions[sessionId];
+            if (activeSession) {
+                QAction *focusAction = menu.addAction(QIcon::fromTheme(QStringLiteral("go-jump")), i18n("Focus Tab"));
+                connect(focusAction, &QAction::triggered, this, [this, activeSession]() {
+                    Q_EMIT focusSessionRequested(activeSession);
+                });
+            }
+        } else {
             QAction *attachAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach"));
             connect(attachAction, &QAction::triggered, this, [this, meta]() {
                 Q_EMIT attachRequested(meta.sessionName);
