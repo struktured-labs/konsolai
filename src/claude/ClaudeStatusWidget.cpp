@@ -144,11 +144,11 @@ void ClaudeStatusWidget::updateDisplay()
         // Show bolt count matching the highest active yolo level with level-specific color
         QString bolts;
         if (m_session->tripleYoloMode()) {
-            bolts = QStringLiteral("<span style='color:#AB47BC'>⚡⚡⚡</span>"); // Purple
+            bolts = QStringLiteral("<span style='color:#AB47BC'>ϟϟϟ</span>"); // Purple
         } else if (m_session->doubleYoloMode()) {
-            bolts = QStringLiteral("<span style='color:#42A5F5'>⚡⚡</span>"); // Light blue
+            bolts = QStringLiteral("<span style='color:#42A5F5'>ϟϟ</span>"); // Light blue
         } else {
-            bolts = QStringLiteral("<span style='color:#FFB300'>⚡</span>"); // Gold
+            bolts = QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
         }
         statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
     }

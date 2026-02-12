@@ -1038,13 +1038,13 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             // Add yolo mode indicator with level-specific color
             QColor yoloColor;
             if (session->tripleYoloMode()) {
-                indicators = QStringLiteral("⚡⚡⚡");
+                indicators = QStringLiteral("ϟϟϟ");
                 yoloColor = QColor(0xAB, 0x47, 0xBC); // Purple
             } else if (session->doubleYoloMode()) {
-                indicators = QStringLiteral("⚡⚡");
+                indicators = QStringLiteral("ϟϟ");
                 yoloColor = QColor(0x42, 0xA5, 0xF5); // Light blue
             } else if (session->yoloMode()) {
-                indicators = QStringLiteral("⚡");
+                indicators = QStringLiteral("ϟ");
                 yoloColor = QColor(0xFF, 0xB3, 0x00); // Gold
             }
 
