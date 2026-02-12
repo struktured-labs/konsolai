@@ -115,14 +115,14 @@ void ClaudeMenu::createActions()
     connect(m_yoloModeAction, &QAction::toggled, this, &ClaudeMenu::onYoloModeToggled);
 
     // Double Yolo Mode - auto-accept completions (light blue)
-    m_doubleYoloModeAction = addAction(coloredBoltIcon(QColor(0x42, 0xA5, 0xF5), 2), i18n("Double &Yolo Mode (Auto-Complete)"));
+    m_doubleYoloModeAction = addAction(coloredBoltIcon(QColor(0x42, 0xA5, 0xF5), 1), i18n("Double &Yolo Mode (Auto-Complete)"));
     m_doubleYoloModeAction->setCheckable(true);
     m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
     m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
     connect(m_doubleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onDoubleYoloModeToggled);
 
     // Triple Yolo Mode - auto-continue with prompt (purple)
-    m_tripleYoloModeAction = addAction(coloredBoltIcon(QColor(0xAB, 0x47, 0xBC), 3), i18n("&Triple Yolo Mode (Auto-Continue)"));
+    m_tripleYoloModeAction = addAction(coloredBoltIcon(QColor(0xAB, 0x47, 0xBC), 1), i18n("&Triple Yolo Mode (Auto-Continue)"));
     m_tripleYoloModeAction->setCheckable(true);
     m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
     m_tripleYoloModeAction->setToolTip(i18n("Automatically send continue prompt when Claude becomes idle"));
