@@ -141,16 +141,23 @@ void ClaudeStatusWidget::updateDisplay()
     // Build status text with approval count and token usage (using rich text for colored bolts)
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
     if (m_session && m_session->totalApprovalCount() > 0) {
-        // Show bolt count matching the highest active yolo level with level-specific color
+        // Show one bolt per enabled yolo level, each in its own color
         QString bolts;
-        if (m_session->tripleYoloMode()) {
-            bolts = QStringLiteral("<span style='color:#AB47BC'>ϟϟϟ</span>"); // Purple
-        } else if (m_session->doubleYoloMode()) {
-            bolts = QStringLiteral("<span style='color:#42A5F5'>ϟϟ</span>"); // Light blue
-        } else {
-            bolts = QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
+        if (m_session->yoloMode()) {
+            bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
         }
-        statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
+        if (m_session->doubleYoloMode()) {
+            bolts += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
+        }
+        if (m_session->tripleYoloMode()) {
+            bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
+        }
+        if (bolts.isEmpty()) {
+            // Approvals exist but no yolo levels active (manual approvals)
+            statusText += QStringLiteral(" │ %1").arg(QString::number(m_session->totalApprovalCount()));
+        } else {
+            statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
+        }
     }
     if (m_session && m_session->tokenUsage().totalTokens() > 0) {
         const auto &usage = m_session->tokenUsage();

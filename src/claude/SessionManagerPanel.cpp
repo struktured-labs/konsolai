@@ -1033,33 +1033,30 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {
-            QString indicators;
-
-            // Add yolo mode indicator with level-specific color
-            QColor yoloColor;
+            // Build rich text with per-bolt colors
+            QString boltsHtml;
+            if (session->yoloMode()) {
+                boltsHtml += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
+            }
+            if (session->doubleYoloMode()) {
+                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
+            }
             if (session->tripleYoloMode()) {
-                indicators = QStringLiteral("ϟϟϟ");
-                yoloColor = QColor(0xAB, 0x47, 0xBC); // Purple
-            } else if (session->doubleYoloMode()) {
-                indicators = QStringLiteral("ϟϟ");
-                yoloColor = QColor(0x42, 0xA5, 0xF5); // Light blue
-            } else if (session->yoloMode()) {
-                indicators = QStringLiteral("ϟ");
-                yoloColor = QColor(0xFF, 0xB3, 0x00); // Gold
+                boltsHtml += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
             }
 
             // Add approval count
             int count = session->totalApprovalCount();
-            if (count > 0) {
-                if (!indicators.isEmpty()) {
-                    indicators += QStringLiteral(" ");
-                }
-                indicators += QStringLiteral("[%1]").arg(count);
+            if (count > 0 && !boltsHtml.isEmpty()) {
+                boltsHtml += QStringLiteral(" [%1]").arg(count);
+            } else if (count > 0) {
+                boltsHtml = QStringLiteral("[%1]").arg(count);
             }
 
-            if (!indicators.isEmpty()) {
-                item->setText(1, indicators);
-                item->setForeground(1, QBrush(yoloColor));
+            if (!boltsHtml.isEmpty()) {
+                auto *label = new QLabel(boltsHtml);
+                label->setTextFormat(Qt::RichText);
+                m_treeWidget->setItemWidget(item, 1, label);
             }
         }
     }
