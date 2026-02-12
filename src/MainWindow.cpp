@@ -586,10 +586,19 @@ void MainWindow::setupActions()
     });
 
     connect(_sessionPanel, &Konsolai::SessionManagerPanel::focusSessionRequested, this, [this](Konsolai::ClaudeSession *session) {
-        if (session) {
-            // ClaudeSession::sessionId() returns QString (hex ID), but ViewManager needs
-            // the Konsole Session integer ID from the base class
-            _viewManager->setCurrentSession(static_cast<Konsole::Session *>(session)->sessionId());
+        if (!session) {
+            return;
+        }
+        // Use the session's views directly — ClaudeSessions aren't registered in
+        // Konsole's SessionManager::_sessions, so setCurrentSession(id) won't work.
+        auto views = static_cast<Konsole::Session *>(session)->views();
+        if (!views.isEmpty()) {
+            auto *display = views.at(0);
+            display->setFocus(Qt::OtherFocusReason);
+            auto *splitter = qobject_cast<ViewSplitter *>(display->parent());
+            if (splitter) {
+                _viewManager->activeContainer()->setCurrentWidget(splitter->getToplevelSplitter());
+            }
         }
     });
 
