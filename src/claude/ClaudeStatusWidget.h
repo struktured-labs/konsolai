@@ -9,15 +9,15 @@
 #include "konsoleprivate_export.h"
 
 #include "ClaudeProcess.h"
+#include "ClaudeSession.h"
 
 #include <QLabel>
+#include <QPointer>
 #include <QTimer>
 #include <QWidget>
 
 namespace Konsolai
 {
-
-class ClaudeSession;
 
 /**
  * ClaudeStatusWidget displays Claude status in the status bar.
@@ -50,7 +50,10 @@ public:
     /**
      * Get the current session
      */
-    ClaudeSession* session() const { return m_session; }
+    ClaudeSession *session() const
+    {
+        return m_session.data();
+    }
 
 public Q_SLOTS:
     /**
@@ -72,7 +75,7 @@ private:
     QString stateText(ClaudeProcess::State state) const;
     QString stateIcon(ClaudeProcess::State state) const;
 
-    ClaudeSession *m_session = nullptr;
+    QPointer<ClaudeSession> m_session;
 
     QLabel *m_stateLabel = nullptr;
     QLabel *m_taskLabel = nullptr;

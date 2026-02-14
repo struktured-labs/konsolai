@@ -124,8 +124,11 @@ void ClaudeStatusWidget::updateSpinner()
 
 void ClaudeStatusWidget::onSessionDestroyed()
 {
-    m_session = nullptr;
-    clearSession();
+    // QPointer already nulled m_session; just reset display state
+    m_currentState = ClaudeProcess::State::NotRunning;
+    m_currentTask.clear();
+    m_spinnerTimer->stop();
+    updateDisplay();
 }
 
 void ClaudeStatusWidget::updateDisplay()

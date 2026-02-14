@@ -259,6 +259,10 @@ ViewManager *MainWindow::viewManager() const
 
 void MainWindow::disconnectController(SessionController *controller)
 {
+    if (!controller) {
+        return;
+    }
+
     disconnect(controller, &Konsole::SessionController::titleChanged, this, &Konsole::MainWindow::activeViewTitleChanged);
     disconnect(controller, &Konsole::SessionController::rawTitleChanged, this, &Konsole::MainWindow::updateWindowCaption);
     disconnect(controller, &Konsole::SessionController::iconChanged, this, &Konsole::MainWindow::updateWindowIcon);
@@ -282,6 +286,10 @@ void MainWindow::disconnectController(SessionController *controller)
 
 void MainWindow::activeViewChanged(SessionController *controller)
 {
+    if (!controller || controller->session().isNull()) {
+        return;
+    }
+
     if (!SessionManager::instance()->sessionProfile(controller->session())) {
         return;
     }
@@ -298,14 +306,15 @@ void MainWindow::activeViewChanged(SessionController *controller)
         disconnectController(_pluggedController);
     }
 
-    Q_ASSERT(controller);
     _pluggedController = controller;
-    _pluggedController->view()->installEventFilter(this);
+    if (auto view = _pluggedController->view()) {
+        view->installEventFilter(this);
+    }
 
     // Update Claude UI with active session
     if (controller->session()) {
         // Check if this is a ClaudeSession
-        auto *claudeSession = qobject_cast<Konsolai::ClaudeSession*>(controller->session());
+        auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(controller->session().data());
         qDebug() << "MainWindow::activeViewChanged - session:" << controller->session() << "isClaudeSession:" << (claudeSession != nullptr)
                  << "title:" << controller->session()->title(Session::DisplayedTitleRole);
         if (claudeSession) {
@@ -318,7 +327,8 @@ void MainWindow::activeViewChanged(SessionController *controller)
         }
     }
 
-    setBlur(ViewManager::profileHasBlurEnabled(SessionManager::instance()->sessionProfile(_pluggedController->session())));
+    auto profile = SessionManager::instance()->sessionProfile(_pluggedController->session());
+    setBlur(profile ? ViewManager::profileHasBlurEnabled(profile) : false);
 
     // listen for title changes from the current session
     connect(controller, &Konsole::SessionController::titleChanged, this, &Konsole::MainWindow::activeViewTitleChanged);

@@ -466,8 +466,16 @@ void TabbedViewContainer::disconnectTerminalDisplay(TerminalDisplay *display)
 void TabbedViewContainer::viewDestroyed(QObject *view)
 {
     QWidget *widget = qobject_cast<QWidget *>(view);
-    Q_ASSERT(widget);
+    if (!widget) {
+        return;
+    }
     const int idx = indexOf(widget);
+    if (idx == -1) {
+        // Already removed (e.g. tab was closed before deferred destruction)
+        _tabIconState.remove(widget);
+        _claudeIndicators.remove(widget);
+        return;
+    }
 
     removeTab(idx);
     forgetView();
@@ -581,6 +589,9 @@ void TabbedViewContainer::currentTabChanged(int index)
 {
     if (index != -1) {
         auto splitview = qobject_cast<ViewSplitter *>(widget(index));
+        if (!splitview) {
+            return;
+        }
         auto view = splitview->activeTerminalDisplay();
         setTabActivity(index, false);
         _tabIconState[splitview].notification = Session::NoNotification;

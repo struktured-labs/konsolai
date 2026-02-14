@@ -69,6 +69,7 @@ ecm_add_tests(
 
 ecm_add_tests(
     ClaudeTabIndicatorTest.cpp
+    ClaudeStatusWidgetTest.cpp
     SessionManagerPanelTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS} Qt::Widgets
 )
