@@ -75,7 +75,12 @@ ClaudeSession::~ClaudeSession()
     if (auto *registry = ClaudeSessionRegistry::instance()) {
         registry->unregisterSession(this);
     }
-    removeHooksFromProjectSettings();
+
+    if (m_isRemote) {
+        cleanupRemoteHooks();
+    } else {
+        removeHooksFromProjectSettings();
+    }
 }
 
 void ClaudeSession::initializeNew(const QString &profileName, const QString &workingDir)
@@ -452,8 +457,12 @@ void ClaudeSession::connectSignals()
         qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "doubleYoloMode:" << m_doubleYoloMode
                  << "tripleYoloMode:" << m_tripleYoloMode << "trySuggestionsFirst:" << m_trySuggestionsFirst;
 
-        // Cancel any pending fallback if Claude is no longer idle
+        // Cancel any pending suggestion/fallback timers if Claude is no longer idle
         if (newState != ClaudeProcess::State::Idle) {
+            if (m_suggestionTimer && m_suggestionTimer->isActive()) {
+                m_suggestionTimer->stop();
+                qDebug() << "ClaudeSession: Cancelled suggestion timer (state changed)";
+            }
             if (m_suggestionFallbackTimer && m_suggestionFallbackTimer->isActive()) {
                 m_suggestionFallbackTimer->stop();
                 qDebug() << "ClaudeSession: Cancelled suggestion fallback (state changed)";
@@ -473,9 +482,16 @@ void ClaudeSession::connectSignals()
             // (suggestions can take several seconds depending on API latency)
             // Also gives user time to start typing, which cancels via state change
             qDebug() << "ClaudeSession: Auto-accepting suggestion (double yolo mode) in 5s";
-            QTimer::singleShot(5000, this, [this]() {
-                autoAcceptSuggestion();
-            });
+            if (!m_suggestionTimer) {
+                m_suggestionTimer = new QTimer(this);
+                m_suggestionTimer->setSingleShot(true);
+                connect(m_suggestionTimer, &QTimer::timeout, this, [this]() {
+                    if (m_doubleYoloMode) {
+                        autoAcceptSuggestion();
+                    }
+                });
+            }
+            m_suggestionTimer->start(5000);
 
             // If triple yolo is also on, schedule fallback
             if (m_tripleYoloMode) {
@@ -633,11 +649,23 @@ QString ClaudeSession::buildRemoteSshCommand() const
         escapedConfig.replace(QStringLiteral("'"), QStringLiteral("'\\''"));
 
         // Build the compound remote command
+        // Use python3 to merge hooks into existing settings.local.json
+        // (preserves existing allowed tools, permissions, etc.)
         remoteCmd = QStringLiteral(
                         "cat > '%1' << 'KONSOLAI_HOOK_EOF'\n%2\nKONSOLAI_HOOK_EOF\n"
                         "chmod +x '%1' && "
                         "mkdir -p '%3/.claude' && "
-                        "echo '%4' > '%3/.claude/settings.local.json' && "
+                        "python3 -c \""
+                        "import json,sys,os; "
+                        "p='%3/.claude/settings.local.json'; "
+                        "e={}; "
+                        "r=open(p) if os.path.exists(p) else None; "
+                        "e=json.load(r) if r else {}; "
+                        "r and r.close(); "
+                        "n=json.loads(sys.argv[1]); "
+                        "e['hooks']=n.get('hooks',{}); "
+                        "f=open(p,'w'); json.dump(e,f,indent=2); f.close()"
+                        "\" '%4' && "
                         "tmux new-session -A -s %5 -c %3 -- %6")
                         .arg(scriptPath, hookScript, remoteWorkDir, escapedConfig, m_sessionName, claudeCmd);
     } else {
@@ -1322,6 +1350,16 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
                 }
             }
         } else {
+            // Cancel any pending suggestion timers so they don't fire after disable
+            if (m_suggestionTimer && m_suggestionTimer->isActive()) {
+                m_suggestionTimer->stop();
+                qDebug() << "ClaudeSession: Cancelled pending suggestion timer (double yolo disabled)";
+            }
+            if (m_suggestionFallbackTimer && m_suggestionFallbackTimer->isActive()) {
+                m_suggestionFallbackTimer->stop();
+                qDebug() << "ClaudeSession: Cancelled suggestion fallback timer (double yolo disabled)";
+            }
+
             // Only stop polling if triple yolo doesn't also need it
             if (!m_tripleYoloMode) {
                 stopIdlePolling();
@@ -1582,6 +1620,56 @@ void ClaudeSession::refreshResourceUsage()
         qDebug() << "ClaudeSession: Resource usage updated - cpu:" << usage.cpuPercent << "% rss:" << (usage.rssBytes / 1048576) << "MB pid:" << m_claudePid;
         Q_EMIT resourceUsageChanged();
     }
+}
+
+void ClaudeSession::cleanupRemoteHooks()
+{
+    if (m_sshHost.isEmpty() || m_sessionId.isEmpty()) {
+        return;
+    }
+
+    // Build SSH target
+    QString target;
+    if (!m_sshUsername.isEmpty()) {
+        target = QStringLiteral("%1@%2").arg(m_sshUsername, m_sshHost);
+    } else {
+        target = m_sshHost;
+    }
+
+    // Build cleanup command: remove hook script and clean hooks from settings.local.json
+    QString scriptPath = QStringLiteral("/tmp/konsolai-hook-%1.sh").arg(m_sessionId);
+    QString remoteWorkDir = m_workingDir.isEmpty() ? QStringLiteral("~") : m_workingDir;
+    QString settingsPath = remoteWorkDir + QStringLiteral("/.claude/settings.local.json");
+
+    // Remove hook script and use python3 to remove hooks key from settings
+    QString cleanupCmd = QStringLiteral(
+                             "rm -f '%1'; "
+                             "python3 -c \""
+                             "import json,os; "
+                             "p='%2'; "
+                             "e={}; "
+                             "r=open(p) if os.path.exists(p) else None; "
+                             "e=json.load(r) if r else {}; "
+                             "r and r.close(); "
+                             "e.pop('hooks',None); "
+                             "f=open(p,'w'); json.dump(e,f,indent=2); f.close()"
+                             "\" 2>/dev/null || true")
+                             .arg(scriptPath, settingsPath);
+
+    QStringList sshArgs;
+    sshArgs << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=3");
+    sshArgs << QStringLiteral("-o") << QStringLiteral("BatchMode=yes");
+    if (m_sshPort != 22 && m_sshPort > 0) {
+        sshArgs << QStringLiteral("-p") << QString::number(m_sshPort);
+    }
+    sshArgs << target << cleanupCmd;
+
+    // Fire-and-forget: don't block the destructor
+    QProcess *process = new QProcess();
+    QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), process, &QProcess::deleteLater);
+    process->start(QStringLiteral("ssh"), sshArgs);
+
+    qDebug() << "ClaudeSession: Initiated remote hook cleanup for" << target;
 }
 
 void ClaudeSession::removeHooksFromProjectSettings()

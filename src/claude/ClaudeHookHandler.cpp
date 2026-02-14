@@ -423,7 +423,12 @@ EOF
 )
 
 # Send via netcat to the SSH tunnel port (timeout 2s, suppress errors)
-echo "$JSON_MSG" | nc -w 2 localhost $TUNNEL_PORT 2>/dev/null || true
+# Falls back to bash /dev/tcp if nc is not available
+if command -v nc &>/dev/null; then
+    echo "$JSON_MSG" | nc -w 2 localhost $TUNNEL_PORT 2>/dev/null || true
+else
+    (exec 3<>/dev/tcp/localhost/$TUNNEL_PORT && echo "$JSON_MSG" >&3 && exec 3>&-) 2>/dev/null || true
+fi
 
 # Always exit 0 to not break Claude
 exit 0

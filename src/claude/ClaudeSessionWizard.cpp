@@ -885,7 +885,8 @@ void ClaudeSessionWizard::onTestConnectionClicked()
         }
         args << host;
     }
-    args << QStringLiteral("echo") << QStringLiteral("ok");
+    // Check connectivity, tmux availability, and claude availability
+    args << QStringLiteral("echo ok && which tmux 2>/dev/null && which claude 2>/dev/null");
 
     auto *process = new QProcess(this);
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process](int exitCode, QProcess::ExitStatus) {
@@ -893,8 +894,29 @@ void ClaudeSessionWizard::onTestConnectionClicked()
         m_testConnectionButton->setEnabled(true);
 
         if (exitCode == 0) {
-            m_connectionStatusLabel->setText(i18n("Connected"));
-            m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: green;"));
+            QString output = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+            QStringList lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+
+            // Line 0: "ok", Line 1: tmux path (if found), Line 2: claude path (if found)
+            bool hasTmux = lines.size() >= 2 && !lines[1].isEmpty();
+            bool hasClaude = lines.size() >= 3 && !lines[2].isEmpty();
+
+            QString status;
+            if (hasTmux && hasClaude) {
+                status = i18n("OK (tmux + claude found)");
+                m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: green;"));
+            } else {
+                QStringList missing;
+                if (!hasTmux) {
+                    missing << QStringLiteral("tmux");
+                }
+                if (!hasClaude) {
+                    missing << QStringLiteral("claude");
+                }
+                status = i18n("Connected, missing: %1", missing.join(QStringLiteral(", ")));
+                m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: orange;"));
+            }
+            m_connectionStatusLabel->setText(status);
         } else {
             QString error = QString::fromUtf8(process->readAllStandardError()).trimmed();
             if (error.isEmpty()) {

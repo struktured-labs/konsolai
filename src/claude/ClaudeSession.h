@@ -699,6 +699,9 @@ private:
     // Double yolo: auto-accept suggestions
     void autoAcceptSuggestion();
 
+    // Timer for the hook-based 5s delayed suggestion acceptance
+    QTimer *m_suggestionTimer = nullptr;
+
     // Fallback timer: if double yolo fires but Claude stays idle, triple yolo follows
     QTimer *m_suggestionFallbackTimer = nullptr;
     void scheduleSuggestionFallback();
@@ -713,6 +716,9 @@ private:
 
     // Hook cleanup: remove konsolai hooks from project's .claude/settings.local.json
     void removeHooksFromProjectSettings();
+
+    // Remote hook cleanup: remove hook script and settings via SSH
+    void cleanupRemoteHooks();
 };
 
 } // namespace Konsolai
