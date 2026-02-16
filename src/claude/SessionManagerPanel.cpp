@@ -11,7 +11,10 @@
 
 #include <KLocalizedString>
 #include <QAction>
+#include <QApplication>
+#include <QClipboard>
 #include <QColor>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -24,15 +27,41 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPointer>
+#include <QPushButton>
 #include <QSet>
 #include <QStandardPaths>
+#include <QToolBar>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace Konsolai
 {
 
 static const QString SETTINGS_GROUP = QStringLiteral("SessionManager");
+
+static QString formatElapsed(const QDateTime &start)
+{
+    if (!start.isValid()) {
+        return {};
+    }
+    qint64 secs = start.secsTo(QDateTime::currentDateTime());
+    if (secs < 0) {
+        secs = 0;
+    }
+    if (secs < 60) {
+        return QStringLiteral("%1s").arg(secs);
+    }
+    qint64 mins = secs / 60;
+    qint64 remSecs = secs % 60;
+    if (mins < 60) {
+        return QStringLiteral("%1m %2s").arg(mins).arg(remSecs);
+    }
+    qint64 hours = mins / 60;
+    qint64 remMins = mins % 60;
+    return QStringLiteral("%1h %2m").arg(hours).arg(remMins);
+}
 
 SessionManagerPanel::SessionManagerPanel(QWidget *parent)
     : QWidget(parent)
@@ -748,6 +777,29 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         return;
     }
 
+    // Check if this is a subagent child item (parent is a session item, not a category)
+    QTreeWidgetItem *parentItem = item->parent();
+    if (parentItem && parentItem->parent() != nullptr) {
+        // This is a grandchild of a category → subagent child item
+        QString agentId = item->data(0, Qt::UserRole).toString();
+        QString parentSessionId = item->data(0, Qt::UserRole + 1).toString();
+        if (!agentId.isEmpty() && m_activeSessions.contains(parentSessionId)) {
+            ClaudeSession *session = m_activeSessions[parentSessionId];
+            if (session) {
+                const auto &agents = session->subagents();
+                if (agents.contains(agentId)) {
+                    const auto &info = agents[agentId];
+                    if (!info.transcriptPath.isEmpty() && QFile::exists(info.transcriptPath)) {
+                        showSubagentTranscript(info);
+                    } else {
+                        showSubagentDetails(info);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     QString sessionId = item->data(0, Qt::UserRole).toString();
     if (sessionId.isEmpty()) {
         return;
@@ -788,6 +840,56 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
     if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
         || item == m_discoveredCategory) {
+        return;
+    }
+
+    // Handle subagent child items (grandchild of a category)
+    QTreeWidgetItem *parentItem = item->parent();
+    if (parentItem && parentItem->parent() != nullptr) {
+        QString agentId = item->data(0, Qt::UserRole).toString();
+        QString parentSessionId = item->data(0, Qt::UserRole + 1).toString();
+        if (agentId.isEmpty() || !m_activeSessions.contains(parentSessionId)) {
+            return;
+        }
+        ClaudeSession *session = m_activeSessions[parentSessionId];
+        if (!session) {
+            return;
+        }
+        const auto &agents = session->subagents();
+        if (!agents.contains(agentId)) {
+            return;
+        }
+        const auto &info = agents[agentId];
+
+        QMenu menu(this);
+
+        bool hasTranscript = !info.transcriptPath.isEmpty() && QFile::exists(info.transcriptPath);
+
+        QAction *viewTranscript = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("View Transcript"));
+        viewTranscript->setEnabled(hasTranscript);
+        connect(viewTranscript, &QAction::triggered, this, [this, info]() {
+            showSubagentTranscript(info);
+        });
+
+        QAction *openExternal = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open-folder")), i18n("Open Transcript in Editor"));
+        openExternal->setEnabled(hasTranscript);
+        connect(openExternal, &QAction::triggered, this, [info]() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(info.transcriptPath));
+        });
+
+        menu.addSeparator();
+
+        QAction *copyId = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Agent ID"));
+        connect(copyId, &QAction::triggered, this, [info]() {
+            QApplication::clipboard()->setText(info.agentId);
+        });
+
+        QAction *details = menu.addAction(QIcon::fromTheme(QStringLiteral("dialog-information")), i18n("Show Details"));
+        connect(details, &QAction::triggered, this, [this, info]() {
+            showSubagentDetails(info);
+        });
+
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
     }
 
@@ -1160,6 +1262,20 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         }
     }
 
+    // Stop duration timer if no sessions have active teams
+    if (m_durationTimer && m_durationTimer->isActive()) {
+        bool anyActiveTeam = false;
+        for (auto it = m_activeSessions.constBegin(); it != m_activeSessions.constEnd(); ++it) {
+            if (it.value() && it.value()->hasActiveTeam()) {
+                anyActiveTeam = true;
+                break;
+            }
+        }
+        if (!anyActiveTeam) {
+            m_durationTimer->stop();
+        }
+    }
+
     // Update category visibility
     m_pinnedCategory->setHidden(m_pinnedCategory->childCount() == 0);
     m_detachedCategory->setHidden(m_detachedCategory->childCount() == 0);
@@ -1318,21 +1434,42 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session && session->hasActiveTeam()) {
             const auto &subagents = session->subagents();
+            bool hasActiveAgents = false;
             for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
                 const auto &info = it.value();
                 // Only show active subagents (Working or Idle)
                 if (info.state != ClaudeProcess::State::Working && info.state != ClaudeProcess::State::Idle) {
                     continue;
                 }
+                hasActiveAgents = true;
 
                 auto *childItem = new QTreeWidgetItem(item);
 
-                // Display: agentType (teammateName) or just agentType
+                // Display: agentType (teammateName) — taskSubject (truncated)
                 QString childName = info.agentType;
                 if (!info.teammateName.isEmpty()) {
                     childName = QStringLiteral("%1 (%2)").arg(info.agentType, info.teammateName);
                 }
+                if (!info.currentTaskSubject.isEmpty()) {
+                    QString truncTask = info.currentTaskSubject;
+                    if (truncTask.length() > 30) {
+                        truncTask = truncTask.left(27) + QStringLiteral("...");
+                    }
+                    childName += QStringLiteral(" \u2014 %1").arg(truncTask);
+                }
                 childItem->setText(0, childName);
+
+                // Store agentId and parent sessionId for context menu / double-click
+                childItem->setData(0, Qt::UserRole, info.agentId);
+                childItem->setData(0, Qt::UserRole + 1, meta.sessionId);
+
+                // Elapsed duration label in column 1
+                QString elapsed = formatElapsed(info.startedAt);
+                if (!elapsed.isEmpty()) {
+                    auto *durationLabel = new QLabel(elapsed);
+                    durationLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
+                    m_treeWidget->setItemWidget(childItem, 1, durationLabel);
+                }
 
                 // Icon by state
                 if (info.state == ClaudeProcess::State::Working) {
@@ -1343,21 +1480,38 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     childItem->setForeground(0, QBrush(Qt::gray));
                 }
 
-                // Tooltip with task subject if available
-                QString tooltip = QStringLiteral("Agent: %1").arg(info.agentType);
-                if (!info.currentTaskSubject.isEmpty()) {
-                    tooltip += QStringLiteral("\nTask: %1").arg(info.currentTaskSubject);
-                }
+                // Enhanced tooltip
+                QString childTooltip = QStringLiteral("Agent: %1\nID: %2").arg(info.agentType, info.agentId);
                 if (!info.teammateName.isEmpty()) {
-                    tooltip += QStringLiteral("\nName: %1").arg(info.teammateName);
+                    childTooltip += QStringLiteral("\nName: %1").arg(info.teammateName);
                 }
-                childItem->setToolTip(0, tooltip);
+                if (!info.currentTaskSubject.isEmpty()) {
+                    childTooltip += QStringLiteral("\nTask: %1").arg(info.currentTaskSubject);
+                }
+                if (info.startedAt.isValid()) {
+                    childTooltip += QStringLiteral("\nElapsed: %1").arg(formatElapsed(info.startedAt));
+                }
+                if (!info.transcriptPath.isEmpty()) {
+                    childTooltip += QStringLiteral("\nTranscript: %1").arg(info.transcriptPath);
+                }
+                childItem->setToolTip(0, childTooltip);
 
-                // Read-only
-                childItem->setFlags(Qt::ItemIsEnabled);
+                childItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             }
 
-            item->setExpanded(true);
+            if (hasActiveAgents) {
+                item->setExpanded(true);
+
+                // Start duration timer if not already running
+                if (!m_durationTimer) {
+                    m_durationTimer = new QTimer(this);
+                    m_durationTimer->setInterval(10000); // 10 seconds
+                    connect(m_durationTimer, &QTimer::timeout, this, &SessionManagerPanel::scheduleTreeUpdate);
+                }
+                if (!m_durationTimer->isActive()) {
+                    m_durationTimer->start();
+                }
+            }
         }
     }
 }
@@ -1578,6 +1732,160 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
 
     dialog.resize(550, 400);
     dialog.exec();
+}
+
+void SessionManagerPanel::showSubagentTranscript(const SubagentInfo &info)
+{
+    if (info.transcriptPath.isEmpty() || !QFile::exists(info.transcriptPath)) {
+        QMessageBox::information(this, i18n("No Transcript"), i18n("Transcript file is not available yet.\nIt will be available after the agent completes."));
+        return;
+    }
+
+    QFile file(info.transcriptPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, i18n("Read Error"), i18n("Could not open transcript file:\n%1", info.transcriptPath));
+        return;
+    }
+
+    // Parse JSONL and extract readable content
+    QString readable;
+    QTextStream stream(&file);
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        QJsonDocument lineDoc = QJsonDocument::fromJson(line.toUtf8());
+        if (!lineDoc.isObject()) {
+            continue;
+        }
+        QJsonObject obj = lineDoc.object();
+        QString type = obj[QStringLiteral("type")].toString();
+
+        if (type == QStringLiteral("assistant")) {
+            // Extract assistant message content
+            QJsonArray content = obj[QStringLiteral("message")].toObject()[QStringLiteral("content")].toArray();
+            for (const auto &block : content) {
+                QJsonObject b = block.toObject();
+                if (b[QStringLiteral("type")].toString() == QStringLiteral("text")) {
+                    readable += QStringLiteral("[Assistant]\n%1\n\n").arg(b[QStringLiteral("text")].toString());
+                } else if (b[QStringLiteral("type")].toString() == QStringLiteral("tool_use")) {
+                    readable += QStringLiteral("[Tool: %1]\n").arg(b[QStringLiteral("name")].toString());
+                    QString inputStr = QString::fromUtf8(QJsonDocument(b[QStringLiteral("input")].toObject()).toJson(QJsonDocument::Compact));
+                    if (inputStr.length() > 200) {
+                        inputStr = inputStr.left(197) + QStringLiteral("...");
+                    }
+                    readable += inputStr + QStringLiteral("\n\n");
+                }
+            }
+        } else if (type == QStringLiteral("tool_result") || type == QStringLiteral("result")) {
+            QJsonArray content = obj[QStringLiteral("content")].toArray();
+            for (const auto &block : content) {
+                QJsonObject b = block.toObject();
+                if (b[QStringLiteral("type")].toString() == QStringLiteral("text")) {
+                    QString text = b[QStringLiteral("text")].toString();
+                    if (text.length() > 500) {
+                        text = text.left(497) + QStringLiteral("...");
+                    }
+                    readable += QStringLiteral("[Result]\n%1\n\n").arg(text);
+                }
+            }
+        } else if (type == QStringLiteral("human") || type == QStringLiteral("user")) {
+            QJsonArray content = obj[QStringLiteral("message")].toObject()[QStringLiteral("content")].toArray();
+            for (const auto &block : content) {
+                QJsonObject b = block.toObject();
+                if (b[QStringLiteral("type")].toString() == QStringLiteral("text")) {
+                    readable += QStringLiteral("[User]\n%1\n\n").arg(b[QStringLiteral("text")].toString());
+                }
+            }
+        }
+    }
+    file.close();
+
+    if (readable.isEmpty()) {
+        // Fallback: show raw JSONL
+        QFile raw(info.transcriptPath);
+        if (raw.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            readable = QString::fromUtf8(raw.readAll());
+            raw.close();
+        }
+    }
+
+    // Build viewer dialog
+    QString title = i18n("Transcript \u2014 %1", info.agentType);
+    if (!info.teammateName.isEmpty()) {
+        title = i18n("Transcript \u2014 %1 (%2)", info.agentType, info.teammateName);
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(title);
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *toolbar = new QToolBar(&dialog);
+    QAction *openExternalAction = toolbar->addAction(QIcon::fromTheme(QStringLiteral("document-open-folder")), i18n("Open in External Editor"));
+    connect(openExternalAction, &QAction::triggered, &dialog, [info]() {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.transcriptPath));
+    });
+    layout->addWidget(toolbar);
+
+    auto *textEdit = new QPlainTextEdit(&dialog);
+    textEdit->setReadOnly(true);
+    QFont monoFont(QStringLiteral("monospace"));
+    monoFont.setStyleHint(QFont::TypeWriter);
+    textEdit->setFont(monoFont);
+    textEdit->setPlainText(readable);
+    layout->addWidget(textEdit);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    dialog.resize(700, 500);
+    dialog.exec();
+}
+
+void SessionManagerPanel::showSubagentDetails(const SubagentInfo &info)
+{
+    QString title = i18n("Agent Details \u2014 %1", info.agentType);
+    if (!info.teammateName.isEmpty()) {
+        title = i18n("Agent Details \u2014 %1 (%2)", info.agentType, info.teammateName);
+    }
+
+    QString stateStr;
+    switch (info.state) {
+    case ClaudeProcess::State::Working:
+        stateStr = i18n("Working");
+        break;
+    case ClaudeProcess::State::Idle:
+        stateStr = i18n("Idle");
+        break;
+    case ClaudeProcess::State::NotRunning:
+        stateStr = i18n("Not Running");
+        break;
+    default:
+        stateStr = i18n("Unknown");
+        break;
+    }
+
+    QString details;
+    details += QStringLiteral("<b>Agent Type:</b> %1<br>").arg(info.agentType.toHtmlEscaped());
+    details += QStringLiteral("<b>Agent ID:</b> %1<br>").arg(info.agentId.toHtmlEscaped());
+    if (!info.teammateName.isEmpty()) {
+        details += QStringLiteral("<b>Teammate Name:</b> %1<br>").arg(info.teammateName.toHtmlEscaped());
+    }
+    details += QStringLiteral("<b>State:</b> %1<br>").arg(stateStr);
+    if (info.startedAt.isValid()) {
+        details += QStringLiteral("<b>Started:</b> %1<br>").arg(info.startedAt.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss")));
+        details += QStringLiteral("<b>Elapsed:</b> %1<br>").arg(formatElapsed(info.startedAt));
+    }
+    if (!info.currentTaskSubject.isEmpty()) {
+        details += QStringLiteral("<b>Task:</b> %1<br>").arg(info.currentTaskSubject.toHtmlEscaped());
+    }
+    if (!info.transcriptPath.isEmpty()) {
+        details += QStringLiteral("<b>Transcript:</b> %1<br>").arg(info.transcriptPath.toHtmlEscaped());
+    }
+
+    QMessageBox::information(this, title, details);
 }
 
 void SessionManagerPanel::editSessionDescription(const QString &sessionId)

@@ -10,10 +10,13 @@
 
 #include "ClaudeSession.h"
 
+#include <QClipboard>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QLabel>
 #include <QMenu>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
@@ -215,6 +218,8 @@ private:
     void updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames);
     void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent);
     void showApprovalLog(ClaudeSession *session);
+    void showSubagentTranscript(const SubagentInfo &info);
+    void showSubagentDetails(const SubagentInfo &info);
     void editSessionDescription(const QString &sessionId);
     void cleanupStaleSockets();
     void ensureHooksConfigured(ClaudeSession *session);
@@ -242,6 +247,9 @@ private:
 
     // Debounce timer for saveMetadata — coalesces rapid-fire approval events
     QTimer *m_saveDebounce = nullptr;
+
+    // Periodic timer to update elapsed duration for subagent items
+    QTimer *m_durationTimer = nullptr;
 
     // Guard against overlapping async tmux queries
     bool m_asyncQueryInFlight = false;
