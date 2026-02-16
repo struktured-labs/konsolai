@@ -242,6 +242,10 @@ void SessionManagerPanel::ensureHooksConfigured(ClaudeSession *session)
     hooks[QStringLiteral("PreToolUse")] = makeHookEntry(QStringLiteral("PreToolUse"));
     hooks[QStringLiteral("PostToolUse")] = makeHookEntry(QStringLiteral("PostToolUse"));
     hooks[QStringLiteral("PermissionRequest")] = makeHookEntry(QStringLiteral("PermissionRequest"));
+    hooks[QStringLiteral("SubagentStart")] = makeHookEntry(QStringLiteral("SubagentStart"));
+    hooks[QStringLiteral("SubagentStop")] = makeHookEntry(QStringLiteral("SubagentStop"));
+    hooks[QStringLiteral("TeammateIdle")] = makeHookEntry(QStringLiteral("TeammateIdle"));
+    hooks[QStringLiteral("TaskCompleted")] = makeHookEntry(QStringLiteral("TaskCompleted"));
 
     settings[QStringLiteral("hooks")] = hooks;
 
@@ -358,6 +362,17 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     connect(session, &ClaudeSession::taskDescriptionChanged, this, [this]() {
         scheduleTreeUpdate();
     });
+
+    // Connect to subagent/team events to update tree with nested agents
+    connect(session, &ClaudeSession::subagentStarted, this, [this]() {
+        scheduleTreeUpdate();
+    });
+    connect(session, &ClaudeSession::subagentStopped, this, [this]() {
+        scheduleTreeUpdate();
+    });
+    connect(session, &ClaudeSession::teamInfoChanged, this, [this]() {
+        scheduleTreeUpdate();
+    });
 }
 
 void SessionManagerPanel::unregisterSession(ClaudeSession *session)
@@ -437,10 +452,14 @@ void SessionManagerPanel::cleanupStaleSockets()
         QString id = sockFile.left(sockFile.length() - 5); // Remove .sock
         if (!liveIds.contains(id)) {
             QFile::remove(dir.filePath(sockFile));
-            // Also remove matching .yolo file
+            // Also remove matching .yolo and .yolo-team files
             QString yoloFile = id + QStringLiteral(".yolo");
             if (dir.exists(yoloFile)) {
                 QFile::remove(dir.filePath(yoloFile));
+            }
+            QString teamYoloFile = id + QStringLiteral(".yolo-team");
+            if (dir.exists(teamYoloFile)) {
+                QFile::remove(dir.filePath(teamYoloFile));
             }
             cleaned++;
         }
@@ -527,7 +546,7 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
         tmux->deleteLater();
     });
 
-    // Clean up stale socket and yolo files
+    // Clean up stale socket, yolo, and yolo-team files
     QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
     if (QFile::exists(socketPath)) {
         QFile::remove(socketPath);
@@ -535,6 +554,10 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
     QString yoloPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".yolo");
     if (QFile::exists(yoloPath)) {
         QFile::remove(yoloPath);
+    }
+    QString teamYoloPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".yolo-team");
+    if (QFile::exists(teamYoloPath)) {
+        QFile::remove(teamYoloPath);
     }
 
     // Update the tree widget (async tmux query will run)
@@ -573,7 +596,7 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
         tmux->deleteLater();
     });
 
-    // Clean up stale socket and yolo files
+    // Clean up stale socket, yolo, and yolo-team files
     QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
     if (QFile::exists(socketPath)) {
         QFile::remove(socketPath);
@@ -581,6 +604,10 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
     QString yoloPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".yolo");
     if (QFile::exists(yoloPath)) {
         QFile::remove(yoloPath);
+    }
+    QString teamYoloPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".yolo-team");
+    if (QFile::exists(teamYoloPath)) {
+        QFile::remove(teamYoloPath);
     }
 
     // Update the tree widget (session will land in "Closed" since tmux is dead and isArchived is false)
@@ -1153,6 +1180,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
     }
 
+    // Add team badge when active team exists
+    if (isActive) {
+        ClaudeSession *activeSession = m_activeSessions[meta.sessionId];
+        if (activeSession && activeSession->hasActiveTeam()) {
+            int agentCount = 0;
+            const auto &agents = activeSession->subagents();
+            for (auto it = agents.constBegin(); it != agents.constEnd(); ++it) {
+                if (it->state == ClaudeProcess::State::Working || it->state == ClaudeProcess::State::Idle) {
+                    agentCount++;
+                }
+            }
+            if (!activeSession->teamName().isEmpty()) {
+                displayName += QStringLiteral(" [%1: %2]").arg(activeSession->teamName()).arg(agentCount);
+            } else {
+                displayName += QStringLiteral(" [%1 agents]").arg(agentCount);
+            }
+        }
+    }
+
     // Add @host suffix for remote sessions
     if (meta.isRemote && !meta.sshHost.isEmpty()) {
         displayName += QStringLiteral(" @%1").arg(meta.sshHost);
@@ -1229,6 +1275,54 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             item->setForeground(0, QBrush(Qt::darkBlue));
         } else {
             item->setForeground(0, QBrush(Qt::darkGreen));
+        }
+    }
+
+    // Add nested subagent children for active sessions with teams
+    if (isActive) {
+        ClaudeSession *session = m_activeSessions[meta.sessionId];
+        if (session && session->hasActiveTeam()) {
+            const auto &subagents = session->subagents();
+            for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
+                const auto &info = it.value();
+                // Only show active subagents (Working or Idle)
+                if (info.state != ClaudeProcess::State::Working && info.state != ClaudeProcess::State::Idle) {
+                    continue;
+                }
+
+                auto *childItem = new QTreeWidgetItem(item);
+
+                // Display: agentType (teammateName) or just agentType
+                QString childName = info.agentType;
+                if (!info.teammateName.isEmpty()) {
+                    childName = QStringLiteral("%1 (%2)").arg(info.agentType, info.teammateName);
+                }
+                childItem->setText(0, childName);
+
+                // Icon by state
+                if (info.state == ClaudeProcess::State::Working) {
+                    childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
+                    childItem->setForeground(0, QBrush(Qt::darkGreen));
+                } else {
+                    childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
+                    childItem->setForeground(0, QBrush(Qt::gray));
+                }
+
+                // Tooltip with task subject if available
+                QString tooltip = QStringLiteral("Agent: %1").arg(info.agentType);
+                if (!info.currentTaskSubject.isEmpty()) {
+                    tooltip += QStringLiteral("\nTask: %1").arg(info.currentTaskSubject);
+                }
+                if (!info.teammateName.isEmpty()) {
+                    tooltip += QStringLiteral("\nName: %1").arg(info.teammateName);
+                }
+                childItem->setToolTip(0, tooltip);
+
+                // Read-only
+                childItem->setFlags(Qt::ItemIsEnabled);
+            }
+
+            item->setExpanded(true);
         }
     }
 }

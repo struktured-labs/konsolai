@@ -136,6 +136,26 @@ Q_SIGNALS:
      */
     void yoloApprovalOccurred(const QString &toolName);
 
+    /**
+     * Emitted when a subagent starts (from SubagentStart hook event)
+     */
+    void subagentStarted(const QString &agentId, const QString &agentType);
+
+    /**
+     * Emitted when a subagent stops (from SubagentStop hook event)
+     */
+    void subagentStopped(const QString &agentId, const QString &agentType, const QString &transcriptPath);
+
+    /**
+     * Emitted when a teammate goes idle (from TeammateIdle hook event)
+     */
+    void teammateIdle(const QString &teammateName, const QString &teamName);
+
+    /**
+     * Emitted when a task is completed (from TaskCompleted hook event)
+     */
+    void taskCompleted(const QString &taskId, const QString &taskSubject, const QString &teammateName, const QString &teamName);
+
 public Q_SLOTS:
     /**
      * Update state based on hook event

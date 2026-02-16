@@ -38,6 +38,16 @@ bool isYoloEnabled(const QString &socketPath)
     return QFileInfo::exists(yoloPath);
 }
 
+// Check if team yolo mode is enabled for this session
+// Team yolo state is stored in: ~/.local/share/konsolai/sessions/{session-id}.yolo-team
+bool isTeamYoloEnabled(const QString &socketPath)
+{
+    QString teamYoloPath = socketPath;
+    teamYoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo-team"));
+
+    return QFileInfo::exists(teamYoloPath);
+}
+
 // Output JSON to auto-approve a PermissionRequest
 void outputApprovalJson()
 {
@@ -130,6 +140,17 @@ int main(int argc, char *argv[])
         eventData[QStringLiteral("yolo_approved")] = true;
     }
 
+    // For TeammateIdle events, check team yolo mode and block idle to auto-continue
+    bool teamYoloBlocked = false;
+    if (eventType == QStringLiteral("TeammateIdle") && isTeamYoloEnabled(socketPath)) {
+        // Output feedback to stderr — Claude Code reads this as hook feedback
+        // and delivers it to the idle teammate, keeping them working
+        QTextStream err(stderr);
+        err << "Continue working on your assigned tasks." << "\n";
+        teamYoloBlocked = true;
+        eventData[QStringLiteral("team_yolo_blocked")] = true;
+    }
+
     // Add environment variables that might be useful
     eventData[QStringLiteral("session_id")] = QString::fromLocal8Bit(qgetenv("KONSOLAI_SESSION_ID"));
     eventData[QStringLiteral("working_dir")] = QString::fromLocal8Bit(qgetenv("PWD"));
@@ -166,5 +187,11 @@ int main(int argc, char *argv[])
     }
 
     socket.disconnectFromServer();
+
+    // Exit code 2 blocks the idle teammate when team yolo is active
+    // (Claude Code treats non-zero hook exit as "block this action")
+    if (teamYoloBlocked) {
+        return 2;
+    }
     return 0;
 }

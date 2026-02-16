@@ -76,5 +76,6 @@ ecm_add_tests(
 
 ecm_add_tests(
     ResourceUsageTest.cpp
+    ClaudeAgentTeamTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )

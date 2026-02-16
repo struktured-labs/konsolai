@@ -453,9 +453,11 @@ void ClaudeSession::connectSignals()
     // Handle idle state for double/triple yolo modes
     // Precedence: when trySuggestionsFirst is true, double yolo fires first.
     // If Claude stays idle after 2s, triple yolo fires as fallback.
+    // When an agent team is active, L2/L3 keyboard-based yolo is suppressed —
+    // hook-based TeammateIdle continuation handles it instead.
     connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
         qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "doubleYoloMode:" << m_doubleYoloMode
-                 << "tripleYoloMode:" << m_tripleYoloMode << "trySuggestionsFirst:" << m_trySuggestionsFirst;
+                 << "tripleYoloMode:" << m_tripleYoloMode << "trySuggestionsFirst:" << m_trySuggestionsFirst << "hasActiveTeam:" << hasActiveTeam();
 
         // Cancel any pending suggestion/fallback timers if Claude is no longer idle
         if (newState != ClaudeProcess::State::Idle) {
@@ -476,6 +478,14 @@ void ClaudeSession::connectSignals()
         // NOTE: We no longer call stopIdlePolling() here. The poller's own guards
         // (state checks, cooldown flag) prevent spam, and polling must stay alive so
         // it can re-attempt Tab+Enter when Claude stays Idle on background tabs.
+
+        // When an agent team is active, suppress keyboard-based L2/L3.
+        // Hook-based TeammateIdle continuation handles auto-continue for teams.
+        if (hasActiveTeam()) {
+            qDebug() << "ClaudeSession: Team active - suppressing keyboard-based L2/L3 yolo";
+            return;
+        }
+
         if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
             // Double yolo fires first: Tab + Enter to accept suggestion
             // Use 5s delay to give Claude's inline suggestion time to appear
@@ -504,6 +514,86 @@ void ClaudeSession::connectSignals()
                 sendPrompt(m_autoContinuePrompt);
                 logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
             });
+        }
+    });
+
+    // Handle subagent/team events
+    connect(m_claudeProcess, &ClaudeProcess::subagentStarted, this, [this](const QString &agentId, const QString &agentType) {
+        SubagentInfo info;
+        info.agentId = agentId;
+        info.agentType = agentType;
+        info.state = ClaudeProcess::State::Working;
+        info.startedAt = QDateTime::currentDateTime();
+        m_subagents.insert(agentId, info);
+        qDebug() << "ClaudeSession: Subagent started -" << agentId << agentType << "total:" << m_subagents.size();
+        Q_EMIT subagentStarted(agentId);
+    });
+
+    connect(m_claudeProcess, &ClaudeProcess::subagentStopped, this, [this](const QString &agentId, const QString &agentType, const QString &transcriptPath) {
+        Q_UNUSED(agentType);
+        if (m_subagents.contains(agentId)) {
+            m_subagents[agentId].state = ClaudeProcess::State::NotRunning;
+            m_subagents[agentId].transcriptPath = transcriptPath;
+        }
+        qDebug() << "ClaudeSession: Subagent stopped -" << agentId << "remaining active:" << (hasActiveTeam() ? "yes" : "no");
+        Q_EMIT subagentStopped(agentId);
+    });
+
+    connect(m_claudeProcess, &ClaudeProcess::teammateIdle, this, [this](const QString &teammateName, const QString &tName) {
+        if (!tName.isEmpty()) {
+            m_teamName = tName;
+        }
+        // Find and update the subagent by teammate name
+        for (auto it = m_subagents.begin(); it != m_subagents.end(); ++it) {
+            if (it->teammateName == teammateName || (it->teammateName.isEmpty() && it->state == ClaudeProcess::State::Working)) {
+                it->teammateName = teammateName;
+                it->state = ClaudeProcess::State::Idle;
+                break;
+            }
+        }
+        Q_EMIT teamInfoChanged();
+    });
+
+    connect(m_claudeProcess,
+            &ClaudeProcess::taskCompleted,
+            this,
+            [this](const QString &taskId, const QString &taskSubject, const QString &teammateName, const QString &tName) {
+                Q_UNUSED(taskId);
+                if (!tName.isEmpty()) {
+                    m_teamName = tName;
+                }
+                // Update the subagent's current task subject
+                for (auto it = m_subagents.begin(); it != m_subagents.end(); ++it) {
+                    if (it->teammateName == teammateName) {
+                        it->currentTaskSubject = taskSubject;
+                        break;
+                    }
+                }
+                Q_EMIT teamInfoChanged();
+            });
+
+    // Stop polling when team starts (first subagent) to avoid interfering keystrokes
+    connect(this, &ClaudeSession::subagentStarted, this, [this]() {
+        if (m_permissionPollTimer && m_permissionPollTimer->isActive()) {
+            qDebug() << "ClaudeSession: Stopping permission polling (team active)";
+            m_permissionPollTimer->stop();
+        }
+        if (m_idlePollTimer && m_idlePollTimer->isActive()) {
+            qDebug() << "ClaudeSession: Stopping idle polling (team active)";
+            m_idlePollTimer->stop();
+        }
+    });
+
+    // Resume polling when team dissolves (last subagent stops)
+    connect(this, &ClaudeSession::subagentStopped, this, [this]() {
+        if (!hasActiveTeam()) {
+            qDebug() << "ClaudeSession: Team dissolved - resuming polling if needed";
+            if (m_yoloMode) {
+                startPermissionPolling();
+            }
+            if (m_doubleYoloMode || m_tripleYoloMode) {
+                startIdlePolling();
+            }
         }
     });
 
@@ -929,6 +1019,12 @@ void ClaudeSession::pollForPermissionPrompt()
         return;
     }
 
+    // When a team is active, hooks handle L1 — polling would send keystrokes
+    // to the parent tmux pane which interferes with subagents
+    if (hasActiveTeam()) {
+        return;
+    }
+
     // Skip if an async capture is already in flight
     if (m_permissionPollInFlight) {
         return;
@@ -1035,6 +1131,12 @@ void ClaudeSession::pollForIdlePrompt()
         return;
     }
     if (!m_tmuxManager) {
+        return;
+    }
+
+    // When a team is active, hooks handle continuation — polling would send
+    // keystrokes to the parent tmux pane which interferes with subagents
+    if (hasActiveTeam()) {
         return;
     }
 
@@ -1285,6 +1387,11 @@ void ClaudeSession::autoAcceptSuggestion()
         return;
     }
 
+    // When a team is active, suppress keyboard-based suggestion acceptance
+    if (hasActiveTeam()) {
+        return;
+    }
+
     // Press Tab to accept any visible suggestion in Claude's input,
     // then Enter to submit it.  If there is no suggestion, Tab is a
     // no-op in Claude Code's Ink UI and Enter on an empty prompt is
@@ -1373,6 +1480,26 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
     if (m_tripleYoloMode != enabled) {
         m_tripleYoloMode = enabled;
         Q_EMIT tripleYoloModeChanged(enabled);
+
+        // Manage .yolo-team state file for hook-based team auto-continue
+        if (m_hookHandler) {
+            QString teamYoloPath = m_hookHandler->socketPath();
+            teamYoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo-team"));
+
+            if (enabled) {
+                QFile teamYoloFile(teamYoloPath);
+                if (teamYoloFile.open(QIODevice::WriteOnly)) {
+                    teamYoloFile.write("1");
+                    teamYoloFile.close();
+                    qDebug() << "ClaudeSession: Created team yolo state file:" << teamYoloPath;
+                }
+            } else {
+                if (QFile::exists(teamYoloPath)) {
+                    QFile::remove(teamYoloPath);
+                    qDebug() << "ClaudeSession: Removed team yolo state file:" << teamYoloPath;
+                }
+            }
+        }
 
         if (enabled) {
             // Start idle polling as a fallback when hooks aren't delivering state

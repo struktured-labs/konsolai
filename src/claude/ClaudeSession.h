@@ -15,6 +15,7 @@
 #include "config-konsole.h"
 
 #include <QDateTime>
+#include <QMap>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -96,6 +97,19 @@ struct KONSOLEPRIVATE_EXPORT ResourceUsage {
 
         return QStringLiteral("%1 %2").arg(cpu, mem);
     }
+};
+
+/**
+ * Information about a subagent spawned by Claude Code's Task/Team tools
+ */
+struct KONSOLEPRIVATE_EXPORT SubagentInfo {
+    QString agentId;
+    QString agentType; // "Explore", "Plan", "Bash", "general-purpose", custom name
+    QString teammateName; // from TeammateIdle/TaskCompleted events
+    ClaudeProcess::State state = ClaudeProcess::State::Working;
+    QDateTime startedAt;
+    QString transcriptPath; // from SubagentStop
+    QString currentTaskSubject; // from TaskCompleted
 };
 
 /**
@@ -435,6 +449,37 @@ public:
         return m_resumeSessionId;
     }
 
+    // ========== Subagent / Team Tracking ==========
+
+    /**
+     * Get the map of active subagents (keyed by agent_id)
+     */
+    const QMap<QString, SubagentInfo> &subagents() const
+    {
+        return m_subagents;
+    }
+
+    /**
+     * Whether an agent team is currently active (has at least one running subagent)
+     */
+    bool hasActiveTeam() const
+    {
+        for (const auto &info : m_subagents) {
+            if (info.state == ClaudeProcess::State::Working || info.state == ClaudeProcess::State::Idle) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get the team name (set when TeammateIdle/TaskCompleted events arrive)
+     */
+    QString teamName() const
+    {
+        return m_teamName;
+    }
+
     /**
      * Whether this session is for reattaching to an existing tmux session
      */
@@ -628,6 +673,21 @@ Q_SIGNALS:
      */
     void taskDescriptionChanged();
 
+    /**
+     * Emitted when a subagent starts
+     */
+    void subagentStarted(const QString &agentId);
+
+    /**
+     * Emitted when a subagent stops
+     */
+    void subagentStopped(const QString &agentId);
+
+    /**
+     * Emitted when team info changes (team name, subagent task subjects, etc.)
+     */
+    void teamInfoChanged();
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -653,6 +713,10 @@ private:
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;
     ClaudeHookHandler *m_hookHandler = nullptr;
+
+    // Subagent / team tracking
+    QMap<QString, SubagentInfo> m_subagents; // keyed by agent_id
+    QString m_teamName;
 
     // Per-session yolo mode settings
     bool m_yoloMode = false;
