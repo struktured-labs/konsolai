@@ -173,6 +173,11 @@ public:
      */
     void saveState();
 
+    /**
+     * Remove a session state entry by session name (for purging dismissed sessions)
+     */
+    void removeSessionState(const QString &sessionName);
+
 Q_SIGNALS:
     /**
      * Emitted when the list of orphaned sessions changes

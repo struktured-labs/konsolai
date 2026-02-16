@@ -37,6 +37,7 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     bool isPinned = false;
     bool isArchived = false;
     bool isExpired = false;
+    bool isDismissed = false;
     QDateTime lastAccessed;
     QDateTime createdAt;
 
@@ -144,6 +145,26 @@ public Q_SLOTS:
      */
     void markExpired(const QString &sessionName);
 
+    /**
+     * Dismiss a session (soft delete — hides from normal view, metadata retained)
+     */
+    void dismissSession(const QString &sessionId);
+
+    /**
+     * Restore a dismissed session back to Archived
+     */
+    void restoreSession(const QString &sessionId);
+
+    /**
+     * Purge a session (permanently remove metadata, project files untouched)
+     */
+    void purgeSession(const QString &sessionId);
+
+    /**
+     * Purge all dismissed sessions
+     */
+    void purgeDismissed();
+
 Q_SIGNALS:
     /**
      * Emitted when user wants to attach to a session
@@ -198,6 +219,7 @@ private:
     QTreeWidgetItem *m_detachedCategory = nullptr;
     QTreeWidgetItem *m_closedCategory = nullptr;
     QTreeWidgetItem *m_archivedCategory = nullptr;
+    QTreeWidgetItem *m_dismissedCategory = nullptr;
     QTreeWidgetItem *m_discoveredCategory = nullptr;
 
     QMap<QString, SessionMetadata> m_metadata;

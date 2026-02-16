@@ -132,6 +132,12 @@ void SessionManagerPanel::setupUi()
     m_archivedCategory->setFlags(Qt::ItemIsEnabled);
     m_archivedCategory->setExpanded(false);
 
+    m_dismissedCategory = new QTreeWidgetItem(m_treeWidget);
+    m_dismissedCategory->setText(0, i18n("Dismissed"));
+    m_dismissedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-clear-history")));
+    m_dismissedCategory->setFlags(Qt::ItemIsEnabled);
+    m_dismissedCategory->setExpanded(false);
+
     m_discoveredCategory = new QTreeWidgetItem(m_treeWidget);
     m_discoveredCategory->setText(0, i18n("Discovered"));
     m_discoveredCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-find")));
@@ -612,11 +618,80 @@ void SessionManagerPanel::markExpired(const QString &sessionName)
     qDebug() << "SessionManagerPanel: Could not find session to mark expired:" << sessionName;
 }
 
+void SessionManagerPanel::dismissSession(const QString &sessionId)
+{
+    if (!m_metadata.contains(sessionId)) {
+        return;
+    }
+
+    m_metadata[sessionId].isDismissed = true;
+    m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
+    saveMetadata();
+    updateTreeWidget();
+    qDebug() << "SessionManagerPanel: Dismissed session:" << sessionId;
+}
+
+void SessionManagerPanel::restoreSession(const QString &sessionId)
+{
+    if (!m_metadata.contains(sessionId)) {
+        return;
+    }
+
+    m_metadata[sessionId].isDismissed = false;
+    m_metadata[sessionId].isArchived = true; // Restore to Archived state
+    m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
+    saveMetadata();
+    updateTreeWidget();
+    qDebug() << "SessionManagerPanel: Restored dismissed session:" << sessionId;
+}
+
+void SessionManagerPanel::purgeSession(const QString &sessionId)
+{
+    if (!m_metadata.contains(sessionId)) {
+        return;
+    }
+
+    // Also remove from the registry
+    QString sessionName = m_metadata[sessionId].sessionName;
+    if (m_registry && !sessionName.isEmpty()) {
+        m_registry->removeSessionState(sessionName);
+    }
+
+    m_metadata.remove(sessionId);
+    saveMetadata();
+    updateTreeWidget();
+    qDebug() << "SessionManagerPanel: Purged session metadata:" << sessionId;
+}
+
+void SessionManagerPanel::purgeDismissed()
+{
+    QStringList toRemove;
+    for (auto it = m_metadata.constBegin(); it != m_metadata.constEnd(); ++it) {
+        if (it->isDismissed) {
+            toRemove.append(it.key());
+        }
+    }
+
+    for (const QString &sessionId : toRemove) {
+        QString sessionName = m_metadata[sessionId].sessionName;
+        if (m_registry && !sessionName.isEmpty()) {
+            m_registry->removeSessionState(sessionName);
+        }
+        m_metadata.remove(sessionId);
+    }
+
+    if (!toRemove.isEmpty()) {
+        saveMetadata();
+        updateTreeWidget();
+        qDebug() << "SessionManagerPanel: Purged" << toRemove.size() << "dismissed sessions";
+    }
+}
+
 void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column)
 
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
+    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory || item == m_dismissedCategory
         || item == m_discoveredCategory) {
         return;
     }
@@ -661,6 +736,35 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
     if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
         || item == m_discoveredCategory) {
+        return;
+    }
+
+    // Handle right-click on the Dismissed category header
+    if (item == m_dismissedCategory) {
+        // Count dismissed sessions
+        int dismissedCount = 0;
+        for (const auto &meta : m_metadata) {
+            if (meta.isDismissed) {
+                dismissedCount++;
+            }
+        }
+        if (dismissedCount > 0) {
+            QMenu menu(this);
+            QAction *purgeAllAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Purge All Dismissed (%1)", dismissedCount));
+            connect(purgeAllAction, &QAction::triggered, this, [this, dismissedCount]() {
+                auto answer = QMessageBox::question(this,
+                                                    i18n("Purge Dismissed Sessions"),
+                                                    i18n("Permanently remove metadata for %1 dismissed session(s)?\n\n"
+                                                         "Project folders will NOT be affected.",
+                                                         dismissedCount),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                if (answer == QMessageBox::Yes) {
+                    purgeDismissed();
+                }
+            });
+            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        }
         return;
     }
 
@@ -713,15 +817,41 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
 
     QMenu menu(this);
 
-    if (meta.isArchived) {
+    if (meta.isDismissed) {
+        // Dismissed session context menu
+        QAction *restoreAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore"));
+        connect(restoreAction, &QAction::triggered, this, [this, sessionId]() {
+            restoreSession(sessionId);
+        });
+
+        menu.addSeparator();
+
+        QAction *purgeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Purge"));
+        connect(purgeAction, &QAction::triggered, this, [this, sessionId]() {
+            auto answer = QMessageBox::question(this,
+                                                i18n("Purge Session"),
+                                                i18n("Permanently remove this session's metadata?\n\n"
+                                                     "Project folder will NOT be affected."),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+            if (answer == QMessageBox::Yes) {
+                purgeSession(sessionId);
+            }
+        });
+    } else if (meta.isArchived) {
         QAction *unarchiveAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-extract")), i18n("Unarchive && Start"));
         connect(unarchiveAction, &QAction::triggered, this, [this, sessionId]() {
             unarchiveSession(sessionId);
         });
 
-        if (!meta.workingDirectory.isEmpty() && QDir(meta.workingDirectory).exists()) {
-            menu.addSeparator();
+        menu.addSeparator();
 
+        QAction *dismissAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), i18n("Dismiss"));
+        connect(dismissAction, &QAction::triggered, this, [this, sessionId]() {
+            dismissSession(sessionId);
+        });
+
+        if (!meta.workingDirectory.isEmpty() && QDir(meta.workingDirectory).exists()) {
             QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
             connect(trashAction, &QAction::triggered, this, [this, sessionId, meta]() {
                 auto answer = QMessageBox::question(this,
@@ -814,6 +944,13 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         connect(archiveAction, &QAction::triggered, this, [this, sessionId]() {
             archiveSession(sessionId);
         });
+
+        if (!isActive) {
+            QAction *dismissAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), i18n("Dismiss"));
+            connect(dismissAction, &QAction::triggered, this, [this, sessionId]() {
+                dismissSession(sessionId);
+            });
+        }
     }
 
     menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
@@ -900,6 +1037,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     while (m_archivedCategory->childCount() > 0) {
         delete m_archivedCategory->takeChild(0);
     }
+    while (m_dismissedCategory->childCount() > 0) {
+        delete m_dismissedCategory->takeChild(0);
+    }
 
     // Note: We no longer auto-archive dead tmux sessions.
     // Dead sessions go to "Closed", user-archived sessions go to "Archived".
@@ -911,12 +1051,14 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     });
 
     // Add sessions to appropriate categories
-    // Priority: Archived > Pinned > Active (has tab) > Detached (tmux alive) > Closed (tmux dead)
+    // Priority: Dismissed > Archived > Pinned > Active (has tab) > Detached (tmux alive) > Closed (tmux dead)
     for (const auto &meta : sortedMeta) {
         bool isActive = m_activeSessions.contains(meta.sessionId);
         bool tmuxAlive = liveNames.contains(meta.sessionName);
 
-        if (meta.isArchived) {
+        if (meta.isDismissed) {
+            addSessionToTree(meta, m_dismissedCategory);
+        } else if (meta.isArchived) {
             addSessionToTree(meta, m_archivedCategory);
         } else if (meta.isPinned) {
             addSessionToTree(meta, m_pinnedCategory);
@@ -961,6 +1103,7 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     m_detachedCategory->setHidden(m_detachedCategory->childCount() == 0);
     m_closedCategory->setHidden(m_closedCategory->childCount() == 0);
     m_archivedCategory->setHidden(m_archivedCategory->childCount() == 0);
+    m_dismissedCategory->setHidden(m_dismissedCategory->childCount() == 0);
     m_discoveredCategory->setHidden(m_discoveredCategory->childCount() == 0);
 }
 
@@ -1117,6 +1260,7 @@ void SessionManagerPanel::loadMetadata()
         meta.isPinned = obj[QStringLiteral("isPinned")].toBool();
         meta.isArchived = obj[QStringLiteral("isArchived")].toBool();
         meta.isExpired = obj[QStringLiteral("isExpired")].toBool();
+        meta.isDismissed = obj[QStringLiteral("isDismissed")].toBool();
         meta.lastAccessed = QDateTime::fromString(obj[QStringLiteral("lastAccessed")].toString(), Qt::ISODate);
         meta.createdAt = QDateTime::fromString(obj[QStringLiteral("createdAt")].toString(), Qt::ISODate);
 
@@ -1173,6 +1317,9 @@ void SessionManagerPanel::saveMetadata()
         }
         if (meta.tripleYoloMode) {
             obj[QStringLiteral("tripleYoloMode")] = true;
+        }
+        if (meta.isDismissed) {
+            obj[QStringLiteral("isDismissed")] = true;
         }
 
         array.append(obj);

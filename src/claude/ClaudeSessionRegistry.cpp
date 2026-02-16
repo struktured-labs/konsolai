@@ -342,6 +342,14 @@ void ClaudeSessionRegistry::saveState()
     file.close();
 }
 
+void ClaudeSessionRegistry::removeSessionState(const QString &sessionName)
+{
+    if (m_sessionStates.remove(sessionName) > 0) {
+        saveState();
+        qDebug() << "ClaudeSessionRegistry: Removed session state for:" << sessionName;
+    }
+}
+
 QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const QString &projectPath)
 {
     QList<ClaudeConversation> conversations;
