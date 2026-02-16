@@ -370,6 +370,20 @@ public:
     }
 
     /**
+     * Restore persisted approval state (counts + log) from a previous session run
+     */
+    void restoreApprovalState(int yoloCount, int doubleCount, int tripleCount, const QVector<ApprovalLogEntry> &log)
+    {
+        m_yoloApprovalCount = yoloCount;
+        m_doubleYoloApprovalCount = doubleCount;
+        m_tripleYoloApprovalCount = tripleCount;
+        m_approvalLog = log;
+        qDebug() << "ClaudeSession: Restored approval state - yolo:" << yoloCount << "double:" << doubleCount << "triple:" << tripleCount
+                 << "log entries:" << log.size();
+        Q_EMIT approvalCountChanged();
+    }
+
+    /**
      * Log an approval (called when auto-approving)
      */
     void logApproval(const QString &toolName, const QString &action, int yoloLevel)

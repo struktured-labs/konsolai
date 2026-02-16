@@ -297,8 +297,15 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         session->setYoloMode(m_metadata[sessionId].yoloMode);
         session->setDoubleYoloMode(m_metadata[sessionId].doubleYoloMode);
         session->setTripleYoloMode(m_metadata[sessionId].tripleYoloMode);
-        qDebug() << "SessionManagerPanel: Restored yolo mode for" << sessionId << "- yolo:" << m_metadata[sessionId].yoloMode
-                 << "double:" << m_metadata[sessionId].doubleYoloMode << "triple:" << m_metadata[sessionId].tripleYoloMode;
+
+        // Restore approval counts and log from saved metadata
+        const auto &meta = m_metadata[sessionId];
+        if (meta.yoloApprovalCount > 0 || meta.doubleYoloApprovalCount > 0 || meta.tripleYoloApprovalCount > 0) {
+            session->restoreApprovalState(meta.yoloApprovalCount, meta.doubleYoloApprovalCount, meta.tripleYoloApprovalCount, meta.approvalLog);
+        }
+
+        qDebug() << "SessionManagerPanel: Restored yolo mode for" << sessionId << "- yolo:" << meta.yoloMode << "double:" << meta.doubleYoloMode
+                 << "triple:" << meta.tripleYoloMode << "approvals:" << (meta.yoloApprovalCount + meta.doubleYoloApprovalCount + meta.tripleYoloApprovalCount);
     }
 
     saveMetadata();
@@ -333,6 +340,20 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     // Connect to approval count changes to update display (debounced)
     connect(session, &ClaudeSession::approvalCountChanged, this, [this]() {
         scheduleTreeUpdate();
+    });
+
+    // Persist approval state on each new approval (debounced to avoid excessive I/O)
+    connect(session, &ClaudeSession::approvalLogged, this, [this, sessionId](const ApprovalLogEntry &entry) {
+        Q_UNUSED(entry);
+        if (m_metadata.contains(sessionId)) {
+            if (auto *s = m_activeSessions.value(sessionId)) {
+                m_metadata[sessionId].yoloApprovalCount = s->yoloApprovalCount();
+                m_metadata[sessionId].doubleYoloApprovalCount = s->doubleYoloApprovalCount();
+                m_metadata[sessionId].tripleYoloApprovalCount = s->tripleYoloApprovalCount();
+                m_metadata[sessionId].approvalLog = s->approvalLog();
+            }
+        }
+        scheduleMetadataSave();
     });
 
     // Connect to all yolo mode changes to update display and persist per-session settings
@@ -383,11 +404,15 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
 
     QString sessionId = session->sessionId();
 
-    // Save yolo mode settings before removing session reference
+    // Save yolo mode settings and approval state before removing session reference
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].yoloMode = session->yoloMode();
         m_metadata[sessionId].doubleYoloMode = session->doubleYoloMode();
         m_metadata[sessionId].tripleYoloMode = session->tripleYoloMode();
+        m_metadata[sessionId].yoloApprovalCount = session->yoloApprovalCount();
+        m_metadata[sessionId].doubleYoloApprovalCount = session->doubleYoloApprovalCount();
+        m_metadata[sessionId].tripleYoloApprovalCount = session->tripleYoloApprovalCount();
+        m_metadata[sessionId].approvalLog = session->approvalLog();
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
         saveMetadata();
     }
@@ -1001,6 +1026,16 @@ void SessionManagerPanel::scheduleTreeUpdate()
     m_updateDebounce->start(250);
 }
 
+void SessionManagerPanel::scheduleMetadataSave()
+{
+    if (!m_saveDebounce) {
+        m_saveDebounce = new QTimer(this);
+        m_saveDebounce->setSingleShot(true);
+        connect(m_saveDebounce, &QTimer::timeout, this, &SessionManagerPanel::saveMetadata);
+    }
+    m_saveDebounce->start(1000);
+}
+
 void SessionManagerPanel::updateTreeWidget()
 {
     // Guard against overlapping async tmux queries - if one is already running,
@@ -1369,6 +1404,23 @@ void SessionManagerPanel::loadMetadata()
         meta.doubleYoloMode = obj[QStringLiteral("doubleYoloMode")].toBool();
         meta.tripleYoloMode = obj[QStringLiteral("tripleYoloMode")].toBool();
 
+        // Approval counts
+        meta.yoloApprovalCount = obj[QStringLiteral("yoloApprovalCount")].toInt();
+        meta.doubleYoloApprovalCount = obj[QStringLiteral("doubleYoloApprovalCount")].toInt();
+        meta.tripleYoloApprovalCount = obj[QStringLiteral("tripleYoloApprovalCount")].toInt();
+
+        // Approval log
+        const QJsonArray logArray = obj[QStringLiteral("approvalLog")].toArray();
+        for (const auto &logVal : logArray) {
+            QJsonObject logObj = logVal.toObject();
+            ApprovalLogEntry entry;
+            entry.timestamp = QDateTime::fromString(logObj[QStringLiteral("time")].toString(), Qt::ISODate);
+            entry.toolName = logObj[QStringLiteral("tool")].toString();
+            entry.action = logObj[QStringLiteral("action")].toString();
+            entry.yoloLevel = logObj[QStringLiteral("level")].toInt();
+            meta.approvalLog.append(entry);
+        }
+
         if (!meta.sessionId.isEmpty()) {
             m_metadata[meta.sessionId] = meta;
         }
@@ -1414,6 +1466,30 @@ void SessionManagerPanel::saveMetadata()
         }
         if (meta.isDismissed) {
             obj[QStringLiteral("isDismissed")] = true;
+        }
+
+        // Approval counts (only save if non-zero)
+        int totalApprovals = meta.yoloApprovalCount + meta.doubleYoloApprovalCount + meta.tripleYoloApprovalCount;
+        if (totalApprovals > 0) {
+            obj[QStringLiteral("yoloApprovalCount")] = meta.yoloApprovalCount;
+            obj[QStringLiteral("doubleYoloApprovalCount")] = meta.doubleYoloApprovalCount;
+            obj[QStringLiteral("tripleYoloApprovalCount")] = meta.tripleYoloApprovalCount;
+
+            // Approval log (cap at 500 most recent entries to keep JSON manageable)
+            if (!meta.approvalLog.isEmpty()) {
+                QJsonArray logArray;
+                int startIdx = qMax(0, meta.approvalLog.size() - 500);
+                for (int i = startIdx; i < meta.approvalLog.size(); ++i) {
+                    const auto &entry = meta.approvalLog[i];
+                    QJsonObject logObj;
+                    logObj[QStringLiteral("time")] = entry.timestamp.toString(Qt::ISODate);
+                    logObj[QStringLiteral("tool")] = entry.toolName;
+                    logObj[QStringLiteral("action")] = entry.action;
+                    logObj[QStringLiteral("level")] = entry.yoloLevel;
+                    logArray.append(logObj);
+                }
+                obj[QStringLiteral("approvalLog")] = logArray;
+            }
         }
 
         array.append(obj);

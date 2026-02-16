@@ -8,6 +8,8 @@
 
 #include "konsoleprivate_export.h"
 
+#include "ClaudeSession.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QLabel>
@@ -23,7 +25,6 @@
 namespace Konsolai
 {
 
-class ClaudeSession;
 class ClaudeSessionRegistry;
 
 /**
@@ -51,6 +52,14 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     bool yoloMode = false;
     bool doubleYoloMode = false;
     bool tripleYoloMode = false;
+
+    // Approval counts (persisted across restarts)
+    int yoloApprovalCount = 0;
+    int doubleYoloApprovalCount = 0;
+    int tripleYoloApprovalCount = 0;
+
+    // Approval log entries (persisted across restarts)
+    QVector<ApprovalLogEntry> approvalLog;
 };
 
 /**
@@ -201,6 +210,7 @@ private:
     void loadMetadata();
     void saveMetadata();
     void scheduleTreeUpdate(); // debounced — coalesces rapid-fire calls
+    void scheduleMetadataSave(); // debounced — coalesces rapid-fire saves
     void updateTreeWidget();
     void updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames);
     void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent);
@@ -229,6 +239,9 @@ private:
 
     // Debounce timer for updateTreeWidget — coalesces rapid-fire signals
     QTimer *m_updateDebounce = nullptr;
+
+    // Debounce timer for saveMetadata — coalesces rapid-fire approval events
+    QTimer *m_saveDebounce = nullptr;
 
     // Guard against overlapping async tmux queries
     bool m_asyncQueryInFlight = false;
