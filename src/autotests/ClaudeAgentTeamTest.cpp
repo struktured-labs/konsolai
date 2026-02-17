@@ -46,12 +46,14 @@ void ClaudeAgentTeamTest::testSubagentStartSignal()
     QJsonObject data;
     data[QStringLiteral("agent_id")] = QStringLiteral("abc-123");
     data[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    data[QStringLiteral("transcript_path")] = QStringLiteral("/home/user/.claude/projects/proj/uuid.jsonl");
 
     process.handleHookEvent(QStringLiteral("SubagentStart"), toJson(data));
 
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("abc-123"));
     QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Explore"));
+    QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("/home/user/.claude/projects/proj/uuid.jsonl"));
 }
 
 void ClaudeAgentTeamTest::testSubagentStartAlternateField()
@@ -59,7 +61,7 @@ void ClaudeAgentTeamTest::testSubagentStartAlternateField()
     ClaudeProcess process;
     QSignalSpy spy(&process, &ClaudeProcess::subagentStarted);
 
-    // Use subagent_type instead of agent_type
+    // Use subagent_type instead of agent_type, no transcript_path
     QJsonObject data;
     data[QStringLiteral("agent_id")] = QStringLiteral("def-456");
     data[QStringLiteral("subagent_type")] = QStringLiteral("Plan");
@@ -69,6 +71,25 @@ void ClaudeAgentTeamTest::testSubagentStartAlternateField()
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("def-456"));
     QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Plan"));
+    QVERIFY(spy.at(0).at(2).toString().isEmpty()); // No transcript path provided
+}
+
+void ClaudeAgentTeamTest::testSubagentStartDerivedTranscriptPath()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::subagentStarted);
+
+    // Provide transcript_path (parent session transcript) so the path can be derived
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QStringLiteral("agent-xyz");
+    data[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    data[QStringLiteral("transcript_path")] = QStringLiteral("/home/user/.claude/projects/-home-user-myproj/abc123.jsonl");
+
+    process.handleHookEvent(QStringLiteral("SubagentStart"), toJson(data));
+
+    QCOMPARE(spy.count(), 1);
+    // The raw transcript_path is passed through; derivation happens in ClaudeSession
+    QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("/home/user/.claude/projects/-home-user-myproj/abc123.jsonl"));
 }
 
 // ============================================================

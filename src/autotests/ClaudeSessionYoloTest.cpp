@@ -8,6 +8,8 @@
 #include "ClaudeSessionYoloTest.h"
 
 // Qt
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
@@ -290,6 +292,256 @@ void ClaudeSessionYoloTest::testStateTransition_PermissionRequestWaitsInput()
     process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
 
     QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
+}
+
+// ============================================================
+// Detection edge cases
+// ============================================================
+
+void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_CrossLine()
+{
+    // ❯ on one line, "Yes" on a separate line — must NOT match.
+    // The per-line check prevents cross-line false positives.
+    QString output = QStringLiteral("  ❯ Run tests\n    Yes\n    No");
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(output));
+}
+
+void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_SelectorOnDeny()
+{
+    // Selector on "Deny" line — should NOT match (no Yes/Allow keyword on that line)
+    QString output = QStringLiteral("    Yes\n    Always allow\n  ❯ Deny");
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(output));
+}
+
+void ClaudeSessionYoloTest::testDetectIdlePrompt_NoMatch_CaretInMiddle()
+{
+    // ">" appears in middle of output but last non-empty line is normal text
+    QString output = QStringLiteral("> old prompt\nReading file src/main.cpp...\nDone.");
+    QVERIFY(!ClaudeSession::detectIdlePrompt(output));
+}
+
+// ============================================================
+// Approval logging tests
+// ============================================================
+
+void ClaudeSessionYoloTest::testLogApproval_Level1()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    QCOMPARE(session.yoloApprovalCount(), 0);
+
+    session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    QCOMPARE(session.yoloApprovalCount(), 1);
+    QCOMPARE(session.doubleYoloApprovalCount(), 0);
+    QCOMPARE(session.tripleYoloApprovalCount(), 0);
+}
+
+void ClaudeSessionYoloTest::testLogApproval_Level2()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
+    QCOMPARE(session.yoloApprovalCount(), 0);
+    QCOMPARE(session.doubleYoloApprovalCount(), 1);
+    QCOMPARE(session.tripleYoloApprovalCount(), 0);
+}
+
+void ClaudeSessionYoloTest::testLogApproval_Level3()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+    QCOMPARE(session.yoloApprovalCount(), 0);
+    QCOMPARE(session.doubleYoloApprovalCount(), 0);
+    QCOMPARE(session.tripleYoloApprovalCount(), 1);
+}
+
+void ClaudeSessionYoloTest::testLogApproval_AppendsToLog()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    QVERIFY(session.approvalLog().isEmpty());
+
+    session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    session.logApproval(QStringLiteral("Write"), QStringLiteral("auto-approved"), 1);
+    session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
+
+    QCOMPARE(session.approvalLog().size(), 3);
+
+    // Check entry fields
+    const auto &entry = session.approvalLog().at(0);
+    QCOMPARE(entry.toolName, QStringLiteral("Bash"));
+    QCOMPARE(entry.action, QStringLiteral("auto-approved"));
+    QCOMPARE(entry.yoloLevel, 1);
+    QVERIFY(entry.timestamp.isValid());
+    // No token usage set on test session — should be zero
+    QCOMPARE(entry.totalTokens, quint64(0));
+    QCOMPARE(entry.estimatedCostUSD, 0.0);
+
+    const auto &entry2 = session.approvalLog().at(2);
+    QCOMPARE(entry2.toolName, QStringLiteral("suggestion"));
+    QCOMPARE(entry2.yoloLevel, 2);
+}
+
+void ClaudeSessionYoloTest::testLogApproval_EmitsSignals()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QSignalSpy countSpy(&session, &ClaudeSession::approvalCountChanged);
+    QSignalSpy logSpy(&session, &ClaudeSession::approvalLogged);
+
+    session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+
+    QCOMPARE(countSpy.count(), 1);
+    QCOMPARE(logSpy.count(), 1);
+
+    // Verify the logged entry is passed in the signal
+    auto loggedEntry = logSpy.at(0).at(0).value<ApprovalLogEntry>();
+    QCOMPARE(loggedEntry.toolName, QStringLiteral("Bash"));
+    QCOMPARE(loggedEntry.yoloLevel, 1);
+}
+
+void ClaudeSessionYoloTest::testTotalApprovalCount()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
+    session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+    session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+
+    QCOMPARE(session.yoloApprovalCount(), 2);
+    QCOMPARE(session.doubleYoloApprovalCount(), 1);
+    QCOMPARE(session.tripleYoloApprovalCount(), 2);
+    QCOMPARE(session.totalApprovalCount(), 5);
+}
+
+void ClaudeSessionYoloTest::testRestoreApprovalState()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Build a log to restore
+    QVector<ApprovalLogEntry> log;
+    ApprovalLogEntry e1;
+    e1.timestamp = QDateTime::currentDateTime();
+    e1.toolName = QStringLiteral("Bash");
+    e1.action = QStringLiteral("auto-approved");
+    e1.yoloLevel = 1;
+    log.append(e1);
+
+    ApprovalLogEntry e2;
+    e2.timestamp = QDateTime::currentDateTime();
+    e2.toolName = QStringLiteral("suggestion");
+    e2.action = QStringLiteral("auto-accepted");
+    e2.yoloLevel = 2;
+    log.append(e2);
+
+    QSignalSpy countSpy(&session, &ClaudeSession::approvalCountChanged);
+
+    session.restoreApprovalState(5, 3, 2, log);
+
+    QCOMPARE(session.yoloApprovalCount(), 5);
+    QCOMPARE(session.doubleYoloApprovalCount(), 3);
+    QCOMPARE(session.tripleYoloApprovalCount(), 2);
+    QCOMPARE(session.totalApprovalCount(), 10);
+    QCOMPARE(session.approvalLog().size(), 2);
+    QCOMPARE(countSpy.count(), 1);
+}
+
+// ============================================================
+// Yolo mode signal tests
+// ============================================================
+
+void ClaudeSessionYoloTest::testSetYoloMode_EmitsSignal()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QSignalSpy spy(&session, &ClaudeSession::yoloModeChanged);
+
+    session.setYoloMode(true);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), true);
+
+    session.setYoloMode(false);
+    QCOMPARE(spy.count(), 2);
+    QCOMPARE(spy.at(1).at(0).toBool(), false);
+
+    // Setting same value again should NOT emit
+    session.setYoloMode(false);
+    QCOMPARE(spy.count(), 2);
+}
+
+void ClaudeSessionYoloTest::testSetDoubleYoloMode_EmitsSignal()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QSignalSpy spy(&session, &ClaudeSession::doubleYoloModeChanged);
+
+    session.setDoubleYoloMode(true);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), true);
+
+    // Setting same value should NOT emit
+    session.setDoubleYoloMode(true);
+    QCOMPARE(spy.count(), 1);
+}
+
+void ClaudeSessionYoloTest::testSetTripleYoloMode_EmitsSignal()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QSignalSpy spy(&session, &ClaudeSession::tripleYoloModeChanged);
+
+    session.setTripleYoloMode(true);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), true);
+
+    session.setTripleYoloMode(false);
+    QCOMPARE(spy.count(), 2);
+    QCOMPARE(spy.at(1).at(0).toBool(), false);
+}
+
+// ============================================================
+// Yolo file management tests
+// ============================================================
+
+void ClaudeSessionYoloTest::testSetYoloMode_CreatesAndRemovesFile()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Derive the expected yolo file path
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    QString yoloPath = dataDir + QStringLiteral("/konsolai/sessions/") + session.sessionId() + QStringLiteral(".yolo");
+
+    // Ensure parent directory exists (hook handler normally does this in start())
+    QDir().mkpath(QFileInfo(yoloPath).absolutePath());
+
+    QVERIFY(!QFile::exists(yoloPath));
+
+    session.setYoloMode(true);
+    QVERIFY2(QFile::exists(yoloPath), qPrintable(QStringLiteral("Expected yolo file at: ") + yoloPath));
+
+    session.setYoloMode(false);
+    QVERIFY2(!QFile::exists(yoloPath), "Yolo file should be removed after disabling");
+}
+
+void ClaudeSessionYoloTest::testSetTripleYoloMode_CreatesAndRemovesTeamFile()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Derive the expected team yolo file path
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    QString teamYoloPath = dataDir + QStringLiteral("/konsolai/sessions/") + session.sessionId() + QStringLiteral(".yolo-team");
+
+    // Ensure parent directory exists
+    QDir().mkpath(QFileInfo(teamYoloPath).absolutePath());
+
+    QVERIFY(!QFile::exists(teamYoloPath));
+
+    session.setTripleYoloMode(true);
+    QVERIFY2(QFile::exists(teamYoloPath), qPrintable(QStringLiteral("Expected team yolo file at: ") + teamYoloPath));
+
+    session.setTripleYoloMode(false);
+    QVERIFY2(!QFile::exists(teamYoloPath), "Team yolo file should be removed after disabling");
 }
 
 QTEST_GUILESS_MAIN(ClaudeSessionYoloTest)

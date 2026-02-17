@@ -23,6 +23,7 @@ private Q_SLOTS:
     // Hook event parsing — SubagentStart
     void testSubagentStartSignal();
     void testSubagentStartAlternateField();
+    void testSubagentStartDerivedTranscriptPath();
 
     // Hook event parsing — SubagentStop
     void testSubagentStopSignal();

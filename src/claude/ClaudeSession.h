@@ -120,6 +120,8 @@ struct KONSOLEPRIVATE_EXPORT ApprovalLogEntry {
     QString toolName;
     QString action;
     int yoloLevel = 0; // 1=yolo, 2=double, 3=triple
+    quint64 totalTokens = 0; // cumulative token count at time of approval
+    double estimatedCostUSD = 0.0; // cumulative estimated cost at time of approval
 };
 
 /**
@@ -393,6 +395,8 @@ public:
         entry.toolName = toolName;
         entry.action = action;
         entry.yoloLevel = yoloLevel;
+        entry.totalTokens = m_tokenUsage.totalTokens();
+        entry.estimatedCostUSD = m_tokenUsage.estimatedCostUSD();
         m_approvalLog.append(entry);
 
         if (yoloLevel == 1) {

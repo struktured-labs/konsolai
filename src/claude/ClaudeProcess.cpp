@@ -153,8 +153,9 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         if (agentType.isEmpty()) {
             agentType = obj.value(QStringLiteral("subagent_type")).toString();
         }
-        qDebug() << "ClaudeProcess: SubagentStart - id:" << agentId << "type:" << agentType;
-        Q_EMIT subagentStarted(agentId, agentType);
+        QString transcriptPath = obj.value(QStringLiteral("transcript_path")).toString();
+        qDebug() << "ClaudeProcess: SubagentStart - id:" << agentId << "type:" << agentType << "transcript:" << transcriptPath;
+        Q_EMIT subagentStarted(agentId, agentType, transcriptPath);
     } else if (eventType == QStringLiteral("SubagentStop")) {
         QString agentId = obj.value(QStringLiteral("agent_id")).toString();
         QString agentType = obj.value(QStringLiteral("agent_type")).toString();

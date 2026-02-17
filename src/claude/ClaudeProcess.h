@@ -139,7 +139,7 @@ Q_SIGNALS:
     /**
      * Emitted when a subagent starts (from SubagentStart hook event)
      */
-    void subagentStarted(const QString &agentId, const QString &agentType);
+    void subagentStarted(const QString &agentId, const QString &agentType, const QString &transcriptPath);
 
     /**
      * Emitted when a subagent stops (from SubagentStop hook event)

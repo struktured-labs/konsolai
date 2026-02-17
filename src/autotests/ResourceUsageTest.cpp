@@ -151,6 +151,8 @@ void ResourceUsageTest::testApprovalLogEntryDefaults()
     QVERIFY(entry.toolName.isEmpty());
     QVERIFY(entry.action.isEmpty());
     QCOMPARE(entry.yoloLevel, 0);
+    QCOMPARE(entry.totalTokens, quint64(0));
+    QCOMPARE(entry.estimatedCostUSD, 0.0);
     // timestamp should be null/invalid by default
     QVERIFY(!entry.timestamp.isValid());
 }

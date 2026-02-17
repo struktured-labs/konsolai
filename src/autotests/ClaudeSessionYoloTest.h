@@ -51,6 +51,29 @@ private Q_SLOTS:
     // State transitions for yolo scenarios
     void testStateTransition_PreToolUseToStopBecomesIdle();
     void testStateTransition_PermissionRequestWaitsInput();
+
+    // Detection edge cases
+    void testDetectPermissionPrompt_NoMatch_CrossLine();
+    void testDetectPermissionPrompt_NoMatch_SelectorOnDeny();
+    void testDetectIdlePrompt_NoMatch_CaretInMiddle();
+
+    // Approval logging
+    void testLogApproval_Level1();
+    void testLogApproval_Level2();
+    void testLogApproval_Level3();
+    void testLogApproval_AppendsToLog();
+    void testLogApproval_EmitsSignals();
+    void testTotalApprovalCount();
+    void testRestoreApprovalState();
+
+    // Yolo mode signals
+    void testSetYoloMode_EmitsSignal();
+    void testSetDoubleYoloMode_EmitsSignal();
+    void testSetTripleYoloMode_EmitsSignal();
+
+    // Yolo file management
+    void testSetYoloMode_CreatesAndRemovesFile();
+    void testSetTripleYoloMode_CreatesAndRemovesTeamFile();
 };
 
 }

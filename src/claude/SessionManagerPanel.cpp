@@ -1604,6 +1604,8 @@ void SessionManagerPanel::loadMetadata()
             entry.toolName = logObj[QStringLiteral("tool")].toString();
             entry.action = logObj[QStringLiteral("action")].toString();
             entry.yoloLevel = logObj[QStringLiteral("level")].toInt();
+            entry.totalTokens = static_cast<quint64>(logObj[QStringLiteral("tokens")].toDouble());
+            entry.estimatedCostUSD = logObj[QStringLiteral("cost")].toDouble();
             meta.approvalLog.append(entry);
         }
 
@@ -1672,6 +1674,10 @@ void SessionManagerPanel::saveMetadata()
                     logObj[QStringLiteral("tool")] = entry.toolName;
                     logObj[QStringLiteral("action")] = entry.action;
                     logObj[QStringLiteral("level")] = entry.yoloLevel;
+                    if (entry.totalTokens > 0) {
+                        logObj[QStringLiteral("tokens")] = static_cast<double>(entry.totalTokens);
+                        logObj[QStringLiteral("cost")] = entry.estimatedCostUSD;
+                    }
                     logArray.append(logObj);
                 }
                 obj[QStringLiteral("approvalLog")] = logArray;
@@ -1730,7 +1736,7 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
     layout->addWidget(summary);
 
     auto *tree = new QTreeWidget(&dialog);
-    tree->setHeaderLabels({i18n("Time"), i18n("Tool"), i18n("Action"), i18n("Level")});
+    tree->setHeaderLabels({i18n("Time"), i18n("Tool"), i18n("Action"), i18n("Level"), i18n("Tokens"), i18n("Cost")});
     tree->setRootIsDecorated(false);
     tree->setAlternatingRowColors(true);
 
@@ -1750,19 +1756,32 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
             levelStr = QStringLiteral("Triple");
         }
         item->setText(3, levelStr);
+        if (entry.totalTokens > 0) {
+            // Format tokens compactly: "12.3K", "1.2M"
+            double t = static_cast<double>(entry.totalTokens);
+            QString tokenStr = t >= 1000000.0 ? QStringLiteral("%1M").arg(t / 1000000.0, 0, 'f', 1)
+                : t >= 1000.0                 ? QStringLiteral("%1K").arg(t / 1000.0, 0, 'f', 1)
+                                              : QString::number(entry.totalTokens);
+            item->setText(4, tokenStr);
+            item->setText(5, QStringLiteral("$%1").arg(entry.estimatedCostUSD, 0, 'f', 4));
+            item->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(5, Qt::AlignRight | Qt::AlignVCenter);
+        }
     }
 
     tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     tree->header()->setSectionResizeMode(2, QHeaderView::Stretch);
     tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
     layout->addWidget(tree);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons);
 
-    dialog.resize(550, 400);
+    dialog.resize(700, 400);
     dialog.exec();
 }
 

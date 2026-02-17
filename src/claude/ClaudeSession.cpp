@@ -518,22 +518,42 @@ void ClaudeSession::connectSignals()
     });
 
     // Handle subagent/team events
-    connect(m_claudeProcess, &ClaudeProcess::subagentStarted, this, [this](const QString &agentId, const QString &agentType) {
-        SubagentInfo info;
-        info.agentId = agentId;
-        info.agentType = agentType;
-        info.state = ClaudeProcess::State::Working;
-        info.startedAt = QDateTime::currentDateTime();
-        m_subagents.insert(agentId, info);
-        qDebug() << "ClaudeSession: Subagent started -" << agentId << agentType << "total:" << m_subagents.size();
-        Q_EMIT subagentStarted(agentId);
-    });
+    connect(m_claudeProcess,
+            &ClaudeProcess::subagentStarted,
+            this,
+            [this](const QString &agentId, const QString &agentType, const QString &parentTranscriptPath) {
+                SubagentInfo info;
+                info.agentId = agentId;
+                info.agentType = agentType;
+                info.state = ClaudeProcess::State::Working;
+                info.startedAt = QDateTime::currentDateTime();
+
+                // Derive subagent transcript path eagerly from the parent transcript path.
+                // Parent: ~/.claude/projects/{proj}/{uuid}.jsonl
+                // Subagent: ~/.claude/projects/{proj}/{uuid}/subagents/agent-{id}.jsonl
+                // (strip .jsonl from parent, append /subagents/agent-{id}.jsonl)
+                if (!parentTranscriptPath.isEmpty()) {
+                    QString base = parentTranscriptPath;
+                    if (base.endsWith(QStringLiteral(".jsonl"))) {
+                        base.chop(6); // remove ".jsonl"
+                    }
+                    info.transcriptPath = base + QStringLiteral("/subagents/agent-") + agentId + QStringLiteral(".jsonl");
+                    qDebug() << "ClaudeSession: Derived subagent transcript:" << info.transcriptPath;
+                }
+
+                m_subagents.insert(agentId, info);
+                qDebug() << "ClaudeSession: Subagent started -" << agentId << agentType << "total:" << m_subagents.size();
+                Q_EMIT subagentStarted(agentId);
+            });
 
     connect(m_claudeProcess, &ClaudeProcess::subagentStopped, this, [this](const QString &agentId, const QString &agentType, const QString &transcriptPath) {
         Q_UNUSED(agentType);
         if (m_subagents.contains(agentId)) {
             m_subagents[agentId].state = ClaudeProcess::State::NotRunning;
-            m_subagents[agentId].transcriptPath = transcriptPath;
+            // Use agent_transcript_path from SubagentStop as authoritative override
+            if (!transcriptPath.isEmpty()) {
+                m_subagents[agentId].transcriptPath = transcriptPath;
+            }
         }
         qDebug() << "ClaudeSession: Subagent stopped -" << agentId << "remaining active:" << (hasActiveTeam() ? "yes" : "no");
         Q_EMIT subagentStopped(agentId);
