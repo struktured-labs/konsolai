@@ -92,13 +92,18 @@ QString TmuxManager::buildNewSessionCommand(const QString &sessionName,
     args << QStringLiteral("--");
     args << command;
 
+    // Suppress DCS passthrough to prevent XTVERSION response leaking into Claude Code prompt
+    // \; chains a second tmux command after new-session completes
+    args << QStringLiteral("\\;") << QStringLiteral("set-option") << QStringLiteral("-p") << QStringLiteral("allow-passthrough") << QStringLiteral("off");
+
     return args.join(QLatin1Char(' '));
 }
 
 QString TmuxManager::buildAttachCommand(const QString &sessionName) const
 {
     // tmux attach-session -t <session-name>
-    return QStringLiteral("tmux attach-session -t %1").arg(sessionName);
+    // Also suppress DCS passthrough to prevent XTVERSION response leaking
+    return QStringLiteral("tmux attach-session -t %1 \\; set-option -p allow-passthrough off").arg(sessionName);
 }
 
 QString TmuxManager::buildKillCommand(const QString &sessionName) const

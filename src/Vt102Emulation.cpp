@@ -2566,7 +2566,7 @@ void Vt102Emulation::reportSecondaryAttributes()
 
 void Vt102Emulation::reportVersion()
 {
-    sendString("\033P>|Konsole " KONSOLE_VERSION "\033\\");
+    sendString("\033P>|Konsolai " KONSOLE_VERSION "\033\\");
 }
 
 /* DECREPTPARM – Report Terminal Parameters
