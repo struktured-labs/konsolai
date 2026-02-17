@@ -134,9 +134,14 @@ public:
     bool sessionExists(const QString &sessionName) const;
 
     /**
-     * Refresh the list of orphaned sessions from tmux
+     * Refresh the list of orphaned sessions from tmux (synchronous — blocks GUI thread)
      */
     void refreshOrphanedSessions();
+
+    /**
+     * Refresh the list of orphaned sessions using pre-fetched tmux data (non-blocking)
+     */
+    void refreshOrphanedSessions(const QList<TmuxManager::SessionInfo> &tmuxSessions);
 
     /**
      * Discover Claude sessions by scanning directories for .claude footprints.
@@ -203,6 +208,8 @@ private Q_SLOTS:
     void onPeriodicRefresh();
 
 private:
+    void refreshOrphanedSessionsAsync();
+
     TmuxManager *m_tmuxManager = nullptr;
 
     // Active sessions (attached to Konsolai windows)

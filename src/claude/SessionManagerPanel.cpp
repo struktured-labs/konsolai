@@ -69,8 +69,8 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
 {
     setupUi();
     loadMetadata();
-    cleanupStaleSockets();
-    refresh();
+    cleanupStaleSockets(); // async — returns immediately
+    refresh(); // async — returns immediately
 }
 
 SessionManagerPanel::~SessionManagerPanel()
@@ -480,72 +480,104 @@ QList<SessionMetadata> SessionManagerPanel::archivedSessions() const
 
 void SessionManagerPanel::cleanupStaleSockets()
 {
-    // Remove stale socket and yolo files from sessions that no longer have live tmux sessions
+    // Remove stale socket and yolo files from sessions that no longer have live tmux sessions.
+    // Uses async tmux query to avoid blocking the GUI thread.
     QString sessionsDir = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions");
     QDir dir(sessionsDir);
     if (!dir.exists()) {
         return;
     }
 
-    // Get live tmux session names
-    TmuxManager tmux;
-    QList<TmuxManager::SessionInfo> liveSessions = tmux.listKonsolaiSessions();
-    QSet<QString> liveIds;
-    for (const auto &info : liveSessions) {
-        // Extract ID from session name: konsolai-{profile}-{id}
-        QStringList parts = info.name.split(QLatin1Char('-'));
-        if (parts.size() >= 3) {
-            liveIds.insert(parts.last());
-        }
+    // Collect socket files before the async call (filesystem reads are fast)
+    QStringList sockFiles = dir.entryList({QStringLiteral("*.sock")}, QDir::Files);
+    if (sockFiles.isEmpty()) {
+        return;
     }
 
-    // Clean up socket and yolo files for dead sessions
-    int cleaned = 0;
-    const auto sockFiles = dir.entryList({QStringLiteral("*.sock")}, QDir::Files);
-    for (const QString &sockFile : sockFiles) {
-        QString id = sockFile.left(sockFile.length() - 5); // Remove .sock
-        if (!liveIds.contains(id)) {
-            QFile::remove(dir.filePath(sockFile));
-            // Also remove matching .yolo and .yolo-team files
-            QString yoloFile = id + QStringLiteral(".yolo");
-            if (dir.exists(yoloFile)) {
-                QFile::remove(dir.filePath(yoloFile));
-            }
-            QString teamYoloFile = id + QStringLiteral(".yolo-team");
-            if (dir.exists(teamYoloFile)) {
-                QFile::remove(dir.filePath(teamYoloFile));
-            }
-            cleaned++;
-        }
-    }
+    auto *tmux = new TmuxManager(nullptr);
+    QPointer<SessionManagerPanel> guard(this);
 
-    if (cleaned > 0) {
-        qDebug() << "SessionManagerPanel: Cleaned up" << cleaned << "stale socket/yolo files";
-    }
+    tmux->listKonsolaiSessionsAsync([guard, tmux, sessionsDir, sockFiles](const QList<TmuxManager::SessionInfo> &liveSessions) {
+        tmux->deleteLater();
+
+        if (!guard) {
+            return;
+        }
+
+        QSet<QString> liveIds;
+        for (const auto &info : liveSessions) {
+            // Extract ID from session name: konsolai-{profile}-{id}
+            QStringList parts = info.name.split(QLatin1Char('-'));
+            if (parts.size() >= 3) {
+                liveIds.insert(parts.last());
+            }
+        }
+
+        // Clean up socket and yolo files for dead sessions
+        QDir dir(sessionsDir);
+        int cleaned = 0;
+        for (const QString &sockFile : sockFiles) {
+            QString id = sockFile.left(sockFile.length() - 5); // Remove .sock
+            if (!liveIds.contains(id)) {
+                QFile::remove(dir.filePath(sockFile));
+                QString yoloFile = id + QStringLiteral(".yolo");
+                if (dir.exists(yoloFile)) {
+                    QFile::remove(dir.filePath(yoloFile));
+                }
+                QString teamYoloFile = id + QStringLiteral(".yolo-team");
+                if (dir.exists(teamYoloFile)) {
+                    QFile::remove(dir.filePath(teamYoloFile));
+                }
+                cleaned++;
+            }
+        }
+
+        if (cleaned > 0) {
+            qDebug() << "SessionManagerPanel: Cleaned up" << cleaned << "stale socket/yolo files";
+        }
+    });
 }
 
 void SessionManagerPanel::refresh()
 {
-    // Discover tmux sessions that aren't tracked
-    if (m_registry) {
-        m_registry->refreshOrphanedSessions();
-        for (const auto &state : m_registry->orphanedSessions()) {
-            if (!m_metadata.contains(state.sessionId)) {
-                SessionMetadata meta;
-                meta.sessionId = state.sessionId;
-                meta.sessionName = state.sessionName;
-                meta.profileName = state.profileName;
-                meta.workingDirectory = state.workingDirectory;
-                meta.lastAccessed = state.lastAccessed;
-                meta.createdAt = state.lastAccessed; // Approximate
-                meta.isArchived = false;
-                meta.isPinned = false;
-                m_metadata[state.sessionId] = meta;
-            }
-        }
+    // Discover tmux sessions that aren't tracked, using async tmux query
+    // to avoid blocking the GUI thread.
+    if (!m_registry) {
+        updateTreeWidget();
+        return;
     }
 
-    updateTreeWidget();
+    auto *tmux = new TmuxManager(nullptr);
+    QPointer<SessionManagerPanel> guard(this);
+
+    tmux->listKonsolaiSessionsAsync([guard, tmux](const QList<TmuxManager::SessionInfo> &liveSessions) {
+        tmux->deleteLater();
+
+        if (!guard) {
+            return;
+        }
+
+        // Feed pre-fetched tmux data to registry (non-blocking)
+        if (guard->m_registry) {
+            guard->m_registry->refreshOrphanedSessions(liveSessions);
+            for (const auto &state : guard->m_registry->orphanedSessions()) {
+                if (!guard->m_metadata.contains(state.sessionId)) {
+                    SessionMetadata meta;
+                    meta.sessionId = state.sessionId;
+                    meta.sessionName = state.sessionName;
+                    meta.profileName = state.profileName;
+                    meta.workingDirectory = state.workingDirectory;
+                    meta.lastAccessed = state.lastAccessed;
+                    meta.createdAt = state.lastAccessed; // Approximate
+                    meta.isArchived = false;
+                    meta.isPinned = false;
+                    guard->m_metadata[state.sessionId] = meta;
+                }
+            }
+        }
+
+        guard->updateTreeWidget();
+    });
 }
 
 void SessionManagerPanel::pinSession(const QString &sessionId)

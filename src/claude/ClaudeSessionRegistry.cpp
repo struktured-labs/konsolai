@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QSet>
 #include <QStandardPaths>
 
@@ -31,8 +32,8 @@ ClaudeSessionRegistry::ClaudeSessionRegistry(QObject *parent)
     // Load persisted state
     loadState();
 
-    // Initial refresh of orphaned sessions
-    refreshOrphanedSessions();
+    // Initial refresh of orphaned sessions (async to avoid blocking GUI)
+    refreshOrphanedSessionsAsync();
 
     // Setup periodic refresh
     connect(m_refreshTimer, &QTimer::timeout, this, &ClaudeSessionRegistry::onPeriodicRefresh);
@@ -129,18 +130,14 @@ void ClaudeSessionRegistry::markDetached(const QString &sessionName)
 
 QList<ClaudeSessionState> ClaudeSessionRegistry::orphanedSessions() const
 {
-    // Use a single list-sessions call instead of per-session has-session
-    // to avoid spawning N synchronous processes on the GUI thread.
-    QList<TmuxManager::SessionInfo> liveSessions = m_tmuxManager->listKonsolaiSessions();
-    QSet<QString> liveNames;
-    for (const auto &info : liveSessions) {
-        liveNames.insert(info.name);
-    }
-
+    // Return orphaned sessions based on cached state from the last
+    // refreshOrphanedSessions() call, avoiding synchronous tmux queries
+    // on the GUI thread.
     QList<ClaudeSessionState> orphans;
     for (const ClaudeSessionState &state : m_sessionStates) {
-        // Orphaned = exists in tmux but not attached to Konsolai
-        if (!state.isAttached && liveNames.contains(state.sessionName)) {
+        // Orphaned = not attached to Konsolai and still known to exist
+        // (liveness is determined during refreshOrphanedSessions)
+        if (!state.isAttached && !m_activeSessions.contains(state.sessionName)) {
             orphans.append(state);
         }
     }
@@ -218,9 +215,13 @@ bool ClaudeSessionRegistry::sessionExists(const QString &sessionName) const
 
 void ClaudeSessionRegistry::refreshOrphanedSessions()
 {
-    // Get current tmux sessions
+    // Synchronous variant — blocks the GUI thread
     QList<TmuxManager::SessionInfo> tmuxSessions = m_tmuxManager->listKonsolaiSessions();
+    refreshOrphanedSessions(tmuxSessions);
+}
 
+void ClaudeSessionRegistry::refreshOrphanedSessions(const QList<TmuxManager::SessionInfo> &tmuxSessions)
+{
     bool changed = false;
 
     // Update state for each tmux session
@@ -488,7 +489,20 @@ QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString 
 
 void ClaudeSessionRegistry::onPeriodicRefresh()
 {
-    refreshOrphanedSessions();
+    refreshOrphanedSessionsAsync();
+}
+
+void ClaudeSessionRegistry::refreshOrphanedSessionsAsync()
+{
+    auto *tmux = new TmuxManager(nullptr);
+    QPointer<ClaudeSessionRegistry> guard(this);
+
+    tmux->listKonsolaiSessionsAsync([guard, tmux](const QList<TmuxManager::SessionInfo> &liveSessions) {
+        tmux->deleteLater();
+        if (guard) {
+            guard->refreshOrphanedSessions(liveSessions);
+        }
+    });
 }
 
 } // namespace Konsolai

@@ -24,6 +24,11 @@
 #include <QStandardPaths>
 #include <qplatformdefs.h>
 
+#ifdef Q_OS_LINUX
+#include <QFile>
+#include <QTextStream>
+#endif
+
 // KDE
 #include <KAboutData>
 #include <KCrash>
@@ -132,11 +137,67 @@ static void migrateRenamedConfigKeys()
     }
 }
 
+#ifdef Q_OS_LINUX
+// Raise the cgroup memory.high limit if the desktop launcher set it too low.
+// KDE Plasma creates app scopes with a default MemoryHigh (e.g. 192 MiB)
+// that is too small for a terminal emulator managing multiple tmux sessions.
+// Without this, the kernel throttles the process (D state) causing UI freezes.
+static void ensureCgroupMemoryLimit()
+{
+    // Read our cgroup path from /proc/self/cgroup
+    QFile cgroupFile(QStringLiteral("/proc/self/cgroup"));
+    if (!cgroupFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+    QString cgroupLine = QString::fromUtf8(cgroupFile.readAll()).trimmed();
+    cgroupFile.close();
+
+    // Format: "0::/user.slice/..."
+    int colonPos = cgroupLine.lastIndexOf(QLatin1String("::"));
+    if (colonPos < 0) {
+        return;
+    }
+    QString cgroupPath = cgroupLine.mid(colonPos + 2);
+    QString memHighPath = QStringLiteral("/sys/fs/cgroup%1/memory.high").arg(cgroupPath);
+
+    QFile memHighFile(memHighPath);
+    if (!memHighFile.open(QIODevice::ReadWrite | QIODevice::Text)) {
+        return;
+    }
+
+    QString currentValue = QString::fromUtf8(memHighFile.readAll()).trimmed();
+    if (currentValue == QLatin1String("max")) {
+        memHighFile.close();
+        return; // No limit set, nothing to do
+    }
+
+    bool ok = false;
+    qint64 currentLimit = currentValue.toLongLong(&ok);
+    if (!ok || currentLimit <= 0) {
+        memHighFile.close();
+        return;
+    }
+
+    // Raise to 1 GiB if the limit is below that
+    constexpr qint64 minLimit = 1073741824LL; // 1 GiB
+    if (currentLimit < minLimit) {
+        memHighFile.seek(0);
+        QTextStream stream(&memHighFile);
+        stream << minLimit;
+        qDebug("Konsolai: Raised cgroup memory.high from %lld to %lld bytes", currentLimit, minLimit);
+    }
+    memHighFile.close();
+}
+#endif
+
 // ***
 // Entry point into the Konsole terminal application.
 // ***
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_LINUX
+    ensureCgroupMemoryLimit();
+#endif
 #ifdef PROFILE_STARTUP
     QElapsedTimer timer;
     timer.start();
