@@ -63,6 +63,11 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
 
     // Approval log entries (persisted across restarts)
     QVector<ApprovalLogEntry> approvalLog;
+
+    // Budget settings (persisted across restarts)
+    int budgetTimeLimitMinutes = 0;
+    double budgetCostCeilingUSD = 0.0;
+    quint64 budgetTokenCeiling = 0;
 };
 
 /**

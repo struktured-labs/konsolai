@@ -1405,6 +1405,14 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
+    // Add GSD badge when .planning/ or ROADMAP.md exists in working directory
+    if (!meta.workingDirectory.isEmpty()) {
+        QDir workDir(meta.workingDirectory);
+        if (workDir.exists(QStringLiteral(".planning")) || workDir.exists(QStringLiteral("ROADMAP.md"))) {
+            displayName += QStringLiteral(" [GSD]");
+        }
+    }
+
     // Add @host suffix for remote sessions
     if (meta.isRemote && !meta.sshHost.isEmpty()) {
         displayName += QStringLiteral(" @%1").arg(meta.sshHost);
@@ -1446,6 +1454,45 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 boltsHtml += QStringLiteral(" [%1]").arg(count);
             } else if (count > 0) {
                 boltsHtml = QStringLiteral("[%1]").arg(count);
+            }
+
+            // Add velocity + budget ETA when budget controller is active
+            if (auto *bc = session->budgetController()) {
+                if (bc->budget().hasAnyLimit()) {
+                    // Show budget progress: elapsed/limit time | $current/$ceiling
+                    QString budgetInfo;
+                    if (bc->budget().timeLimitMinutes > 0) {
+                        int elapsed = bc->budget().elapsedMinutes();
+                        budgetInfo += QStringLiteral(" %1/%2m").arg(elapsed).arg(bc->budget().timeLimitMinutes);
+                    }
+                    if (bc->budget().costCeilingUSD > 0.0) {
+                        double cost = session->tokenUsage().estimatedCostUSD();
+                        if (!budgetInfo.isEmpty()) {
+                            budgetInfo += QStringLiteral(" |");
+                        }
+                        budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
+                    }
+                    if (!budgetInfo.isEmpty()) {
+                        boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
+                    }
+                }
+                // Show velocity if available
+                const auto &vel = bc->velocity();
+                if (vel.tokensPerMinute() > 0) {
+                    boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
+                }
+            }
+
+            // Add observer warning badge
+            if (auto *obs = session->sessionObserver()) {
+                int severity = obs->composedSeverity();
+                if (severity >= 5) {
+                    boltsHtml += QStringLiteral(" <span style='color:#F44336'>⚠ CRITICAL</span>");
+                } else if (severity >= 3) {
+                    boltsHtml += QStringLiteral(" <span style='color:#FF9800'>⚠</span>");
+                } else if (severity > 0) {
+                    boltsHtml += QStringLiteral(" <span style='color:#FFC107'>⚠</span>");
+                }
             }
 
             if (!boltsHtml.isEmpty()) {
@@ -1662,6 +1709,11 @@ void SessionManagerPanel::loadMetadata()
             meta.approvalLog.append(entry);
         }
 
+        // Budget settings
+        meta.budgetTimeLimitMinutes = obj[QStringLiteral("budgetTimeLimitMinutes")].toInt();
+        meta.budgetCostCeilingUSD = obj[QStringLiteral("budgetCostCeilingUSD")].toDouble();
+        meta.budgetTokenCeiling = static_cast<quint64>(obj[QStringLiteral("budgetTokenCeiling")].toDouble());
+
         if (!meta.sessionId.isEmpty()) {
             m_metadata[meta.sessionId] = meta;
         }
@@ -1735,6 +1787,17 @@ void SessionManagerPanel::saveMetadata()
                 }
                 obj[QStringLiteral("approvalLog")] = logArray;
             }
+        }
+
+        // Budget settings (only save if any limit is set)
+        if (meta.budgetTimeLimitMinutes > 0) {
+            obj[QStringLiteral("budgetTimeLimitMinutes")] = meta.budgetTimeLimitMinutes;
+        }
+        if (meta.budgetCostCeilingUSD > 0.0) {
+            obj[QStringLiteral("budgetCostCeilingUSD")] = meta.budgetCostCeilingUSD;
+        }
+        if (meta.budgetTokenCeiling > 0) {
+            obj[QStringLiteral("budgetTokenCeiling")] = static_cast<double>(meta.budgetTokenCeiling);
         }
 
         array.append(obj);

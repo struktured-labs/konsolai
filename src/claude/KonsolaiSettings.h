@@ -107,6 +107,38 @@ public:
     bool trySuggestionsFirst() const;
     void setTrySuggestionsFirst(bool enabled);
 
+    // ========== Budget Defaults ==========
+
+    /**
+     * Default time limit in minutes (0 = unlimited)
+     */
+    int defaultTimeLimitMinutes() const;
+    void setDefaultTimeLimitMinutes(int minutes);
+
+    /**
+     * Default cost ceiling in USD (0.0 = unlimited)
+     */
+    double defaultCostCeilingUSD() const;
+    void setDefaultCostCeilingUSD(double cost);
+
+    /**
+     * Default budget policy: 0 = Soft, 1 = Hard
+     */
+    int defaultBudgetPolicy() const;
+    void setDefaultBudgetPolicy(int policy);
+
+    /**
+     * Default token ceiling (0 = unlimited)
+     */
+    quint64 defaultTokenCeiling() const;
+    void setDefaultTokenCeiling(quint64 tokens);
+
+    /**
+     * Budget warning threshold as percentage (default: 80%)
+     */
+    double budgetWarningThresholdPercent() const;
+    void setBudgetWarningThresholdPercent(double percent);
+
     /**
      * Save settings to disk
      */

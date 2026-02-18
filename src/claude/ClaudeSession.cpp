@@ -93,6 +93,12 @@ ClaudeSession::~ClaudeSession()
         m_resourceTimer->stop();
     }
 
+    // BudgetController and SessionObserver own timers — delete early to stop them
+    delete m_budgetController;
+    m_budgetController = nullptr;
+    delete m_sessionObserver;
+    m_sessionObserver = nullptr;
+
     if (auto *registry = ClaudeSessionRegistry::instance()) {
         registry->unregisterSession(this);
     }
@@ -462,6 +468,10 @@ void ClaudeSession::connectSignals()
         Q_UNUSED(description);
         qDebug() << "ClaudeSession: Permission requested:" << action << "yoloMode:" << m_yoloMode;
         if (m_yoloMode) {
+            if (m_budgetController && m_budgetController->shouldBlockYolo()) {
+                qDebug() << "ClaudeSession: Budget gate blocking yolo approval";
+                return;
+            }
             qDebug() << "ClaudeSession: Auto-approving permission always (yolo mode)";
             // Use a short delay to ensure the prompt is ready
             QTimer::singleShot(100, this, [this, action]() {
@@ -505,6 +515,11 @@ void ClaudeSession::connectSignals()
         // Hook-based TeammateIdle continuation handles auto-continue for teams.
         if (hasActiveTeam()) {
             qDebug() << "ClaudeSession: Team active - suppressing keyboard-based L2/L3 yolo";
+            return;
+        }
+
+        if (m_budgetController && m_budgetController->shouldBlockYolo()) {
+            qDebug() << "ClaudeSession: Budget gate blocking L2/L3 yolo";
             return;
         }
 
@@ -689,6 +704,54 @@ void ClaudeSession::setTaskDescription(const QString &desc)
 ClaudeProcess::State ClaudeSession::claudeState() const
 {
     return m_claudeProcess ? m_claudeProcess->state() : ClaudeProcess::State::NotRunning;
+}
+
+BudgetController *ClaudeSession::budgetController()
+{
+    if (!m_budgetController) {
+        m_budgetController = new BudgetController(const_cast<ClaudeSession *>(this));
+
+        // Wire token usage changes to the budget controller
+        connect(this, &ClaudeSession::tokenUsageChanged, m_budgetController, [this]() {
+            m_budgetController->onTokenUsageChanged(m_tokenUsage);
+        });
+
+        // Wire resource usage changes to the budget controller
+        connect(this, &ClaudeSession::resourceUsageChanged, m_budgetController, [this]() {
+            m_budgetController->onResourceUsageChanged(m_resourceUsage);
+        });
+    }
+    return m_budgetController;
+}
+
+SessionObserver *ClaudeSession::sessionObserver()
+{
+    if (!m_sessionObserver) {
+        m_sessionObserver = new SessionObserver(this);
+
+        // Wire state changes
+        connect(this, &ClaudeSession::stateChanged, m_sessionObserver, [this](ClaudeProcess::State newState) {
+            m_sessionObserver->onStateChanged(static_cast<int>(newState));
+        });
+
+        // Wire token usage changes
+        connect(this, &ClaudeSession::tokenUsageChanged, m_sessionObserver, [this]() {
+            m_sessionObserver->onTokenUsageChanged(m_tokenUsage.inputTokens,
+                                                   m_tokenUsage.outputTokens,
+                                                   m_tokenUsage.totalTokens(),
+                                                   m_tokenUsage.estimatedCostUSD());
+        });
+
+        // Wire approval logging
+        connect(this, &ClaudeSession::approvalLogged, m_sessionObserver, [this](const ApprovalLogEntry &entry) {
+            m_sessionObserver->onApprovalLogged(entry.toolName, entry.yoloLevel, entry.timestamp);
+        });
+
+        // Wire subagent events
+        connect(this, &ClaudeSession::subagentStarted, m_sessionObserver, &SessionObserver::onSubagentStarted);
+        connect(this, &ClaudeSession::subagentStopped, m_sessionObserver, &SessionObserver::onSubagentStopped);
+    }
+    return m_sessionObserver;
 }
 
 QString ClaudeSession::shellCommand() const
@@ -1023,7 +1086,8 @@ void ClaudeSession::setYoloMode(bool enabled)
                 startPermissionPolling();
 
                 // If a permission prompt is already showing, approve it now
-                if (claudeState() == ClaudeProcess::State::WaitingInput) {
+                // (unless budget gate is active)
+                if (claudeState() == ClaudeProcess::State::WaitingInput && !(m_budgetController && m_budgetController->shouldBlockYolo())) {
                     qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving always immediately";
                     QTimer::singleShot(100, this, [this]() {
                         approvePermissionAlways();
@@ -1067,6 +1131,11 @@ void ClaudeSession::stopPermissionPolling()
 void ClaudeSession::pollForPermissionPrompt()
 {
     if (!m_yoloMode || !m_tmuxManager) {
+        return;
+    }
+
+    // Budget gate: block yolo when budget exceeded or resources critical
+    if (m_budgetController && m_budgetController->shouldBlockYolo()) {
         return;
     }
 
@@ -1186,6 +1255,11 @@ void ClaudeSession::pollForIdlePrompt()
         return;
     }
     if (!m_tmuxManager) {
+        return;
+    }
+
+    // Budget gate: block yolo when budget exceeded or resources critical
+    if (m_budgetController && m_budgetController->shouldBlockYolo()) {
         return;
     }
 
@@ -1452,6 +1526,12 @@ void ClaudeSession::autoAcceptSuggestion()
         return;
     }
 
+    // Budget gate: block yolo when budget exceeded or resources critical
+    if (m_budgetController && m_budgetController->shouldBlockYolo()) {
+        qDebug() << "ClaudeSession: Budget gate blocking auto-accept suggestion";
+        return;
+    }
+
     // When a team is active, suppress keyboard-based suggestion acceptance
     if (hasActiveTeam()) {
         return;
@@ -1484,6 +1564,10 @@ void ClaudeSession::scheduleSuggestionFallback()
         connect(m_suggestionFallbackTimer, &QTimer::timeout, this, [this]() {
             // Only fire if Claude is still idle (suggestion wasn't accepted)
             if (m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
+                if (m_budgetController && m_budgetController->shouldBlockYolo()) {
+                    qDebug() << "ClaudeSession: Budget gate blocking suggestion fallback";
+                    return;
+                }
                 qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
                 sendPrompt(m_autoContinuePrompt);
                 logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);

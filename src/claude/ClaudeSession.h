@@ -8,8 +8,10 @@
 
 #include "konsoleprivate_export.h"
 
+#include "BudgetController.h"
 #include "ClaudeHookHandler.h"
 #include "ClaudeProcess.h"
+#include "SessionObserver.h"
 #include "TmuxManager.h"
 
 #include "config-konsole.h"
@@ -533,6 +535,16 @@ public:
     TmuxManager* tmuxManager() { return m_tmuxManager; }
 
     /**
+     * Get the BudgetController instance (lazy-created on first access)
+     */
+    BudgetController *budgetController();
+
+    /**
+     * Get the SessionObserver instance (lazy-created on first access)
+     */
+    SessionObserver *sessionObserver();
+
+    /**
      * Detach from the tmux session without killing it
      */
     void detach();
@@ -731,6 +743,8 @@ private:
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;
     ClaudeHookHandler *m_hookHandler = nullptr;
+    BudgetController *m_budgetController = nullptr;
+    SessionObserver *m_sessionObserver = nullptr;
 
     // Subagent / team tracking
     QMap<QString, SubagentInfo> m_subagents; // keyed by agent_id

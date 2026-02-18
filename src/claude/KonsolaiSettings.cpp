@@ -185,6 +185,73 @@ void KonsolaiSettings::setTrySuggestionsFirst(bool enabled)
     Q_EMIT settingsChanged();
 }
 
+// ========== Budget Defaults ==========
+
+int KonsolaiSettings::defaultTimeLimitMinutes() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return group.readEntry("TimeLimitMinutes", 0);
+}
+
+void KonsolaiSettings::setDefaultTimeLimitMinutes(int minutes)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("TimeLimitMinutes", minutes);
+    Q_EMIT settingsChanged();
+}
+
+double KonsolaiSettings::defaultCostCeilingUSD() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return group.readEntry("CostCeilingUSD", 0.0);
+}
+
+void KonsolaiSettings::setDefaultCostCeilingUSD(double cost)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("CostCeilingUSD", cost);
+    Q_EMIT settingsChanged();
+}
+
+int KonsolaiSettings::defaultBudgetPolicy() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return group.readEntry("Policy", 0); // 0 = Soft
+}
+
+void KonsolaiSettings::setDefaultBudgetPolicy(int policy)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("Policy", policy);
+    Q_EMIT settingsChanged();
+}
+
+quint64 KonsolaiSettings::defaultTokenCeiling() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return static_cast<quint64>(group.readEntry("TokenCeiling", 0));
+}
+
+void KonsolaiSettings::setDefaultTokenCeiling(quint64 tokens)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("TokenCeiling", static_cast<qint64>(tokens));
+    Q_EMIT settingsChanged();
+}
+
+double KonsolaiSettings::budgetWarningThresholdPercent() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return group.readEntry("WarningThresholdPercent", 80.0);
+}
+
+void KonsolaiSettings::setBudgetWarningThresholdPercent(double percent)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("WarningThresholdPercent", percent);
+    Q_EMIT settingsChanged();
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

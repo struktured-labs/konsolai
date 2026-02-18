@@ -23,6 +23,8 @@ class QLabel;
 class QGroupBox;
 class QRadioButton;
 class QButtonGroup;
+class QSpinBox;
+class QDoubleSpinBox;
 
 namespace Konsolai
 {
@@ -66,6 +68,12 @@ public:
     QString sshUsername() const;
     int sshPort() const;
     QString sshConfigEntry() const;
+
+    // Budget controls
+    int budgetTimeLimitMinutes() const;
+    double budgetCostCeilingUSD() const;
+    quint64 budgetTokenCeiling() const;
+    int budgetPolicy() const; // 0 = Soft, 1 = Hard
 
 private Q_SLOTS:
     void onPromptChanged();
@@ -130,6 +138,13 @@ private:
     QComboBox *m_modelCombo = nullptr;
     QCheckBox *m_autoApproveReadCheck = nullptr;
     QLabel *m_previewLabel = nullptr;
+
+    // Budget Controls widgets
+    QGroupBox *m_budgetGroup = nullptr;
+    QSpinBox *m_timeLimitSpin = nullptr;
+    QDoubleSpinBox *m_costCeilingSpin = nullptr;
+    QSpinBox *m_tokenCeilingSpin = nullptr;
+    QComboBox *m_budgetPolicyCombo = nullptr;
 
     // State
     Konsole::Profile::Ptr m_profile;

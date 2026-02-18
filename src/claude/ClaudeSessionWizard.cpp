@@ -15,6 +15,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileSystemModel>
@@ -28,6 +29,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
+#include <QSpinBox>
 #include <QStringListModel>
 #include <QTextStream>
 #include <QVBoxLayout>
@@ -66,6 +68,19 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
         int idx = m_modelCombo->findText(model);
         if (idx >= 0) {
             m_modelCombo->setCurrentIndex(idx);
+        }
+
+        // Load budget defaults
+        m_timeLimitSpin->setValue(settings->defaultTimeLimitMinutes());
+        m_costCeilingSpin->setValue(settings->defaultCostCeilingUSD());
+        m_tokenCeilingSpin->setValue(static_cast<int>(settings->defaultTokenCeiling() / 1000));
+        int budgetPol = settings->defaultBudgetPolicy();
+        if (budgetPol >= 0 && budgetPol <= 1) {
+            m_budgetPolicyCombo->setCurrentIndex(budgetPol);
+        }
+        // Show budget group as checked if any limit is set
+        if (settings->defaultTimeLimitMinutes() > 0 || settings->defaultCostCeilingUSD() > 0.0 || settings->defaultTokenCeiling() > 0) {
+            m_budgetGroup->setChecked(true);
         }
     }
 
@@ -199,6 +214,39 @@ QString ClaudeSessionWizard::sshConfigEntry() const
         return QString();
     }
     return m_sshConfigCombo ? m_sshConfigCombo->currentText() : QString();
+}
+
+int ClaudeSessionWizard::budgetTimeLimitMinutes() const
+{
+    if (!m_budgetGroup || !m_budgetGroup->isChecked()) {
+        return 0;
+    }
+    return m_timeLimitSpin ? m_timeLimitSpin->value() : 0;
+}
+
+double ClaudeSessionWizard::budgetCostCeilingUSD() const
+{
+    if (!m_budgetGroup || !m_budgetGroup->isChecked()) {
+        return 0.0;
+    }
+    return m_costCeilingSpin ? m_costCeilingSpin->value() : 0.0;
+}
+
+quint64 ClaudeSessionWizard::budgetTokenCeiling() const
+{
+    if (!m_budgetGroup || !m_budgetGroup->isChecked()) {
+        return 0;
+    }
+    // Value is in K (thousands), convert to raw tokens
+    return m_tokenCeilingSpin ? static_cast<quint64>(m_tokenCeilingSpin->value()) * 1000 : 0;
+}
+
+int ClaudeSessionWizard::budgetPolicy() const
+{
+    if (!m_budgetGroup || !m_budgetGroup->isChecked()) {
+        return 0; // Soft
+    }
+    return m_budgetPolicyCombo ? m_budgetPolicyCombo->currentIndex() : 0;
 }
 
 void ClaudeSessionWizard::setupUi()
@@ -423,6 +471,46 @@ void ClaudeSessionWizard::setupUi()
     optionsRow->addWidget(m_autoApproveReadCheck);
     optionsRow->addStretch();
     mainLayout->addLayout(optionsRow);
+
+    mainLayout->addSpacing(4);
+
+    // --- Budget Controls (collapsible) ---
+    m_budgetGroup = new QGroupBox(i18n("Budget Controls"), this);
+    m_budgetGroup->setCheckable(true);
+    m_budgetGroup->setChecked(false); // Collapsed by default
+    auto *budgetLayout = new QGridLayout(m_budgetGroup);
+
+    budgetLayout->addWidget(new QLabel(i18n("Time limit (min):"), this), 0, 0);
+    m_timeLimitSpin = new QSpinBox(this);
+    m_timeLimitSpin->setRange(0, 1440);
+    m_timeLimitSpin->setSpecialValueText(i18n("Unlimited"));
+    m_timeLimitSpin->setSuffix(i18n(" min"));
+    budgetLayout->addWidget(m_timeLimitSpin, 0, 1);
+
+    budgetLayout->addWidget(new QLabel(i18n("Cost ceiling ($):"), this), 1, 0);
+    m_costCeilingSpin = new QDoubleSpinBox(this);
+    m_costCeilingSpin->setRange(0.0, 1000.0);
+    m_costCeilingSpin->setDecimals(2);
+    m_costCeilingSpin->setSingleStep(0.50);
+    m_costCeilingSpin->setSpecialValueText(i18n("Unlimited"));
+    m_costCeilingSpin->setPrefix(QStringLiteral("$"));
+    budgetLayout->addWidget(m_costCeilingSpin, 1, 1);
+
+    budgetLayout->addWidget(new QLabel(i18n("Token ceiling (K):"), this), 2, 0);
+    m_tokenCeilingSpin = new QSpinBox(this);
+    m_tokenCeilingSpin->setRange(0, 100000);
+    m_tokenCeilingSpin->setSingleStep(100);
+    m_tokenCeilingSpin->setSpecialValueText(i18n("Unlimited"));
+    m_tokenCeilingSpin->setSuffix(QStringLiteral("K"));
+    budgetLayout->addWidget(m_tokenCeilingSpin, 2, 1);
+
+    budgetLayout->addWidget(new QLabel(i18n("Policy:"), this), 3, 0);
+    m_budgetPolicyCombo = new QComboBox(this);
+    m_budgetPolicyCombo->addItem(i18n("Soft (warn only)"));
+    m_budgetPolicyCombo->addItem(i18n("Hard (block yolo)"));
+    budgetLayout->addWidget(m_budgetPolicyCombo, 3, 1);
+
+    mainLayout->addWidget(m_budgetGroup);
 
     mainLayout->addSpacing(4);
 

@@ -30,6 +30,11 @@ set(claude_SRCS
     ClaudeConversationPicker.cpp
     SessionManagerPanel.cpp
     KonsolaiSettings.cpp
+    BudgetController.cpp
+    SessionObserver.cpp
+    PromptQualityGate.cpp
+    PromptTemplateManager.cpp
+    OneShotController.cpp
     ${dbus_xml_srcs}
 )
 

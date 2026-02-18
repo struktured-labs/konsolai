@@ -77,5 +77,9 @@ ecm_add_tests(
 ecm_add_tests(
     ResourceUsageTest.cpp
     ClaudeAgentTeamTest.cpp
+    BudgetControllerTest.cpp
+    SessionObserverTest.cpp
+    PromptQualityGateTest.cpp
+    OneShotControllerTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )
