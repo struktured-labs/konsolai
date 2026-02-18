@@ -870,8 +870,7 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 void SessionManagerPanel::onContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory
-        || item == m_discoveredCategory) {
+    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_discoveredCategory) {
         return;
     }
 
@@ -922,6 +921,39 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         });
 
         menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        return;
+    }
+
+    // Handle right-click on the Closed category header
+    if (item == m_closedCategory) {
+        int closedCount = m_closedCategory->childCount();
+        if (closedCount > 0) {
+            QMenu menu(this);
+            QAction *archiveAllAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-insert")), i18n("Archive All Closed (%1)", closedCount));
+            connect(archiveAllAction, &QAction::triggered, this, [this, closedCount]() {
+                auto answer = QMessageBox::question(this,
+                                                    i18n("Archive Closed Sessions"),
+                                                    i18n("Archive %1 closed session(s)?\n\n"
+                                                         "They will be moved to the Archived category.",
+                                                         closedCount),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                if (answer == QMessageBox::Yes) {
+                    // Collect session IDs first (archiveSession modifies the tree)
+                    QStringList toArchive;
+                    for (int i = 0; i < m_closedCategory->childCount(); ++i) {
+                        QString sid = m_closedCategory->child(i)->data(0, Qt::UserRole).toString();
+                        if (!sid.isEmpty()) {
+                            toArchive.append(sid);
+                        }
+                    }
+                    for (const auto &sid : toArchive) {
+                        archiveSession(sid);
+                    }
+                }
+            });
+            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        }
         return;
     }
 
@@ -1342,7 +1374,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
 
     // Display name: project directory or session name
     QString displayName;
-    if (!meta.workingDirectory.isEmpty() && meta.workingDirectory != QStringLiteral(".")) {
+    if (!meta.workingDirectory.isEmpty() && meta.workingDirectory != QStringLiteral(".") && meta.workingDirectory != QDir::homePath()) {
         displayName = QDir(meta.workingDirectory).dirName();
     }
     // Fallback to session name if display name is empty or just "." or "build" (which is misleading)

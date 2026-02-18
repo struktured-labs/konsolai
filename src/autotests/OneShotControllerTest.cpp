@@ -8,6 +8,7 @@
 
 // Qt
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTest>
 
 // Konsolai
@@ -15,15 +16,23 @@
 
 using namespace Konsolai;
 
-void OneShotControllerTest::testInitialPhase()
+void OneShotControllerTest::initTestCase()
 {
-    OneShotController controller;
-    QVERIFY(!controller.isRunning());
+    QStandardPaths::setTestModeEnabled(true);
 }
 
-void OneShotControllerTest::testConfigDefaults()
+void OneShotControllerTest::cleanupTestCase()
+{
+}
+
+// ============================================================
+// testDefaultConfig
+// ============================================================
+
+void OneShotControllerTest::testDefaultConfig()
 {
     OneShotConfig config;
+
     QVERIFY(config.prompt.isEmpty());
     QVERIFY(config.workingDir.isEmpty());
     QVERIFY(config.model.isEmpty());
@@ -35,9 +44,14 @@ void OneShotControllerTest::testConfigDefaults()
     QCOMPARE(config.qualityScore, 0);
 }
 
-void OneShotControllerTest::testResultDefaults()
+// ============================================================
+// testDefaultResult
+// ============================================================
+
+void OneShotControllerTest::testDefaultResult()
 {
     OneShotResult result;
+
     QVERIFY(!result.success);
     QVERIFY(result.summary.isEmpty());
     QCOMPARE(result.costUSD, 0.0);
@@ -48,94 +62,79 @@ void OneShotControllerTest::testResultDefaults()
     QVERIFY(result.errors.isEmpty());
 }
 
-void OneShotControllerTest::testIsRunning()
-{
-    OneShotController controller;
-    QVERIFY(!controller.isRunning());
-}
+// ============================================================
+// testSetConfig
+// ============================================================
 
-void OneShotControllerTest::testPhaseTransitions()
+void OneShotControllerTest::testSetConfig()
 {
-    OneShotController controller;
-    // Before start(), not running
-    QVERIFY(!controller.isRunning());
+    OneShotController ctrl;
 
-    // start() makes it running
-    controller.start();
-    QVERIFY(controller.isRunning());
-}
-
-void OneShotControllerTest::testFormatBudgetProgress()
-{
-    OneShotController controller;
-    // Without a session attached, should return empty
-    QVERIFY(controller.formatBudgetStatus().isEmpty());
-}
-
-void OneShotControllerTest::testElapsedMinutes()
-{
-    OneShotController controller;
-    // Before start(), format should be empty
-    QVERIFY(controller.formatBudgetStatus().isEmpty());
-}
-
-void OneShotControllerTest::testYoloLevelMapping()
-{
     OneShotConfig config;
-    QCOMPARE(config.yoloLevel, 3); // Triple yolo by default
-
-    config.yoloLevel = 1;
-    QCOMPARE(config.yoloLevel, 1);
-
-    config.yoloLevel = 2;
-    QCOMPARE(config.yoloLevel, 2);
-}
-
-void OneShotControllerTest::testBudgetPolicySoft()
-{
-    OneShotConfig config;
-    // Default is soft (no explicit field in simplified config)
-    QCOMPARE(config.timeLimitMinutes, 0);
-}
-
-void OneShotControllerTest::testBudgetPolicyHard()
-{
-    OneShotConfig config;
-    config.costCeilingUSD = 5.0;
-    QCOMPARE(config.costCeilingUSD, 5.0);
-}
-
-void OneShotControllerTest::testGsdPromptPrefix()
-{
-    OneShotConfig config;
-    config.prompt = QStringLiteral("Build a REST API");
-    config.useGsd = true;
-
-    // Verify the GSD prefix would be applied
-    QString expectedPrompt = QStringLiteral("Use /gsd:new-project: Build a REST API");
-    QString actualPrompt = config.useGsd ? QStringLiteral("Use /gsd:new-project: ") + config.prompt : config.prompt;
-    QCOMPARE(actualPrompt, expectedPrompt);
-}
-
-void OneShotControllerTest::testOneShotConfig()
-{
-    OneShotConfig config;
-    config.prompt = QStringLiteral("Fix the crash in src/main.cpp");
+    config.prompt = QStringLiteral("Fix the login bug");
     config.workingDir = QStringLiteral("/home/user/project");
-    config.timeLimitMinutes = 30;
-    config.costCeilingUSD = 1.50;
-    config.tokenCeiling = 500000;
+    config.model = QStringLiteral("opus");
+    config.timeLimitMinutes = 15;
+    config.costCeilingUSD = 0.50;
+    config.tokenCeiling = 100000;
     config.yoloLevel = 2;
+    config.useGsd = true;
     config.qualityScore = 85;
 
-    OneShotController controller;
-    controller.setConfig(config);
+    ctrl.setConfig(config);
 
-    QCOMPARE(controller.config().prompt, QStringLiteral("Fix the crash in src/main.cpp"));
-    QCOMPARE(controller.config().timeLimitMinutes, 30);
-    QCOMPARE(controller.config().costCeilingUSD, 1.50);
-    QCOMPARE(controller.config().yoloLevel, 2);
-    QCOMPARE(controller.config().qualityScore, 85);
+    const auto &c = ctrl.config();
+    QCOMPARE(c.prompt, QStringLiteral("Fix the login bug"));
+    QCOMPARE(c.workingDir, QStringLiteral("/home/user/project"));
+    QCOMPARE(c.model, QStringLiteral("opus"));
+    QCOMPARE(c.timeLimitMinutes, 15);
+    QCOMPARE(c.costCeilingUSD, 0.50);
+    QCOMPARE(c.tokenCeiling, quint64(100000));
+    QCOMPARE(c.yoloLevel, 2);
+    QVERIFY(c.useGsd);
+    QCOMPARE(c.qualityScore, 85);
+}
+
+// ============================================================
+// testIsRunning
+// ============================================================
+
+void OneShotControllerTest::testIsRunning()
+{
+    OneShotController ctrl;
+
+    // Initially not running
+    QVERIFY(!ctrl.isRunning());
+
+    // After start(), should be running
+    ctrl.start();
+    QVERIFY(ctrl.isRunning());
+}
+
+// ============================================================
+// testFormatBudgetStatus
+// ============================================================
+
+void OneShotControllerTest::testFormatBudgetStatus()
+{
+    OneShotController ctrl;
+
+    // Without a session, should return empty
+    QString status = ctrl.formatBudgetStatus();
+    QVERIFY(status.isEmpty());
+}
+
+// ============================================================
+// testFormatStateLabel
+// ============================================================
+
+void OneShotControllerTest::testFormatStateLabel()
+{
+    OneShotController ctrl;
+
+    // Without a session, should return "No session"
+    QString label = ctrl.formatStateLabel();
+    QCOMPARE(label, QStringLiteral("No session"));
 }
 
 QTEST_GUILESS_MAIN(Konsolai::OneShotControllerTest)

@@ -184,6 +184,12 @@ public:
     QString getPaneWorkingDirectory(const QString &sessionName) const;
 
     /**
+     * Get the current working directory of a tmux session's pane (asynchronous).
+     * The callback receives the path (empty on failure).
+     */
+    void getPaneWorkingDirectoryAsync(const QString &sessionName, std::function<void(const QString &)> callback);
+
+    /**
      * Get the PID of the shell process in the tmux pane (synchronous).
      * Returns 0 on failure.
      */

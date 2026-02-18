@@ -16,20 +16,17 @@ class OneShotControllerTest : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void testInitialPhase();
-    void testConfigDefaults();
-    void testResultDefaults();
+    void initTestCase();
+    void cleanupTestCase();
+
+    void testDefaultConfig();
+    void testDefaultResult();
+    void testSetConfig();
     void testIsRunning();
-    void testPhaseTransitions();
-    void testFormatBudgetProgress();
-    void testElapsedMinutes();
-    void testYoloLevelMapping();
-    void testBudgetPolicySoft();
-    void testBudgetPolicyHard();
-    void testGsdPromptPrefix();
-    void testOneShotConfig();
+    void testFormatBudgetStatus();
+    void testFormatStateLabel();
 };
 
-} // namespace Konsolai
+}
 
 #endif // ONESHOTCONTROLLERTEST_H

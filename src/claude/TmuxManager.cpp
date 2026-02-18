@@ -256,6 +256,16 @@ void TmuxManager::getPanePidAsync(const QString &sessionName, std::function<void
                         });
 }
 
+void TmuxManager::getPaneWorkingDirectoryAsync(const QString &sessionName, std::function<void(const QString &)> callback)
+{
+    executeCommandAsync({QStringLiteral("display-message"), QStringLiteral("-p"), QStringLiteral("-t"), sessionName, QStringLiteral("#{pane_current_path}")},
+                        [callback](bool ok, const QString &output) {
+                            if (callback) {
+                                callback(ok ? output.trimmed() : QString());
+                            }
+                        });
+}
+
 QString TmuxManager::executeCommand(const QStringList &args, bool *ok) const
 {
     QProcess process;

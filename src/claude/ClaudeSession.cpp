@@ -309,14 +309,38 @@ void ClaudeSession::run()
         m_workingDir = workDir;
     }
 
-    // For reattached sessions, get the actual working directory from tmux
-    // This is where Claude is actually running, which may differ from where konsolai started
-    if (m_isReattach && m_tmuxManager && m_tmuxManager->sessionExists(m_sessionName)) {
-        QString tmuxWorkDir = m_tmuxManager->getPaneWorkingDirectory(m_sessionName);
-        if (!tmuxWorkDir.isEmpty() && QDir(tmuxWorkDir).exists()) {
-            m_workingDir = tmuxWorkDir;
-            qDebug() << "ClaudeSession::run() - Got working dir from tmux:" << m_workingDir;
-        }
+    // For reattached sessions, query tmux asynchronously to avoid blocking the main
+    // thread at startup (multiple sessions doing sync tmux calls can freeze the UI).
+    // The initial m_workingDir from stored metadata is used immediately; the async
+    // callback updates it if tmux reports a different (more accurate) directory.
+    if (m_isReattach && m_tmuxManager) {
+        QPointer<ClaudeSession> guard(this);
+        m_tmuxManager->sessionExistsAsync(m_sessionName, [this, guard](bool exists) {
+            if (!guard || !exists || !m_tmuxManager) {
+                return;
+            }
+            m_tmuxManager->getPaneWorkingDirectoryAsync(m_sessionName, [this, guard](const QString &tmuxWorkDir) {
+                if (!guard) {
+                    return;
+                }
+                if (!tmuxWorkDir.isEmpty() && QDir(tmuxWorkDir).exists() && tmuxWorkDir != m_workingDir) {
+                    m_workingDir = tmuxWorkDir;
+                    qDebug() << "ClaudeSession::run() - Got working dir from tmux (async):" << m_workingDir;
+
+                    // Update tab title with the corrected directory
+                    QString projectName = QDir(m_workingDir).dirName();
+                    if (!projectName.isEmpty() && projectName != QStringLiteral(".")) {
+                        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);
+                        setTitle(Konsole::Session::NameRole, displayName);
+                        setTitle(Konsole::Session::DisplayedTitleRole, displayName);
+                        setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
+                        setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
+                    }
+
+                    Q_EMIT workingDirectoryChanged(m_workingDir);
+                }
+            });
+        });
     }
 
     // Validate working directory (skip for remote sessions - path is on remote host)
@@ -869,11 +893,12 @@ QString ClaudeSession::buildRemoteSshCommand() const
                         "e['hooks']=n.get('hooks',{}); "
                         "f=open(p,'w'); json.dump(e,f,indent=2); f.close()"
                         "\" '%4' && "
-                        "tmux new-session -A -s %5 -c %3 -- %6")
+                        "tmux new-session -A -s %5 -c %3 -- %6 \\; set-option -p allow-passthrough off")
                         .arg(scriptPath, hookScript, remoteWorkDir, escapedConfig, m_sessionName, claudeCmd);
     } else {
         // No tunnel - just run tmux directly
-        remoteCmd = QStringLiteral("tmux new-session -A -s %1 -c %2 -- %3").arg(m_sessionName, remoteWorkDir, claudeCmd);
+        remoteCmd =
+            QStringLiteral("tmux new-session -A -s %1 -c %2 -- %3 \\; set-option -p allow-passthrough off").arg(m_sessionName, remoteWorkDir, claudeCmd);
     }
 
     // Quote the entire remote command
