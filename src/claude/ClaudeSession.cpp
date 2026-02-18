@@ -410,13 +410,39 @@ void ClaudeSession::run()
                         existingFile.close();
                     }
 
-                    // Parse our hooks config and merge
+                    // Parse our hooks config and merge per event type.
+                    // Multiple sessions in the same workDir each have their own socket,
+                    // so we must ADD our hooks alongside any existing ones (from other
+                    // sessions) rather than replacing the entire "hooks" object.
                     QJsonDocument hooksDoc = QJsonDocument::fromJson(hooksConfig.toUtf8());
                     if (hooksDoc.isObject()) {
                         QJsonObject hooksObj = hooksDoc.object();
-                        // The hooks are under "hooks" key in our generated config
                         if (hooksObj.contains(QStringLiteral("hooks"))) {
-                            settings[QStringLiteral("hooks")] = hooksObj[QStringLiteral("hooks")];
+                            QJsonObject newHooks = hooksObj[QStringLiteral("hooks")].toObject();
+                            QJsonObject existingHooks = settings[QStringLiteral("hooks")].toObject();
+                            QString mySocket = m_hookHandler->socketPath();
+
+                            // For each event type, merge our entry into the existing array
+                            for (auto it = newHooks.begin(); it != newHooks.end(); ++it) {
+                                QJsonArray existingArray = existingHooks[it.key()].toArray();
+                                QJsonArray ourEntries = it.value().toArray();
+
+                                // Remove any stale entries for THIS session's socket
+                                QJsonArray filtered;
+                                for (const auto &entry : existingArray) {
+                                    QString entryStr = QString::fromUtf8(QJsonDocument(entry.toObject()).toJson());
+                                    if (!entryStr.contains(mySocket)) {
+                                        filtered.append(entry);
+                                    }
+                                }
+
+                                // Append our entries
+                                for (const auto &entry : ourEntries) {
+                                    filtered.append(entry);
+                                }
+                                existingHooks[it.key()] = filtered;
+                            }
+                            settings[QStringLiteral("hooks")] = existingHooks;
                         }
                     }
 
@@ -2028,25 +2054,60 @@ void ClaudeSession::removeHooksFromProjectSettings()
 
     QJsonObject settings = doc.object();
 
-    // Only remove hooks that reference konsolai-hook-handler
     if (!settings.contains(QStringLiteral("hooks"))) {
         return;
     }
 
-    // Check that the hooks actually belong to konsolai before removing
-    QString hooksStr = QString::fromUtf8(QJsonDocument(settings.value(QStringLiteral("hooks")).toObject()).toJson());
-    if (!hooksStr.contains(QStringLiteral("konsolai-hook-handler"))) {
+    // Only remove hook entries that reference THIS session's socket path.
+    // Other sessions in the same workDir may still be running with their
+    // own hooks — we must not remove those.
+    QString mySocket = m_hookHandler ? m_hookHandler->socketPath() : QString();
+    if (mySocket.isEmpty()) {
         return;
     }
 
-    settings.remove(QStringLiteral("hooks"));
+    QJsonObject hooks = settings[QStringLiteral("hooks")].toObject();
+    bool anyRemoved = false;
+
+    for (auto it = hooks.begin(); it != hooks.end(); ++it) {
+        QJsonArray entries = it.value().toArray();
+        QJsonArray filtered;
+        for (const auto &entry : entries) {
+            QString entryStr = QString::fromUtf8(QJsonDocument(entry.toObject()).toJson());
+            if (entryStr.contains(mySocket)) {
+                anyRemoved = true;
+            } else {
+                filtered.append(entry);
+            }
+        }
+        hooks[it.key()] = filtered;
+    }
+
+    if (!anyRemoved) {
+        return;
+    }
+
+    // Check if any hooks remain; if not, remove the key entirely
+    bool anyHooksLeft = false;
+    for (auto it = hooks.begin(); it != hooks.end(); ++it) {
+        if (!it.value().toArray().isEmpty()) {
+            anyHooksLeft = true;
+            break;
+        }
+    }
+
+    if (anyHooksLeft) {
+        settings[QStringLiteral("hooks")] = hooks;
+    } else {
+        settings.remove(QStringLiteral("hooks"));
+    }
 
     QFile outFile(settingsPath);
     if (outFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QJsonDocument outDoc(settings);
         outFile.write(outDoc.toJson(QJsonDocument::Indented));
         outFile.close();
-        qDebug() << "ClaudeSession: Removed hooks from" << settingsPath;
+        qDebug() << "ClaudeSession: Removed this session's hooks from" << settingsPath;
     }
 }
 
