@@ -942,7 +942,11 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                     // Collect session IDs first (archiveSession modifies the tree)
                     QStringList toArchive;
                     for (int i = 0; i < m_closedCategory->childCount(); ++i) {
-                        QString sid = m_closedCategory->child(i)->data(0, Qt::UserRole).toString();
+                        auto *child = m_closedCategory->child(i);
+                        if (!child) {
+                            continue;
+                        }
+                        QString sid = child->data(0, Qt::UserRole).toString();
                         if (!sid.isEmpty()) {
                             toArchive.append(sid);
                         }
@@ -1736,7 +1740,7 @@ void SessionManagerPanel::loadMetadata()
             entry.toolName = logObj[QStringLiteral("tool")].toString();
             entry.action = logObj[QStringLiteral("action")].toString();
             entry.yoloLevel = logObj[QStringLiteral("level")].toInt();
-            entry.totalTokens = static_cast<quint64>(logObj[QStringLiteral("tokens")].toDouble());
+            entry.totalTokens = static_cast<quint64>(logObj[QStringLiteral("tokens")].toInteger(0));
             entry.estimatedCostUSD = logObj[QStringLiteral("cost")].toDouble();
             meta.approvalLog.append(entry);
         }
@@ -1744,7 +1748,7 @@ void SessionManagerPanel::loadMetadata()
         // Budget settings
         meta.budgetTimeLimitMinutes = obj[QStringLiteral("budgetTimeLimitMinutes")].toInt();
         meta.budgetCostCeilingUSD = obj[QStringLiteral("budgetCostCeilingUSD")].toDouble();
-        meta.budgetTokenCeiling = static_cast<quint64>(obj[QStringLiteral("budgetTokenCeiling")].toDouble());
+        meta.budgetTokenCeiling = static_cast<quint64>(obj[QStringLiteral("budgetTokenCeiling")].toInteger(0));
 
         if (!meta.sessionId.isEmpty()) {
             m_metadata[meta.sessionId] = meta;

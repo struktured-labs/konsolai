@@ -1988,9 +1988,15 @@ void ClaudeSession::cleanupRemoteHooks()
     }
     sshArgs << target << cleanupCmd;
 
-    // Fire-and-forget: don't block the destructor
+    // Fire-and-forget: don't block the destructor.
+    // Kill after 10s to prevent zombie processes if SSH hangs.
     QProcess *process = new QProcess();
     QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), process, &QProcess::deleteLater);
+    QTimer::singleShot(10000, process, [process]() {
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+        }
+    });
     process->start(QStringLiteral("ssh"), sshArgs);
 
     qDebug() << "ClaudeSession: Initiated remote hook cleanup for" << target;

@@ -20,7 +20,10 @@ BudgetController::BudgetController(QObject *parent)
     m_checkTimer->start();
 }
 
-BudgetController::~BudgetController() = default;
+BudgetController::~BudgetController()
+{
+    m_checkTimer->stop();
+}
 
 void BudgetController::setBudget(const SessionBudget &b)
 {

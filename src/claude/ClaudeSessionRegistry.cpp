@@ -326,6 +326,7 @@ void ClaudeSessionRegistry::saveState()
 
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "ClaudeSessionRegistry::saveState: Failed to write session state to" << filePath;
         return;
     }
 
