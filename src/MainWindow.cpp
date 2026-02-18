@@ -1435,57 +1435,85 @@ void MainWindow::autoReattachClaudeSessions()
         return;
     }
 
-    QList<Konsolai::ClaudeSessionState> orphans = registry->orphanedSessions();
-    if (orphans.isEmpty()) {
-        return;
-    }
-
-    qDebug() << "Auto-reattaching" << orphans.size() << "orphaned Claude sessions";
-
-    // Get the Claude profile
-    Profile::Ptr claudeProfile;
-    const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
-    for (const Profile::Ptr &profile : profiles) {
-        if (profile->property<bool>(Profile::ClaudeEnabled)) {
-            claudeProfile = profile;
-            break;
-        }
-    }
-
-    if (!claudeProfile) {
-        qWarning() << "No Claude profile found for reattaching sessions";
-        return;
-    }
-
-    for (const Konsolai::ClaudeSessionState &state : orphans) {
-        qDebug() << "Reattaching session:" << state.sessionName;
-
-        // Create a ClaudeSession for reattach
-        auto *claudeSession = Konsolai::ClaudeSession::createForReattach(state.sessionName, this);
-
-        // Set initial working directory
-        if (!state.workingDirectory.isEmpty()) {
-            claudeSession->setInitialWorkingDirectory(state.workingDirectory);
+    // Query live tmux sessions first, then only reattach those that actually
+    // exist.  The registry's orphanedSessions() list may contain stale entries
+    // from previous runs whose tmux sessions have since been killed.
+    // Reattaching a dead tmux session creates a shell that exits immediately,
+    // cascading through cleanup and crashing the app at startup.
+    auto *tmux = new Konsolai::TmuxManager(this);
+    QPointer<MainWindow> guard(this);
+    tmux->listKonsolaiSessionsAsync([this, guard, registry, tmux](const QList<Konsolai::TmuxManager::SessionInfo> &liveSessions) {
+        tmux->deleteLater();
+        if (!guard) {
+            return;
         }
 
-        // Apply profile settings
-        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
-
-        // Create view and add to container
-        auto *view = _viewManager->createView(claudeSession);
-        _viewManager->activeContainer()->addView(view);
-
-        // Start the session (attaches to existing tmux session)
-        if (!claudeSession->isRunning()) {
-            claudeSession->run();
+        // Build a set of live tmux session names for fast lookup
+        QSet<QString> liveNames;
+        for (const auto &info : liveSessions) {
+            liveNames.insert(info.name);
         }
 
-        // Register with registry and connect to status UI
-        registry->registerSession(claudeSession);
-        _sessionPanel->registerSession(claudeSession);
-        _claudeMenu->setActiveSession(claudeSession);
-        _claudeStatusWidget->setSession(claudeSession);
-    }
+        QList<Konsolai::ClaudeSessionState> orphans = registry->orphanedSessions();
+        if (orphans.isEmpty()) {
+            return;
+        }
+
+        // Get the Claude profile
+        Profile::Ptr claudeProfile;
+        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+        for (const Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+
+        if (!claudeProfile) {
+            qWarning() << "No Claude profile found for reattaching sessions";
+            return;
+        }
+
+        int reattached = 0;
+        int skipped = 0;
+        for (const Konsolai::ClaudeSessionState &state : orphans) {
+            if (!liveNames.contains(state.sessionName)) {
+                ++skipped;
+                continue;
+            }
+
+            qDebug() << "Reattaching session:" << state.sessionName;
+
+            // Create a ClaudeSession for reattach
+            auto *claudeSession = Konsolai::ClaudeSession::createForReattach(state.sessionName, this);
+
+            // Set initial working directory
+            if (!state.workingDirectory.isEmpty()) {
+                claudeSession->setInitialWorkingDirectory(state.workingDirectory);
+            }
+
+            // Apply profile settings
+            SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+
+            // Create view and add to container
+            auto *view = _viewManager->createView(claudeSession);
+            _viewManager->activeContainer()->addView(view);
+
+            // Start the session (attaches to existing tmux session)
+            if (!claudeSession->isRunning()) {
+                claudeSession->run();
+            }
+
+            // Register with registry and connect to status UI
+            registry->registerSession(claudeSession);
+            _sessionPanel->registerSession(claudeSession);
+            _claudeMenu->setActiveSession(claudeSession);
+            _claudeStatusWidget->setSession(claudeSession);
+            ++reattached;
+        }
+
+        qDebug() << "Auto-reattached" << reattached << "sessions, skipped" << skipped << "stale entries";
+    });
 }
 
 void MainWindow::showSessionSwitcher()
