@@ -792,6 +792,7 @@ private:
     QTimer *m_idlePollTimer = nullptr;
     bool m_idlePromptDetected = false;
     bool m_idlePollInFlight = false; // true while async capturePane is running
+    bool m_hookDeliveredIdle = false; // true when hook-based idle triggered yolo (suppresses polling)
     void startIdlePolling();
     void stopIdlePolling();
     void pollForIdlePrompt();

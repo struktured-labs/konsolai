@@ -72,6 +72,27 @@ ClaudeSession* ClaudeSession::createForReattach(const QString &existingSessionNa
 
 ClaudeSession::~ClaudeSession()
 {
+    // Stop ALL timers FIRST to prevent ghost yolo:
+    // timers firing during destruction would invoke lambdas on a partially-destroyed object.
+    if (m_permissionPollTimer) {
+        m_permissionPollTimer->stop();
+    }
+    if (m_idlePollTimer) {
+        m_idlePollTimer->stop();
+    }
+    if (m_suggestionTimer) {
+        m_suggestionTimer->stop();
+    }
+    if (m_suggestionFallbackTimer) {
+        m_suggestionFallbackTimer->stop();
+    }
+    if (m_tokenRefreshTimer) {
+        m_tokenRefreshTimer->stop();
+    }
+    if (m_resourceTimer) {
+        m_resourceTimer->stop();
+    }
+
     if (auto *registry = ClaudeSessionRegistry::instance()) {
         registry->unregisterSession(this);
     }
@@ -471,6 +492,7 @@ void ClaudeSession::connectSignals()
             }
             // Reset idle detection since hooks are delivering events
             m_idlePromptDetected = false;
+            m_hookDeliveredIdle = false;
             return;
         }
 
@@ -485,6 +507,14 @@ void ClaudeSession::connectSignals()
             qDebug() << "ClaudeSession: Team active - suppressing keyboard-based L2/L3 yolo";
             return;
         }
+
+        // Signal hook-based idle to suppress polling for a cooldown window.
+        // This prevents both hook-based AND polling-based yolo from firing
+        // for the same idle event (double-fire).
+        m_hookDeliveredIdle = true;
+        QTimer::singleShot(10000, this, [this]() {
+            m_hookDeliveredIdle = false;
+        });
 
         if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
             // Double yolo fires first: Tab + Enter to accept suggestion
@@ -895,8 +925,9 @@ void ClaudeSession::approvePermissionAlways()
 
     // Capture the terminal to find where the cursor (❯) is and where the
     // "Always allow" option is, then navigate precisely.
-    m_tmuxManager->capturePaneAsync(m_sessionName, [this](bool ok, const QString &output) {
-        if (!ok || !m_tmuxManager) {
+    QPointer<ClaudeSession> guard(this);
+    m_tmuxManager->capturePaneAsync(m_sessionName, [this, guard](bool ok, const QString &output) {
+        if (!guard || !ok || !m_tmuxManager) {
             return;
         }
 
@@ -1055,7 +1086,11 @@ void ClaudeSession::pollForPermissionPrompt()
     // NOTE: We must NOT pass -S/-E with negative values — tmux treats those
     // as scrollback history lines, not bottom-of-screen lines.
     m_permissionPollInFlight = true;
-    m_tmuxManager->capturePaneAsync(m_sessionName, [this](bool ok, const QString &output) {
+    QPointer<ClaudeSession> guard(this);
+    m_tmuxManager->capturePaneAsync(m_sessionName, [this, guard](bool ok, const QString &output) {
+        if (!guard) {
+            return;
+        }
         m_permissionPollInFlight = false;
         if (!ok || !m_yoloMode) {
             return;
@@ -1171,6 +1206,12 @@ void ClaudeSession::pollForIdlePrompt()
         return;
     }
 
+    // Skip if hook-based idle already triggered yolo actions recently.
+    // This prevents both hook and polling from firing for the same idle event.
+    if (m_hookDeliveredIdle) {
+        return;
+    }
+
     // NOTE: We no longer skip when claudeState() == Idle. That's precisely
     // the case we need to handle — hooks delivered Idle once, but the signal
     // handler's Tab+Enter was a no-op (no suggestion present at the time).
@@ -1180,7 +1221,11 @@ void ClaudeSession::pollForIdlePrompt()
     // NOTE: We must NOT pass -S/-E with negative values — tmux treats those
     // as scrollback history lines, not bottom-of-screen lines.
     m_idlePollInFlight = true;
-    m_tmuxManager->capturePaneAsync(m_sessionName, [this](bool ok, const QString &output) {
+    QPointer<ClaudeSession> guard(this);
+    m_tmuxManager->capturePaneAsync(m_sessionName, [this, guard](bool ok, const QString &output) {
+        if (!guard) {
+            return;
+        }
         m_idlePollInFlight = false;
         if (!ok) {
             return;
@@ -1461,16 +1506,25 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
             // Start idle polling so double yolo can re-fire on background tabs
             startIdlePolling();
 
-            // If Claude appears idle, apply immediately with new precedence
+            // If Claude appears idle, apply immediately with new precedence.
+            // Use m_suggestionTimer (not a one-shot) so that if stateChanged(Idle) also
+            // fires, both paths share the same timer and can't double-fire.
             auto state = claudeState();
             if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
                 if (m_trySuggestionsFirst || !m_tripleYoloMode) {
                     qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-accepting suggestion immediately";
-                    QTimer::singleShot(500, this, [this]() {
-                        if (m_doubleYoloMode) {
-                            autoAcceptSuggestion();
-                        }
-                    });
+                    if (!m_suggestionTimer) {
+                        m_suggestionTimer = new QTimer(this);
+                        m_suggestionTimer->setSingleShot(true);
+                        connect(m_suggestionTimer, &QTimer::timeout, this, [this]() {
+                            if (m_doubleYoloMode) {
+                                autoAcceptSuggestion();
+                            }
+                        });
+                    }
+                    if (!m_suggestionTimer->isActive()) {
+                        m_suggestionTimer->start(500);
+                    }
                     if (m_tripleYoloMode) {
                         scheduleSuggestionFallback();
                     }
@@ -1525,15 +1579,21 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
             // Start idle polling as a fallback when hooks aren't delivering state
             startIdlePolling();
 
-            // Also fire immediately if Claude appears idle right now
+            // Also fire immediately if Claude appears idle right now.
+            // Set m_idlePromptDetected to prevent polling from double-firing.
             auto state = claudeState();
             if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
+                m_idlePromptDetected = true;
                 qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-continuing immediately (triple yolo enabled)";
                 QTimer::singleShot(500, this, [this]() {
                     if (m_tripleYoloMode) {
                         sendPrompt(m_autoContinuePrompt);
                         logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
                     }
+                    // Reset after cooldown to allow polling to work for subsequent idle events
+                    QTimer::singleShot(5000, this, [this]() {
+                        m_idlePromptDetected = false;
+                    });
                 });
             }
         } else {
@@ -1563,7 +1623,11 @@ void ClaudeSession::startResourceTracking()
 
     // Resolve the Claude PID asynchronously from the tmux pane PID
     if (m_tmuxManager) {
-        m_tmuxManager->getPanePidAsync(m_sessionName, [this](qint64 panePid) {
+        QPointer<ClaudeSession> guard(this);
+        m_tmuxManager->getPanePidAsync(m_sessionName, [this, guard](qint64 panePid) {
+            if (!guard) {
+                return;
+            }
             if (panePid > 0) {
                 m_claudePid = findClaudePid(panePid);
                 if (m_claudePid > 0) {
@@ -1747,7 +1811,11 @@ void ClaudeSession::refreshResourceUsage()
         m_lastCpuTime = 0;
 
         if (m_tmuxManager) {
-            m_tmuxManager->getPanePidAsync(m_sessionName, [this](qint64 panePid) {
+            QPointer<ClaudeSession> guard(this);
+            m_tmuxManager->getPanePidAsync(m_sessionName, [this, guard](qint64 panePid) {
+                if (!guard) {
+                    return;
+                }
                 if (panePid > 0) {
                     m_claudePid = findClaudePid(panePid);
                     if (m_claudePid > 0) {
