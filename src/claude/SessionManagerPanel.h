@@ -257,6 +257,9 @@ private:
 
     // Cached live session names from last async tmux query
     QSet<QString> m_cachedLiveNames;
+
+    // Per-session toggle: sessions in this set hide completed (NotRunning) agents
+    QSet<QString> m_hideCompletedAgents;
 };
 
 } // namespace Konsolai

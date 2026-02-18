@@ -1108,6 +1108,25 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             }
         }
 
+        // Toggle completed agents visibility for sessions with subagents
+        if (isActive && m_activeSessions.contains(sessionId)) {
+            ClaudeSession *activeSession = m_activeSessions[sessionId];
+            if (activeSession && !activeSession->subagents().isEmpty()) {
+                bool hiding = m_hideCompletedAgents.contains(sessionId);
+                QAction *toggleAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-visible")), i18n("Show Completed Agents"));
+                toggleAction->setCheckable(true);
+                toggleAction->setChecked(!hiding);
+                connect(toggleAction, &QAction::triggered, this, [this, sessionId](bool checked) {
+                    if (checked) {
+                        m_hideCompletedAgents.remove(sessionId);
+                    } else {
+                        m_hideCompletedAgents.insert(sessionId);
+                    }
+                    scheduleTreeUpdate();
+                });
+            }
+        }
+
         // Restart option for active sessions
         if (isActive && m_activeSessions.contains(sessionId)) {
             ClaudeSession *activeSession = m_activeSessions[sessionId];
@@ -1363,21 +1382,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
     }
 
-    // Add team badge when active team exists
+    // Add team badge when subagents exist (active or completed)
     if (isActive) {
         ClaudeSession *activeSession = m_activeSessions[meta.sessionId];
-        if (activeSession && activeSession->hasActiveTeam()) {
-            int agentCount = 0;
+        if (activeSession && !activeSession->subagents().isEmpty()) {
+            int activeCount = 0;
+            int totalCount = activeSession->subagents().size();
             const auto &agents = activeSession->subagents();
             for (auto it = agents.constBegin(); it != agents.constEnd(); ++it) {
                 if (it->state == ClaudeProcess::State::Working || it->state == ClaudeProcess::State::Idle) {
-                    agentCount++;
+                    activeCount++;
                 }
             }
-            if (!activeSession->teamName().isEmpty()) {
-                displayName += QStringLiteral(" [%1: %2]").arg(activeSession->teamName()).arg(agentCount);
+            QString badgeLabel = activeSession->teamName().isEmpty() ? QStringLiteral("team") : activeSession->teamName();
+            if (activeCount == 0) {
+                displayName += QStringLiteral(" [%1: done]").arg(badgeLabel);
+            } else if (activeCount < totalCount) {
+                displayName += QStringLiteral(" [%1: %2/%3]").arg(badgeLabel).arg(activeCount).arg(totalCount);
             } else {
-                displayName += QStringLiteral(" [%1 agents]").arg(agentCount);
+                displayName += QStringLiteral(" [%1: %2]").arg(badgeLabel).arg(activeCount);
             }
         }
     }
@@ -1461,19 +1484,42 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // Add nested subagent children for active sessions with teams
+    // Add nested subagent children for active sessions with subagents (active or completed)
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
-        if (session && session->hasActiveTeam()) {
+        if (session && !session->subagents().isEmpty()) {
             const auto &subagents = session->subagents();
-            bool hasActiveAgents = false;
+            bool hideCompleted = m_hideCompletedAgents.contains(meta.sessionId);
+
+            // Sort agents: Working first, Idle second, NotRunning last
+            QList<const SubagentInfo *> sorted;
             for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
-                const auto &info = it.value();
-                // Only show active subagents (Working or Idle)
-                if (info.state != ClaudeProcess::State::Working && info.state != ClaudeProcess::State::Idle) {
+                sorted.append(&it.value());
+            }
+            std::sort(sorted.begin(), sorted.end(), [](const SubagentInfo *a, const SubagentInfo *b) {
+                auto rank = [](ClaudeProcess::State s) -> int {
+                    if (s == ClaudeProcess::State::Working)
+                        return 0;
+                    if (s == ClaudeProcess::State::Idle)
+                        return 1;
+                    return 2; // NotRunning
+                };
+                return rank(a->state) < rank(b->state);
+            });
+
+            bool hasActiveAgents = false;
+            for (const auto *infoPtr : sorted) {
+                const auto &info = *infoPtr;
+                bool isCompleted = (info.state != ClaudeProcess::State::Working && info.state != ClaudeProcess::State::Idle);
+
+                // Skip completed agents if per-session toggle says hide them
+                if (isCompleted && hideCompleted) {
                     continue;
                 }
-                hasActiveAgents = true;
+
+                if (!isCompleted) {
+                    hasActiveAgents = true;
+                }
 
                 auto *childItem = new QTreeWidgetItem(item);
 
@@ -1503,13 +1549,17 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     m_treeWidget->setItemWidget(childItem, 1, durationLabel);
                 }
 
-                // Icon by state
+                // Icon and color by state
                 if (info.state == ClaudeProcess::State::Working) {
                     childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
                     childItem->setForeground(0, QBrush(Qt::darkGreen));
-                } else {
+                } else if (info.state == ClaudeProcess::State::Idle) {
                     childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
                     childItem->setForeground(0, QBrush(Qt::gray));
+                } else {
+                    // Completed (NotRunning) — checkmark icon and dimmed text
+                    childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
+                    childItem->setForeground(0, QBrush(QColor(140, 140, 140)));
                 }
 
                 // Enhanced tooltip
@@ -1525,6 +1575,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 }
                 if (!info.transcriptPath.isEmpty()) {
                     childTooltip += QStringLiteral("\nTranscript: %1").arg(info.transcriptPath);
+                }
+                if (isCompleted) {
+                    childTooltip += QStringLiteral("\nStatus: Completed");
                 }
                 childItem->setToolTip(0, childTooltip);
 
