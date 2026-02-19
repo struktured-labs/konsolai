@@ -245,8 +245,8 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
         }
     }
 
-    // Update tab title with task description if available
-    if (!m_taskDescription.isEmpty() && !m_workingDir.isEmpty()) {
+    // Update tab title from restored state (workingDir gives project name, taskDescription is optional)
+    if (!m_workingDir.isEmpty()) {
         QString projectName = QDir(m_workingDir).dirName();
         if (!projectName.isEmpty()) {
             QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);

@@ -14,6 +14,20 @@
 namespace Konsolai
 {
 
+// Strip DCS (Device Control String) and other terminal escape sequences from captured output.
+// Prevents XTVERSION responses like "P|>Konsolai" from leaking into prompt detection.
+static QString stripTerminalEscapes(const QString &input)
+{
+    QString output = input;
+    // Remove DCS sequences: ESC P ... ESC backslash
+    static const QRegularExpression dcsRx(QStringLiteral("\\x1bP[^\\x1b]*\\x1b\\\\"));
+    output.remove(dcsRx);
+    // Remove CSI sequences: ESC [ params letter
+    static const QRegularExpression csiRx(QStringLiteral("\\x1b\\[[0-9;]*[A-Za-z]"));
+    output.remove(csiRx);
+    return output;
+}
+
 TmuxManager::TmuxManager(QObject *parent)
     : QObject(parent)
 {
@@ -213,7 +227,7 @@ QString TmuxManager::capturePane(const QString &sessionName, int startLine, int 
         QStringLiteral("-E"), QString::number(endLine)
     }, &ok);
 
-    return ok ? output : QString();
+    return ok ? stripTerminalEscapes(output) : QString();
 }
 
 QString TmuxManager::getPaneWorkingDirectory(const QString &sessionName) const
@@ -320,12 +334,16 @@ void TmuxManager::capturePaneAsync(const QString &sessionName, int startLine, in
                          QString::number(startLine),
                          QStringLiteral("-E"),
                          QString::number(endLine)},
-                        callback);
+                        [callback](bool ok, const QString &output) {
+                            callback(ok, ok ? stripTerminalEscapes(output) : output);
+                        });
 }
 
 void TmuxManager::capturePaneAsync(const QString &sessionName, std::function<void(bool, const QString &)> callback)
 {
-    executeCommandAsync({QStringLiteral("capture-pane"), QStringLiteral("-t"), sessionName, QStringLiteral("-p")}, callback);
+    executeCommandAsync({QStringLiteral("capture-pane"), QStringLiteral("-t"), sessionName, QStringLiteral("-p")}, [callback](bool ok, const QString &output) {
+        callback(ok, ok ? stripTerminalEscapes(output) : output);
+    });
 }
 
 void TmuxManager::sessionExistsAsync(const QString &sessionName, std::function<void(bool)> callback)
