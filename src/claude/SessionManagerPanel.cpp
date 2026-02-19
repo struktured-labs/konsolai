@@ -118,7 +118,7 @@ void SessionManagerPanel::setupUi()
     m_treeWidget->setHeaderHidden(true);
     m_treeWidget->setRootIsDecorated(true);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_treeWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_treeWidget->setIndentation(12);
     // Column 0: session name (stretches), Column 1: indicators (fixed width, right-aligned)
     m_treeWidget->header()->setStretchLastSection(false);
@@ -1040,58 +1040,149 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     QMenu menu(this);
 
     if (meta.isDismissed) {
-        // Dismissed session context menu
-        QAction *restoreAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore"));
-        connect(restoreAction, &QAction::triggered, this, [this, sessionId]() {
-            restoreSession(sessionId);
-        });
-
-        menu.addSeparator();
-
-        QAction *purgeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Purge"));
-        connect(purgeAction, &QAction::triggered, this, [this, sessionId]() {
-            auto answer = QMessageBox::question(this,
-                                                i18n("Purge Session"),
-                                                i18n("Permanently remove this session's metadata?\n\n"
-                                                     "Project folder will NOT be affected."),
-                                                QMessageBox::Yes | QMessageBox::No,
-                                                QMessageBox::No);
-            if (answer == QMessageBox::Yes) {
-                purgeSession(sessionId);
+        // Collect all selected dismissed session IDs for batch operations
+        QStringList selectedDismissed;
+        const auto selectedItemsDismissed = m_treeWidget->selectedItems();
+        for (auto *sel : selectedItemsDismissed) {
+            if (sel->parent() == m_dismissedCategory) {
+                QString sid = sel->data(0, Qt::UserRole).toString();
+                if (!sid.isEmpty() && m_metadata.contains(sid) && m_metadata[sid].isDismissed) {
+                    selectedDismissed.append(sid);
+                }
             }
-        });
-    } else if (meta.isArchived) {
-        QAction *unarchiveAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-extract")), i18n("Unarchive && Start"));
-        connect(unarchiveAction, &QAction::triggered, this, [this, sessionId]() {
-            unarchiveSession(sessionId);
-        });
+        }
+        if (!selectedDismissed.contains(sessionId)) {
+            selectedDismissed.append(sessionId);
+        }
 
-        menu.addSeparator();
+        int selectedCount = selectedDismissed.size();
 
-        QAction *dismissAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), i18n("Dismiss"));
-        connect(dismissAction, &QAction::triggered, this, [this, sessionId]() {
-            dismissSession(sessionId);
-        });
+        if (selectedCount > 1) {
+            // Multi-selection batch menu
+            QAction *restoreAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore Selected (%1)", selectedCount));
+            connect(restoreAction, &QAction::triggered, this, [this, selectedDismissed]() {
+                for (const auto &sid : selectedDismissed) {
+                    restoreSession(sid);
+                }
+            });
 
-        if (!meta.workingDirectory.isEmpty() && QDir(meta.workingDirectory).exists()) {
-            QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
-            connect(trashAction, &QAction::triggered, this, [this, sessionId, meta]() {
+            menu.addSeparator();
+
+            QAction *purgeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Purge Selected (%1)", selectedCount));
+            connect(purgeAction, &QAction::triggered, this, [this, selectedDismissed, selectedCount]() {
                 auto answer = QMessageBox::question(this,
-                                                    i18n("Move to Trash"),
-                                                    i18n("Move this project folder to the trash?\n\n%1", meta.workingDirectory),
+                                                    i18n("Purge Sessions"),
+                                                    i18n("Permanently remove metadata for %1 dismissed session(s)?\n\n"
+                                                         "Project folders will NOT be affected.",
+                                                         selectedCount),
                                                     QMessageBox::Yes | QMessageBox::No,
                                                     QMessageBox::No);
                 if (answer == QMessageBox::Yes) {
-                    QFile dir(meta.workingDirectory);
-                    if (dir.moveToTrash()) {
-                        m_metadata.remove(sessionId);
-                        saveMetadata();
-                        updateTreeWidget();
-                    } else {
-                        QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", meta.workingDirectory));
+                    for (const auto &sid : selectedDismissed) {
+                        purgeSession(sid);
                     }
                 }
             });
+        } else {
+            // Single item menu
+            QAction *restoreAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore"));
+            connect(restoreAction, &QAction::triggered, this, [this, sessionId]() {
+                restoreSession(sessionId);
+            });
+
+            menu.addSeparator();
+
+            QAction *purgeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Purge"));
+            connect(purgeAction, &QAction::triggered, this, [this, sessionId]() {
+                auto answer = QMessageBox::question(this,
+                                                    i18n("Purge Session"),
+                                                    i18n("Permanently remove this session's metadata?\n\n"
+                                                         "Project folder will NOT be affected."),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                if (answer == QMessageBox::Yes) {
+                    purgeSession(sessionId);
+                }
+            });
+        }
+    } else if (meta.isArchived) {
+        // Collect all selected archived session IDs for batch operations
+        QStringList selectedArchived;
+        const auto selectedItems = m_treeWidget->selectedItems();
+        for (auto *sel : selectedItems) {
+            if (sel->parent() == m_archivedCategory) {
+                QString sid = sel->data(0, Qt::UserRole).toString();
+                if (!sid.isEmpty() && m_metadata.contains(sid) && m_metadata[sid].isArchived) {
+                    selectedArchived.append(sid);
+                }
+            }
+        }
+        // Ensure the right-clicked item is included
+        if (!selectedArchived.contains(sessionId)) {
+            selectedArchived.append(sessionId);
+        }
+
+        int selectedCount = selectedArchived.size();
+
+        if (selectedCount > 1) {
+            // Multi-selection batch menu
+            QAction *unarchiveAction =
+                menu.addAction(QIcon::fromTheme(QStringLiteral("archive-extract")), i18n("Unarchive && Start Selected (%1)", selectedCount));
+            connect(unarchiveAction, &QAction::triggered, this, [this, selectedArchived]() {
+                for (const auto &sid : selectedArchived) {
+                    unarchiveSession(sid);
+                }
+            });
+
+            menu.addSeparator();
+
+            QAction *dismissAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), i18n("Dismiss Selected (%1)", selectedCount));
+            connect(dismissAction, &QAction::triggered, this, [this, selectedArchived, selectedCount]() {
+                auto answer = QMessageBox::question(this,
+                                                    i18n("Dismiss Sessions"),
+                                                    i18n("Dismiss %1 archived session(s)?", selectedCount),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                if (answer == QMessageBox::Yes) {
+                    for (const auto &sid : selectedArchived) {
+                        dismissSession(sid);
+                    }
+                }
+            });
+        } else {
+            // Single item menu
+            QAction *unarchiveAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-extract")), i18n("Unarchive && Start"));
+            connect(unarchiveAction, &QAction::triggered, this, [this, sessionId]() {
+                unarchiveSession(sessionId);
+            });
+
+            menu.addSeparator();
+
+            QAction *dismissAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), i18n("Dismiss"));
+            connect(dismissAction, &QAction::triggered, this, [this, sessionId]() {
+                dismissSession(sessionId);
+            });
+
+            if (!meta.workingDirectory.isEmpty() && QDir(meta.workingDirectory).exists()) {
+                QAction *trashAction = menu.addAction(QIcon::fromTheme(QStringLiteral("user-trash")), i18n("Move to Trash..."));
+                connect(trashAction, &QAction::triggered, this, [this, sessionId, meta]() {
+                    auto answer = QMessageBox::question(this,
+                                                        i18n("Move to Trash"),
+                                                        i18n("Move this project folder to the trash?\n\n%1", meta.workingDirectory),
+                                                        QMessageBox::Yes | QMessageBox::No,
+                                                        QMessageBox::No);
+                    if (answer == QMessageBox::Yes) {
+                        QFile dir(meta.workingDirectory);
+                        if (dir.moveToTrash()) {
+                            m_metadata.remove(sessionId);
+                            saveMetadata();
+                            updateTreeWidget();
+                        } else {
+                            QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", meta.workingDirectory));
+                        }
+                    }
+                });
+            }
         }
     } else {
         // Active or detached session
