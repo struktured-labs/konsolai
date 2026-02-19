@@ -1166,7 +1166,7 @@ void ClaudeSession::startPermissionPolling()
 
     if (!m_permissionPollTimer->isActive()) {
         qDebug() << "ClaudeSession: Starting permission polling for yolo mode";
-        m_permissionPollTimer->start(300); // Poll every 300ms
+        m_permissionPollTimer->start(500); // Poll every 500ms
     }
 }
 
@@ -1507,9 +1507,6 @@ void ClaudeSession::refreshTokenUsage()
     TokenUsage usage = parseConversationTokens(newestFile);
     if (usage.totalTokens() != m_tokenUsage.totalTokens()) {
         m_tokenUsage = usage;
-        qDebug() << "ClaudeSession: Token usage updated -"
-                 << "in:" << usage.inputTokens << "out:" << usage.outputTokens << "cache_read:" << usage.cacheReadTokens
-                 << "cache_create:" << usage.cacheCreationTokens << "cost: $" << QString::number(usage.estimatedCostUSD(), 'f', 4);
         Q_EMIT tokenUsageChanged();
     }
 }
@@ -1754,7 +1751,7 @@ void ClaudeSession::startResourceTracking()
         m_resourceTimer = new QTimer(this);
         connect(m_resourceTimer, &QTimer::timeout, this, &ClaudeSession::refreshResourceUsage);
     }
-    m_resourceTimer->start(5000); // 5s interval
+    m_resourceTimer->start(15000); // 15s interval — resource stats don't need high frequency
 
     // Resolve the Claude PID asynchronously from the tmux pane PID
     if (m_tmuxManager) {
@@ -1967,7 +1964,6 @@ void ClaudeSession::refreshResourceUsage()
     // Only emit if something changed meaningfully
     if (qAbs(usage.cpuPercent - m_resourceUsage.cpuPercent) > 0.5 || usage.rssBytes != m_resourceUsage.rssBytes) {
         m_resourceUsage = usage;
-        qDebug() << "ClaudeSession: Resource usage updated - cpu:" << usage.cpuPercent << "% rss:" << (usage.rssBytes / 1048576) << "MB pid:" << m_claudePid;
         Q_EMIT resourceUsageChanged();
     }
 }

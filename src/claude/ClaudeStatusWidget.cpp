@@ -6,7 +6,6 @@
 #include "ClaudeStatusWidget.h"
 #include "ClaudeSession.h"
 
-#include <QDebug>
 #include <QHBoxLayout>
 
 namespace Konsolai
@@ -31,7 +30,7 @@ ClaudeStatusWidget::ClaudeStatusWidget(QWidget *parent)
     layout->addWidget(m_taskLabel);
 
     // Setup spinner timer
-    m_spinnerTimer->setInterval(80);  // ~12 FPS
+    m_spinnerTimer->setInterval(150); // ~7 FPS — smooth enough for text spinner
     connect(m_spinnerTimer, &QTimer::timeout, this, &ClaudeStatusWidget::updateSpinner);
 
     updateDisplay();
@@ -68,7 +67,7 @@ void ClaudeStatusWidget::setSession(ClaudeSession *session)
 
         // Update with current state - use Idle if session is running
         ClaudeProcess::State initialState = m_session->claudeState();
-        qDebug() << "ClaudeStatusWidget::setSession - initial state:" << static_cast<int>(initialState) << "isRunning:" << m_session->isRunning();
+        // Use Idle if session is running but process reports NotRunning (startup race)
         if (initialState == ClaudeProcess::State::NotRunning && m_session->isRunning()) {
             initialState = ClaudeProcess::State::Idle;
         }
@@ -96,7 +95,6 @@ void ClaudeStatusWidget::clearSession()
 
 void ClaudeStatusWidget::updateState(ClaudeProcess::State state)
 {
-    qDebug() << "ClaudeStatusWidget::updateState:" << static_cast<int>(state) << "(was:" << static_cast<int>(m_currentState) << ")";
     m_currentState = state;
 
     // Start/stop spinner based on state

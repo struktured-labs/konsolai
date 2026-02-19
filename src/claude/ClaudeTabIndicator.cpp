@@ -19,7 +19,7 @@ ClaudeTabIndicator::ClaudeTabIndicator(QWidget *parent)
 {
     setFixedSize(SIZE, SIZE);
 
-    m_animationTimer->setInterval(100); // 10 FPS
+    m_animationTimer->setInterval(200); // 5 FPS — enough for a small spinner dot
     connect(m_animationTimer, &QTimer::timeout, this, &ClaudeTabIndicator::updateAnimation);
 
     m_suggestionDelayTimer->setSingleShot(true);
@@ -185,7 +185,7 @@ void ClaudeTabIndicator::onSuggestionDelayElapsed()
 
 void ClaudeTabIndicator::updateAnimation()
 {
-    m_animationPhase += 0.05;
+    m_animationPhase += 0.10;
     if (m_animationPhase >= 1.0) {
         m_animationPhase = 0.0;
     }
