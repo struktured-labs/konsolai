@@ -9,6 +9,7 @@
 
 // Qt
 #include <QRegularExpression>
+#include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTest>
 
@@ -165,6 +166,271 @@ void TmuxManagerTest::testVersion()
         QString version = TmuxManager::version();
         QVERIFY(!version.isEmpty());
     }
+}
+
+// ============================================================
+// Session name sanitization
+// ============================================================
+
+void TmuxManagerTest::testBuildSessionNameSanitizesChars()
+{
+    // Dots and colons should be replaced with hyphens
+    QString name = TmuxManager::buildSessionName(QStringLiteral("my.profile"), QStringLiteral("a1b2c3d4"));
+    QVERIFY(!name.contains(QLatin1Char('.')));
+    QCOMPARE(name, QStringLiteral("konsolai-my-profile-a1b2c3d4"));
+
+    QString name2 = TmuxManager::buildSessionName(QStringLiteral("host:8080"), QStringLiteral("deadbeef"));
+    QVERIFY(!name2.contains(QLatin1Char(':')));
+    QCOMPARE(name2, QStringLiteral("konsolai-host-8080-deadbeef"));
+}
+
+// ============================================================
+// Session ID uniqueness
+// ============================================================
+
+void TmuxManagerTest::testSessionIdUniqueness()
+{
+    QSet<QString> ids;
+    const int count = 100;
+
+    for (int i = 0; i < count; ++i) {
+        ids.insert(TmuxManager::generateSessionId());
+    }
+
+    // All should be unique (probabilistically — 2^32 space, 100 samples)
+    QCOMPARE(ids.size(), count);
+}
+
+// ============================================================
+// Command building edge cases
+// ============================================================
+
+void TmuxManagerTest::testBuildNewSessionCommandNoAttach()
+{
+    TmuxManager manager;
+
+    QString cmd = manager.buildNewSessionCommand(QStringLiteral("konsolai-test-12345678"),
+                                                 QStringLiteral("claude"),
+                                                 false // attachExisting = false
+    );
+
+    QVERIFY(cmd.contains(QStringLiteral("tmux")));
+    QVERIFY(cmd.contains(QStringLiteral("new-session")));
+    // Should NOT contain -A flag
+    QVERIFY(!cmd.contains(QStringLiteral(" -A ")));
+    QVERIFY(!cmd.contains(QStringLiteral(" -A\n")));
+}
+
+void TmuxManagerTest::testBuildNewSessionCommandPassthrough()
+{
+    TmuxManager manager;
+
+    QString cmd = manager.buildNewSessionCommand(QStringLiteral("konsolai-test-12345678"), QStringLiteral("claude"));
+
+    // Should suppress DCS passthrough
+    QVERIFY(cmd.contains(QStringLiteral("allow-passthrough")));
+    QVERIFY(cmd.contains(QStringLiteral("off")));
+}
+
+// ============================================================
+// Execution tests (require tmux)
+// ============================================================
+
+void TmuxManagerTest::testSessionExistsNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    QVERIFY(!manager.sessionExists(QStringLiteral("konsolai-nonexistent-99999999")));
+}
+
+void TmuxManagerTest::testListSessionsWhenAvailable()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    // Should not crash even if no sessions exist
+    QList<TmuxManager::SessionInfo> sessions = manager.listSessions();
+    Q_UNUSED(sessions)
+
+    // Also test listKonsolaiSessions
+    QList<TmuxManager::SessionInfo> konsolaiSessions = manager.listKonsolaiSessions();
+    // All returned sessions should match the konsolai- prefix
+    for (const auto &s : konsolaiSessions) {
+        QVERIFY(s.name.startsWith(QStringLiteral("konsolai-")));
+    }
+}
+
+void TmuxManagerTest::testKillNonexistentSession()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    QSignalSpy errorSpy(&manager, &TmuxManager::errorOccurred);
+
+    bool result = manager.killSession(QStringLiteral("konsolai-nonexistent-99999999"));
+    QVERIFY(!result);
+}
+
+void TmuxManagerTest::testCapturePaneNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    QString output = manager.capturePane(QStringLiteral("konsolai-nonexistent-99999999"));
+    QVERIFY(output.isEmpty());
+}
+
+void TmuxManagerTest::testSendKeysNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool result = manager.sendKeys(QStringLiteral("konsolai-nonexistent-99999999"), QStringLiteral("hello\n"));
+    QVERIFY(!result);
+}
+
+void TmuxManagerTest::testSendKeySequenceNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool result = manager.sendKeySequence(QStringLiteral("konsolai-nonexistent-99999999"), QStringLiteral("Enter"));
+    QVERIFY(!result);
+}
+
+void TmuxManagerTest::testGetPaneWorkingDirNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    QString dir = manager.getPaneWorkingDirectory(QStringLiteral("konsolai-nonexistent-99999999"));
+    QVERIFY(dir.isEmpty());
+}
+
+void TmuxManagerTest::testGetPanePidNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    qint64 pid = manager.getPanePid(QStringLiteral("konsolai-nonexistent-99999999"));
+    QCOMPARE(pid, qint64(0));
+}
+
+// ============================================================
+// Async execution tests (require tmux)
+// ============================================================
+
+void TmuxManagerTest::testSessionExistsAsyncNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    bool exists = true;
+
+    manager.sessionExistsAsync(QStringLiteral("konsolai-nonexistent-99999999"), [&](bool result) {
+        callbackCalled = true;
+        exists = result;
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    QVERIFY(!exists);
+}
+
+void TmuxManagerTest::testCapturePaneAsyncNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    bool ok = true;
+
+    manager.capturePaneAsync(QStringLiteral("konsolai-nonexistent-99999999"), -10, 10, [&](bool success, const QString &output) {
+        callbackCalled = true;
+        ok = success;
+        Q_UNUSED(output)
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    QVERIFY(!ok);
+}
+
+void TmuxManagerTest::testListKonsolaiSessionsAsync()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    QList<TmuxManager::SessionInfo> result;
+
+    manager.listKonsolaiSessionsAsync([&](const QList<TmuxManager::SessionInfo> &sessions) {
+        callbackCalled = true;
+        result = sessions;
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    // All results should match konsolai- prefix
+    for (const auto &s : result) {
+        QVERIFY(s.name.startsWith(QStringLiteral("konsolai-")));
+    }
+}
+
+void TmuxManagerTest::testGetPanePidAsyncNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    qint64 pid = -1;
+
+    manager.getPanePidAsync(QStringLiteral("konsolai-nonexistent-99999999"), [&](qint64 result) {
+        callbackCalled = true;
+        pid = result;
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    QCOMPARE(pid, qint64(0));
 }
 
 QTEST_GUILESS_MAIN(TmuxManagerTest)

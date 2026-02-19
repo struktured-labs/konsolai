@@ -68,6 +68,12 @@ private Q_SLOTS:
     void testMetadataCorruptedJson();
     void testMetadataMissingFields();
     void testMetadataApprovalCountPersistence();
+
+    // Full round-trip with ALL fields
+    void testMetadataAllFieldsRoundTrip();
+    void testMetadataApprovalLogRoundTrip();
+    void testMetadataMultipleSessionsRoundTrip();
+    void testMetadataSaveLoadIdempotent();
 };
 
 }

@@ -560,6 +560,277 @@ void SessionManagerPanelTest::testMetadataApprovalCountPersistence()
     QCOMPARE(all[0].tripleYoloApprovalCount, 3);
 }
 
+// ============================================================
+// Full round-trip with ALL fields
+// ============================================================
+
+void SessionManagerPanelTest::testMetadataAllFieldsRoundTrip()
+{
+    // Create a session with EVERY field populated
+    QJsonArray sessions;
+    QJsonObject s;
+    s[QStringLiteral("sessionId")] = QStringLiteral("all11111");
+    s[QStringLiteral("sessionName")] = QStringLiteral("konsolai-test-all11111");
+    s[QStringLiteral("profileName")] = QStringLiteral("FullProfile");
+    s[QStringLiteral("workingDirectory")] = QStringLiteral("/home/user/big-project");
+    s[QStringLiteral("isPinned")] = true;
+    s[QStringLiteral("isArchived")] = false;
+    s[QStringLiteral("isExpired")] = false;
+    s[QStringLiteral("isDismissed")] = false;
+    s[QStringLiteral("lastAccessed")] = QStringLiteral("2025-12-25T23:59:59");
+    s[QStringLiteral("createdAt")] = QStringLiteral("2025-01-01T00:00:00");
+    // SSH fields
+    s[QStringLiteral("isRemote")] = true;
+    s[QStringLiteral("sshHost")] = QStringLiteral("prod.example.com");
+    s[QStringLiteral("sshUsername")] = QStringLiteral("deployer");
+    s[QStringLiteral("sshPort")] = 2222;
+    // Yolo fields
+    s[QStringLiteral("yoloMode")] = true;
+    s[QStringLiteral("doubleYoloMode")] = true;
+    s[QStringLiteral("tripleYoloMode")] = true;
+    // Approval counts
+    s[QStringLiteral("yoloApprovalCount")] = 100;
+    s[QStringLiteral("doubleYoloApprovalCount")] = 50;
+    s[QStringLiteral("tripleYoloApprovalCount")] = 25;
+    // Budget fields
+    s[QStringLiteral("budgetTimeLimitMinutes")] = 120;
+    s[QStringLiteral("budgetCostCeilingUSD")] = 10.99;
+    s[QStringLiteral("budgetTokenCeiling")] = 500000;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    // Load, modify, save, and reload
+    {
+        SessionManagerPanel panel;
+        QList<SessionMetadata> all = panel.allSessions();
+        QCOMPARE(all.size(), 1);
+
+        const auto &m = all[0];
+        // Verify all fields loaded correctly
+        QCOMPARE(m.sessionId, QStringLiteral("all11111"));
+        QCOMPARE(m.sessionName, QStringLiteral("konsolai-test-all11111"));
+        QCOMPARE(m.profileName, QStringLiteral("FullProfile"));
+        QCOMPARE(m.workingDirectory, QStringLiteral("/home/user/big-project"));
+        QVERIFY(m.isPinned);
+        QVERIFY(!m.isArchived);
+        QVERIFY(!m.isExpired);
+        QVERIFY(!m.isDismissed);
+        QVERIFY(m.isRemote);
+        QCOMPARE(m.sshHost, QStringLiteral("prod.example.com"));
+        QCOMPARE(m.sshUsername, QStringLiteral("deployer"));
+        QCOMPARE(m.sshPort, 2222);
+        QVERIFY(m.yoloMode);
+        QVERIFY(m.doubleYoloMode);
+        QVERIFY(m.tripleYoloMode);
+        QCOMPARE(m.yoloApprovalCount, 100);
+        QCOMPARE(m.doubleYoloApprovalCount, 50);
+        QCOMPARE(m.tripleYoloApprovalCount, 25);
+        QCOMPARE(m.budgetTimeLimitMinutes, 120);
+        QCOMPARE(m.budgetCostCeilingUSD, 10.99);
+        QCOMPARE(m.budgetTokenCeiling, static_cast<quint64>(500000));
+
+        // Panel destructor saves metadata
+    }
+
+    // Reload and verify persistence
+    {
+        SessionManagerPanel panel2;
+        QList<SessionMetadata> all = panel2.allSessions();
+        QCOMPARE(all.size(), 1);
+
+        const auto &m = all[0];
+        QCOMPARE(m.sessionId, QStringLiteral("all11111"));
+        QVERIFY(m.isPinned);
+        QVERIFY(m.isRemote);
+        QCOMPARE(m.sshHost, QStringLiteral("prod.example.com"));
+        QCOMPARE(m.sshPort, 2222);
+        QVERIFY(m.yoloMode);
+        QVERIFY(m.doubleYoloMode);
+        QVERIFY(m.tripleYoloMode);
+        QCOMPARE(m.yoloApprovalCount, 100);
+        QCOMPARE(m.doubleYoloApprovalCount, 50);
+        QCOMPARE(m.tripleYoloApprovalCount, 25);
+        QCOMPARE(m.budgetTimeLimitMinutes, 120);
+        QCOMPARE(m.budgetCostCeilingUSD, 10.99);
+        QCOMPARE(m.budgetTokenCeiling, static_cast<quint64>(500000));
+    }
+}
+
+void SessionManagerPanelTest::testMetadataApprovalLogRoundTrip()
+{
+    // Create session with approval log entries
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("log11111"), QStringLiteral("konsolai-test-log11111"));
+
+    QJsonArray logEntries;
+    {
+        QJsonObject entry;
+        entry[QStringLiteral("time")] = QStringLiteral("2025-06-15T10:00:00");
+        entry[QStringLiteral("tool")] = QStringLiteral("Bash");
+        entry[QStringLiteral("action")] = QStringLiteral("auto-approved");
+        entry[QStringLiteral("level")] = 1;
+        entry[QStringLiteral("tokens")] = 5000;
+        entry[QStringLiteral("cost")] = 0.05;
+        logEntries.append(entry);
+    }
+    {
+        QJsonObject entry;
+        entry[QStringLiteral("time")] = QStringLiteral("2025-06-15T10:01:00");
+        entry[QStringLiteral("tool")] = QStringLiteral("suggestion");
+        entry[QStringLiteral("action")] = QStringLiteral("auto-accepted");
+        entry[QStringLiteral("level")] = 2;
+        entry[QStringLiteral("tokens")] = 10000;
+        entry[QStringLiteral("cost")] = 0.10;
+        logEntries.append(entry);
+    }
+
+    s[QStringLiteral("approvalLog")] = logEntries;
+    s[QStringLiteral("yoloApprovalCount")] = 1;
+    s[QStringLiteral("doubleYoloApprovalCount")] = 1;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].yoloApprovalCount, 1);
+    QCOMPARE(all[0].doubleYoloApprovalCount, 1);
+    QCOMPARE(all[0].approvalLog.size(), 2);
+
+    // Verify first entry
+    const auto &e1 = all[0].approvalLog[0];
+    QCOMPARE(e1.toolName, QStringLiteral("Bash"));
+    QCOMPARE(e1.action, QStringLiteral("auto-approved"));
+    QCOMPARE(e1.yoloLevel, 1);
+    QCOMPARE(e1.totalTokens, quint64(5000));
+    QCOMPARE(e1.estimatedCostUSD, 0.05);
+
+    // Verify second entry
+    const auto &e2 = all[0].approvalLog[1];
+    QCOMPARE(e2.toolName, QStringLiteral("suggestion"));
+    QCOMPARE(e2.yoloLevel, 2);
+}
+
+void SessionManagerPanelTest::testMetadataMultipleSessionsRoundTrip()
+{
+    // Test that multiple sessions with different field combinations all persist correctly
+    QJsonArray sessions;
+
+    // Session 1: pinned, local, no yolo
+    QJsonObject s1 = makeSession(QStringLiteral("mul11111"), QStringLiteral("konsolai-test-mul11111"), true, false);
+
+    // Session 2: archived, remote, yolo enabled
+    QJsonObject s2 = makeSession(QStringLiteral("mul22222"), QStringLiteral("konsolai-test-mul22222"), false, true);
+    s2[QStringLiteral("isRemote")] = true;
+    s2[QStringLiteral("sshHost")] = QStringLiteral("dev.example.com");
+    s2[QStringLiteral("yoloMode")] = true;
+
+    // Session 3: dismissed, with budget
+    QJsonObject s3 = makeSession(QStringLiteral("mul33333"), QStringLiteral("konsolai-test-mul33333"), false, true);
+    s3[QStringLiteral("isDismissed")] = true;
+    s3[QStringLiteral("budgetTimeLimitMinutes")] = 30;
+    s3[QStringLiteral("budgetCostCeilingUSD")] = 2.50;
+
+    sessions.append(s1);
+    sessions.append(s2);
+    sessions.append(s3);
+    writeTestSessions(sessions);
+
+    {
+        SessionManagerPanel panel;
+        QList<SessionMetadata> all = panel.allSessions();
+        QCOMPARE(all.size(), 3);
+        // Panel destructor saves
+    }
+
+    // Reload
+    SessionManagerPanel panel2;
+    QList<SessionMetadata> all = panel2.allSessions();
+    QCOMPARE(all.size(), 3);
+
+    // Find each session and verify
+    SessionMetadata *m1 = nullptr;
+    SessionMetadata *m2 = nullptr;
+    SessionMetadata *m3 = nullptr;
+    for (auto &m : all) {
+        if (m.sessionId == QStringLiteral("mul11111"))
+            m1 = &m;
+        else if (m.sessionId == QStringLiteral("mul22222"))
+            m2 = &m;
+        else if (m.sessionId == QStringLiteral("mul33333"))
+            m3 = &m;
+    }
+
+    QVERIFY(m1);
+    QVERIFY(m1->isPinned);
+    QVERIFY(!m1->isRemote);
+
+    QVERIFY(m2);
+    QVERIFY(m2->isArchived);
+    QVERIFY(m2->isRemote);
+    QCOMPARE(m2->sshHost, QStringLiteral("dev.example.com"));
+    QVERIFY(m2->yoloMode);
+
+    QVERIFY(m3);
+    QVERIFY(m3->isDismissed);
+    QCOMPARE(m3->budgetTimeLimitMinutes, 30);
+    QCOMPARE(m3->budgetCostCeilingUSD, 2.50);
+}
+
+void SessionManagerPanelTest::testMetadataSaveLoadIdempotent()
+{
+    // Save, load, save again — result should be identical
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("idem1111"), QStringLiteral("konsolai-test-idem1111"), true, false);
+    s[QStringLiteral("yoloMode")] = true;
+    s[QStringLiteral("budgetTimeLimitMinutes")] = 45;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    // First load & save
+    {
+        SessionManagerPanel panel;
+        QCOMPARE(panel.allSessions().size(), 1);
+    }
+
+    // Read file after first save
+    QFile file1(sessionsFilePath());
+    QVERIFY(file1.open(QIODevice::ReadOnly));
+    QByteArray data1 = file1.readAll();
+    file1.close();
+
+    // Second load & save
+    {
+        SessionManagerPanel panel;
+        QCOMPARE(panel.allSessions().size(), 1);
+    }
+
+    // Read file after second save
+    QFile file2(sessionsFilePath());
+    QVERIFY(file2.open(QIODevice::ReadOnly));
+    QByteArray data2 = file2.readAll();
+    file2.close();
+
+    // Parse both and compare session count and key fields (exact byte comparison
+    // may differ due to JSON key ordering or whitespace)
+    QJsonDocument doc1 = QJsonDocument::fromJson(data1);
+    QJsonDocument doc2 = QJsonDocument::fromJson(data2);
+    QVERIFY(!doc1.isNull());
+    QVERIFY(!doc2.isNull());
+
+    QJsonArray arr1 = doc1.array();
+    QJsonArray arr2 = doc2.array();
+    QCOMPARE(arr1.size(), arr2.size());
+    QCOMPARE(arr1.size(), 1);
+
+    QJsonObject o1 = arr1[0].toObject();
+    QJsonObject o2 = arr2[0].toObject();
+    QCOMPARE(o1.value(QStringLiteral("sessionId")).toString(), o2.value(QStringLiteral("sessionId")).toString());
+    QCOMPARE(o1.value(QStringLiteral("isPinned")).toBool(), o2.value(QStringLiteral("isPinned")).toBool());
+    QCOMPARE(o1.value(QStringLiteral("yoloMode")).toBool(), o2.value(QStringLiteral("yoloMode")).toBool());
+    QCOMPARE(o1.value(QStringLiteral("budgetTimeLimitMinutes")).toInt(), o2.value(QStringLiteral("budgetTimeLimitMinutes")).toInt());
+}
+
 QTEST_MAIN(SessionManagerPanelTest)
 
 #include "moc_SessionManagerPanelTest.cpp"

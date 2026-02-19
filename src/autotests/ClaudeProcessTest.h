@@ -79,6 +79,13 @@ private Q_SLOTS:
     void testTeammateIdleEvent();
     void testTaskCompletedEvent();
     void testTeamEventMissingFields();
+
+    // Yolo approval flow via ClaudeProcess
+    void testYoloApprovalDoesNotChangeState();
+    void testYoloApprovalMultipleTools();
+    void testYoloApprovalMissingToolName();
+    void testYoloApprovalThenManualPermission();
+    void testYoloApprovalCountsWithSpy();
 };
 
 }

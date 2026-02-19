@@ -589,6 +589,125 @@ void ClaudeProcessTest::testTeamEventMissingFields()
     }
 }
 
+// ============================================================
+// Yolo approval flow via ClaudeProcess
+// ============================================================
+
+void ClaudeProcessTest::testYoloApprovalDoesNotChangeState()
+{
+    ClaudeProcess process;
+
+    // Start in Working state
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+    QSignalSpy yoloSpy(&process, &ClaudeProcess::yoloApprovalOccurred);
+
+    // Yolo-approved PermissionRequest should NOT change state
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    data[QStringLiteral("yolo_approved")] = true;
+
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(yoloSpy.count(), 1);
+    QCOMPARE(stateSpy.count(), 0); // State did NOT change
+    QCOMPARE(process.state(), ClaudeProcess::State::Working); // Still Working
+}
+
+void ClaudeProcessTest::testYoloApprovalMultipleTools()
+{
+    ClaudeProcess process;
+    QSignalSpy yoloSpy(&process, &ClaudeProcess::yoloApprovalOccurred);
+    QSignalSpy permSpy(&process, &ClaudeProcess::permissionRequested);
+
+    // Rapid yolo approvals for different tools
+    QStringList tools = {QStringLiteral("Bash"), QStringLiteral("Write"), QStringLiteral("Read"), QStringLiteral("Edit")};
+
+    for (const QString &tool : tools) {
+        QJsonObject data;
+        data[QStringLiteral("tool_name")] = tool;
+        data[QStringLiteral("yolo_approved")] = true;
+        process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+    }
+
+    QCOMPARE(yoloSpy.count(), 4);
+    QCOMPARE(permSpy.count(), 0); // None went to manual approval
+
+    // Verify each tool name was captured
+    QCOMPARE(yoloSpy.at(0).at(0).toString(), QStringLiteral("Bash"));
+    QCOMPARE(yoloSpy.at(1).at(0).toString(), QStringLiteral("Write"));
+    QCOMPARE(yoloSpy.at(2).at(0).toString(), QStringLiteral("Read"));
+    QCOMPARE(yoloSpy.at(3).at(0).toString(), QStringLiteral("Edit"));
+}
+
+void ClaudeProcessTest::testYoloApprovalMissingToolName()
+{
+    ClaudeProcess process;
+    QSignalSpy yoloSpy(&process, &ClaudeProcess::yoloApprovalOccurred);
+
+    // yolo_approved=true but no tool_name
+    QJsonObject data;
+    data[QStringLiteral("yolo_approved")] = true;
+
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(yoloSpy.count(), 1);
+    QVERIFY(yoloSpy.at(0).at(0).toString().isEmpty()); // Empty tool name
+}
+
+void ClaudeProcessTest::testYoloApprovalThenManualPermission()
+{
+    ClaudeProcess process;
+    QSignalSpy yoloSpy(&process, &ClaudeProcess::yoloApprovalOccurred);
+    QSignalSpy permSpy(&process, &ClaudeProcess::permissionRequested);
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+
+    // First: yolo-approved
+    QJsonObject data1;
+    data1[QStringLiteral("tool_name")] = QStringLiteral("Read");
+    data1[QStringLiteral("yolo_approved")] = true;
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data1).toJson()));
+
+    QCOMPARE(yoloSpy.count(), 1);
+    QCOMPARE(permSpy.count(), 0);
+
+    // Second: manual approval needed
+    QJsonObject data2;
+    data2[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    data2[QStringLiteral("tool_input")] = QStringLiteral("rm -rf /");
+    data2[QStringLiteral("yolo_approved")] = false;
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data2).toJson()));
+
+    QCOMPARE(yoloSpy.count(), 1); // Still just the one yolo
+    QCOMPARE(permSpy.count(), 1); // Manual approval emitted
+    QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
+}
+
+void ClaudeProcessTest::testYoloApprovalCountsWithSpy()
+{
+    ClaudeProcess process;
+    QSignalSpy yoloSpy(&process, &ClaudeProcess::yoloApprovalOccurred);
+
+    // Send 10 yolo approvals
+    for (int i = 0; i < 10; ++i) {
+        QJsonObject data;
+        data[QStringLiteral("tool_name")] = QStringLiteral("Tool_%1").arg(i);
+        data[QStringLiteral("yolo_approved")] = true;
+        process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+    }
+
+    QCOMPARE(yoloSpy.count(), 10);
+
+    // Verify all unique tool names
+    QSet<QString> toolNames;
+    for (int i = 0; i < 10; ++i) {
+        toolNames.insert(yoloSpy.at(i).at(0).toString());
+    }
+    QCOMPARE(toolNames.size(), 10);
+}
+
 QTEST_GUILESS_MAIN(ClaudeProcessTest)
 
 #include "moc_ClaudeProcessTest.cpp"

@@ -1166,7 +1166,7 @@ void ClaudeSession::startPermissionPolling()
 
     if (!m_permissionPollTimer->isActive()) {
         qDebug() << "ClaudeSession: Starting permission polling for yolo mode";
-        m_permissionPollTimer->start(500); // Poll every 500ms
+        m_permissionPollTimer->start(300); // Poll every 300ms
     }
 }
 
@@ -2060,6 +2060,21 @@ void ClaudeSession::removeHooksFromProjectSettings()
     QString mySocket = m_hookHandler ? m_hookHandler->socketPath() : QString();
     if (mySocket.isEmpty()) {
         return;
+    }
+
+    // Guard against reattach race condition: if a replacement session with the
+    // same session ID is already registered in the registry, it owns the hooks
+    // now.  Our destructor (via deleteLater) runs AFTER the new session wrote
+    // its hooks, so removing them here would break the new session's yolo mode.
+    auto *registry = ClaudeSessionRegistry::instance();
+    if (registry) {
+        const auto active = registry->activeSessions();
+        for (auto *session : active) {
+            if (session != this && session->sessionId() == m_sessionId) {
+                qDebug() << "ClaudeSession: Skipping hook cleanup — replacement session active for ID:" << m_sessionId;
+                return;
+            }
+        }
     }
 
     QJsonObject hooks = settings[QStringLiteral("hooks")].toObject();

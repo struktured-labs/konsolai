@@ -19,6 +19,7 @@ class ClaudeHookHandlerTest : public QObject
 private Q_SLOTS:
     void initTestCase();
     void cleanupTestCase();
+    void cleanup();
 
     // Socket path tests
     void testSocketPath();
@@ -44,6 +45,28 @@ private Q_SLOTS:
     void testClientConnectedSignal();
     void testClientDisconnectedSignal();
     void testErrorSignal();
+
+    // TCP mode tests
+    void testModeDefaultIsUnixSocket();
+    void testTcpStartStop();
+    void testTcpClientConnection();
+    void testTcpReceiveEvent();
+    void testTcpConnectionString();
+    void testTcpMultipleClients();
+    void testTcpMalformedJson();
+    void testTcpClientDisconnect();
+    void testConnectionStringUnixSocket();
+
+    // Remote hook config tests
+    void testGenerateRemoteHookScript();
+    void testGenerateRemoteHooksConfig();
+
+    // Missing event_type field
+    void testMissingEventType();
+
+    // ClaudeHookClient tests
+    void testHookClientSendEvent();
+    void testHookClientConnectionFailure();
 };
 
 }

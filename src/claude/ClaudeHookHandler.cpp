@@ -202,19 +202,21 @@ void ClaudeHookHandler::stop()
         QFile::remove(m_socketPath);
     }
 
+    // Close all TCP client connections BEFORE deleting the server,
+    // because nextPendingConnection() sockets are children of QTcpServer.
+    for (QTcpSocket *client : std::as_const(m_tcpClients)) {
+        client->setParent(nullptr); // Detach from server to prevent double-free
+        client->disconnectFromHost();
+        client->deleteLater();
+    }
+    m_tcpClients.clear();
+
     // Stop TCP server
     if (m_tcpServer) {
         m_tcpServer->close();
         delete m_tcpServer;
         m_tcpServer = nullptr;
     }
-
-    // Close all TCP client connections
-    for (QTcpSocket *client : std::as_const(m_tcpClients)) {
-        client->disconnectFromHost();
-        client->deleteLater();
-    }
-    m_tcpClients.clear();
     m_tcpPort = 0;
 }
 

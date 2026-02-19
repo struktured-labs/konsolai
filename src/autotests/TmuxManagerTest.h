@@ -36,6 +36,32 @@ private Q_SLOTS:
     // Availability tests
     void testIsAvailable();
     void testVersion();
+
+    // Session name sanitization
+    void testBuildSessionNameSanitizesChars();
+
+    // Session ID uniqueness
+    void testSessionIdUniqueness();
+
+    // Command building edge cases
+    void testBuildNewSessionCommandNoAttach();
+    void testBuildNewSessionCommandPassthrough();
+
+    // Execution tests (require tmux)
+    void testSessionExistsNonexistent();
+    void testListSessionsWhenAvailable();
+    void testKillNonexistentSession();
+    void testCapturePaneNonexistent();
+    void testSendKeysNonexistent();
+    void testSendKeySequenceNonexistent();
+    void testGetPaneWorkingDirNonexistent();
+    void testGetPanePidNonexistent();
+
+    // Async execution tests (require tmux)
+    void testSessionExistsAsyncNonexistent();
+    void testCapturePaneAsyncNonexistent();
+    void testListKonsolaiSessionsAsync();
+    void testGetPanePidAsyncNonexistent();
 };
 
 }
