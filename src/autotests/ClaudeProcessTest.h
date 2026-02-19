@@ -69,6 +69,16 @@ private Q_SLOTS:
 
     // PreToolUse task description
     void testPreToolUseSetsTask();
+
+    // Subagent events
+    void testSubagentStartEvent();
+    void testSubagentStopEvent();
+    void testSubagentStartMissingFields();
+
+    // Team events
+    void testTeammateIdleEvent();
+    void testTaskCompletedEvent();
+    void testTeamEventMissingFields();
 };
 
 }

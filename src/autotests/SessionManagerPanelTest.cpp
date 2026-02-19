@@ -348,6 +348,218 @@ void SessionManagerPanelTest::testMetadataSshFields()
     QCOMPARE(all[0].sshPort, 2222);
 }
 
+// ============================================================
+// Dismiss / Restore / Purge lifecycle
+// ============================================================
+
+void SessionManagerPanelTest::testDismissSession()
+{
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("dis11111"), QStringLiteral("konsolai-test-dis11111"), false, true));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QCOMPARE(panel.archivedSessions().size(), 1);
+
+    panel.dismissSession(QStringLiteral("dis11111"));
+
+    // Still isArchived=true, but now also isDismissed=true
+    // archivedSessions() returns all isArchived regardless of isDismissed
+    QCOMPARE(panel.archivedSessions().size(), 1);
+    QCOMPARE(panel.allSessions().size(), 1);
+    QVERIFY(panel.allSessions()[0].isDismissed);
+    QVERIFY(panel.allSessions()[0].isArchived);
+}
+
+void SessionManagerPanelTest::testDismissNonexistentSession()
+{
+    SessionManagerPanel panel;
+    panel.dismissSession(QStringLiteral("nonexistent"));
+    QCOMPARE(panel.allSessions().size(), 0);
+}
+
+void SessionManagerPanelTest::testRestoreSession()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("rst11111"), QStringLiteral("konsolai-test-rst11111"), false, true);
+    s[QStringLiteral("isDismissed")] = true;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    // archivedSessions() includes dismissed (isArchived is still true)
+    QCOMPARE(panel.archivedSessions().size(), 1);
+    QVERIFY(panel.allSessions()[0].isDismissed);
+
+    panel.restoreSession(QStringLiteral("rst11111"));
+
+    // Should no longer be dismissed, still archived
+    QCOMPARE(panel.archivedSessions().size(), 1);
+    QVERIFY(!panel.archivedSessions()[0].isDismissed);
+    QVERIFY(panel.archivedSessions()[0].isArchived);
+}
+
+void SessionManagerPanelTest::testRestoreNonexistentSession()
+{
+    SessionManagerPanel panel;
+    panel.restoreSession(QStringLiteral("nonexistent"));
+    QCOMPARE(panel.allSessions().size(), 0);
+}
+
+void SessionManagerPanelTest::testPurgeSession()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("prg11111"), QStringLiteral("konsolai-test-prg11111"), false, true);
+    s[QStringLiteral("isDismissed")] = true;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QCOMPARE(panel.allSessions().size(), 1);
+
+    panel.purgeSession(QStringLiteral("prg11111"));
+    QCOMPARE(panel.allSessions().size(), 0);
+}
+
+void SessionManagerPanelTest::testPurgeNonexistentSession()
+{
+    SessionManagerPanel panel;
+    panel.purgeSession(QStringLiteral("nonexistent"));
+    QCOMPARE(panel.allSessions().size(), 0);
+}
+
+void SessionManagerPanelTest::testPurgeDismissed()
+{
+    QJsonArray sessions;
+    QJsonObject s1 = makeSession(QStringLiteral("pd111111"), QStringLiteral("konsolai-test-pd111111"), false, true);
+    s1[QStringLiteral("isDismissed")] = true;
+    QJsonObject s2 = makeSession(QStringLiteral("pd222222"), QStringLiteral("konsolai-test-pd222222"), false, true);
+    s2[QStringLiteral("isDismissed")] = true;
+    QJsonObject s3 = makeSession(QStringLiteral("pd333333"), QStringLiteral("konsolai-test-pd333333"), false, true);
+    // s3 is archived but NOT dismissed
+    sessions.append(s1);
+    sessions.append(s2);
+    sessions.append(s3);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QCOMPARE(panel.allSessions().size(), 3);
+
+    panel.purgeDismissed();
+
+    // Only the non-dismissed one should remain
+    QCOMPARE(panel.allSessions().size(), 1);
+    QCOMPARE(panel.allSessions()[0].sessionId, QStringLiteral("pd333333"));
+}
+
+void SessionManagerPanelTest::testDismissRestorePurgeRoundTrip()
+{
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("rnd11111"), QStringLiteral("konsolai-test-rnd11111"), false, true));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+
+    // Start: archived
+    QCOMPARE(panel.archivedSessions().size(), 1);
+
+    // Dismiss — still in archivedSessions() since isArchived stays true
+    panel.dismissSession(QStringLiteral("rnd11111"));
+    QCOMPARE(panel.archivedSessions().size(), 1);
+    QVERIFY(panel.allSessions()[0].isDismissed);
+
+    // Restore
+    panel.restoreSession(QStringLiteral("rnd11111"));
+    QCOMPARE(panel.archivedSessions().size(), 1);
+    QVERIFY(!panel.allSessions()[0].isDismissed);
+
+    // Dismiss again and purge
+    panel.dismissSession(QStringLiteral("rnd11111"));
+    panel.purgeSession(QStringLiteral("rnd11111"));
+    QCOMPARE(panel.allSessions().size(), 0);
+}
+
+// ============================================================
+// Additional metadata persistence tests
+// ============================================================
+
+void SessionManagerPanelTest::testMetadataBudgetPersistence()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("bgt11111"), QStringLiteral("konsolai-test-bgt11111"));
+    s[QStringLiteral("budgetTimeLimitMinutes")] = 60;
+    s[QStringLiteral("budgetCostCeilingUSD")] = 5.50;
+    s[QStringLiteral("budgetTokenCeiling")] = 100000;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].budgetTimeLimitMinutes, 60);
+    QCOMPARE(all[0].budgetCostCeilingUSD, 5.50);
+    QCOMPARE(all[0].budgetTokenCeiling, static_cast<quint64>(100000));
+}
+
+void SessionManagerPanelTest::testMetadataCorruptedJson()
+{
+    // Write garbage to the sessions file
+    QString path = sessionsFilePath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("this is not valid json {{{");
+    file.close();
+
+    // Panel should handle gracefully — no sessions, no crash
+    SessionManagerPanel panel;
+    QCOMPARE(panel.allSessions().size(), 0);
+}
+
+void SessionManagerPanelTest::testMetadataMissingFields()
+{
+    // Session with minimal fields (missing many optional ones)
+    QJsonArray sessions;
+    QJsonObject s;
+    s[QStringLiteral("sessionId")] = QStringLiteral("min11111");
+    s[QStringLiteral("sessionName")] = QStringLiteral("konsolai-test-min11111");
+    // No workingDirectory, no isPinned, no isArchived, etc.
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].sessionId, QStringLiteral("min11111"));
+    // Defaults should be applied
+    QVERIFY(!all[0].isPinned);
+    QVERIFY(!all[0].isArchived);
+    QVERIFY(!all[0].isDismissed);
+    QVERIFY(!all[0].isRemote);
+    QVERIFY(!all[0].yoloMode);
+    QCOMPARE(all[0].budgetTimeLimitMinutes, 0);
+    QCOMPARE(all[0].budgetCostCeilingUSD, 0.0);
+    QCOMPARE(all[0].budgetTokenCeiling, static_cast<quint64>(0));
+}
+
+void SessionManagerPanelTest::testMetadataApprovalCountPersistence()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("apv11111"), QStringLiteral("konsolai-test-apv11111"));
+    s[QStringLiteral("yoloApprovalCount")] = 42;
+    s[QStringLiteral("doubleYoloApprovalCount")] = 7;
+    s[QStringLiteral("tripleYoloApprovalCount")] = 3;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].yoloApprovalCount, 42);
+    QCOMPARE(all[0].doubleYoloApprovalCount, 7);
+    QCOMPARE(all[0].tripleYoloApprovalCount, 3);
+}
+
 QTEST_MAIN(SessionManagerPanelTest)
 
 #include "moc_SessionManagerPanelTest.cpp"

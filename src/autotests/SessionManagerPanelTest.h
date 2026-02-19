@@ -50,10 +50,24 @@ private Q_SLOTS:
     void testCollapsedSignal();
     void testCollapsedIdempotent();
 
+    // Dismiss / Restore / Purge lifecycle
+    void testDismissSession();
+    void testDismissNonexistentSession();
+    void testRestoreSession();
+    void testRestoreNonexistentSession();
+    void testPurgeSession();
+    void testPurgeNonexistentSession();
+    void testPurgeDismissed();
+    void testDismissRestorePurgeRoundTrip();
+
     // Metadata persistence round-trip
     void testMetadataPersistence();
     void testMetadataYoloPersistence();
     void testMetadataSshFields();
+    void testMetadataBudgetPersistence();
+    void testMetadataCorruptedJson();
+    void testMetadataMissingFields();
+    void testMetadataApprovalCountPersistence();
 };
 
 }

@@ -456,6 +456,139 @@ void ClaudeProcessTest::testPreToolUseSetsTask()
     QCOMPARE(taskSpy.count(), 1);
 }
 
+// ============================================================
+// Subagent events
+// ============================================================
+
+void ClaudeProcessTest::testSubagentStartEvent()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::subagentStarted);
+
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QStringLiteral("agent-abc-123");
+    data[QStringLiteral("agent_type")] = QStringLiteral("general-purpose");
+    data[QStringLiteral("transcript_path")] = QStringLiteral("/tmp/transcript.md");
+
+    process.handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("agent-abc-123"));
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("general-purpose"));
+    QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("/tmp/transcript.md"));
+}
+
+void ClaudeProcessTest::testSubagentStopEvent()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::subagentStopped);
+
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QStringLiteral("agent-xyz-789");
+    data[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    data[QStringLiteral("agent_transcript_path")] = QStringLiteral("/tmp/done.md");
+
+    process.handleHookEvent(QStringLiteral("SubagentStop"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("agent-xyz-789"));
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Explore"));
+    QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("/tmp/done.md"));
+}
+
+void ClaudeProcessTest::testSubagentStartMissingFields()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::subagentStarted);
+
+    // Use alternative field name "subagent_type" and omit transcript
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QStringLiteral("agent-fallback");
+    data[QStringLiteral("subagent_type")] = QStringLiteral("Plan");
+
+    process.handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("agent-fallback"));
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Plan"));
+    QVERIFY(spy.at(0).at(2).toString().isEmpty()); // No transcript
+}
+
+// ============================================================
+// Team events
+// ============================================================
+
+void ClaudeProcessTest::testTeammateIdleEvent()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::teammateIdle);
+
+    QJsonObject data;
+    data[QStringLiteral("teammate_name")] = QStringLiteral("researcher");
+    data[QStringLiteral("team_name")] = QStringLiteral("my-team");
+
+    process.handleHookEvent(QStringLiteral("TeammateIdle"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("researcher"));
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("my-team"));
+}
+
+void ClaudeProcessTest::testTaskCompletedEvent()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::taskCompleted);
+
+    QJsonObject data;
+    data[QStringLiteral("task_id")] = QStringLiteral("task-42");
+    data[QStringLiteral("task_subject")] = QStringLiteral("Fix the bug");
+    data[QStringLiteral("teammate_name")] = QStringLiteral("coder");
+    data[QStringLiteral("team_name")] = QStringLiteral("dev-team");
+
+    process.handleHookEvent(QStringLiteral("TaskCompleted"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("task-42"));
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Fix the bug"));
+    QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("coder"));
+    QCOMPARE(spy.at(0).at(3).toString(), QStringLiteral("dev-team"));
+}
+
+void ClaudeProcessTest::testTeamEventMissingFields()
+{
+    ClaudeProcess process;
+
+    // TeammateIdle with alternative "name" field
+    {
+        QSignalSpy spy(&process, &ClaudeProcess::teammateIdle);
+
+        QJsonObject data;
+        data[QStringLiteral("name")] = QStringLiteral("tester");
+        data[QStringLiteral("team_name")] = QStringLiteral("qa-team");
+
+        process.handleHookEvent(QStringLiteral("TeammateIdle"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("tester"));
+    }
+
+    // TaskCompleted with alternative field names
+    {
+        QSignalSpy spy(&process, &ClaudeProcess::taskCompleted);
+
+        QJsonObject data;
+        data[QStringLiteral("task_id")] = QStringLiteral("task-99");
+        data[QStringLiteral("subject")] = QStringLiteral("Write docs"); // alt for task_subject
+        data[QStringLiteral("name")] = QStringLiteral("writer"); // alt for teammate_name
+
+        process.handleHookEvent(QStringLiteral("TaskCompleted"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Write docs"));
+        QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("writer"));
+    }
+}
+
 QTEST_GUILESS_MAIN(ClaudeProcessTest)
 
 #include "moc_ClaudeProcessTest.cpp"
