@@ -43,8 +43,8 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(i18n("New Claude Session"));
-    setMinimumSize(600, 480);
-    resize(650, 520);
+    setMinimumSize(600, 620);
+    resize(650, 680);
 
     setupUi();
 
