@@ -74,6 +74,15 @@ private Q_SLOTS:
     // Yolo file management
     void testSetYoloMode_CreatesAndRemovesFile();
     void testSetTripleYoloMode_CreatesAndRemovesTeamFile();
+
+    // hasActiveTeam and subagent tracking
+    void testHasActiveTeam_NoSubagents();
+    void testHasActiveTeam_WithWorkingSubagent();
+    void testHasActiveTeam_SubagentStoppedNoTeam();
+    void testHasActiveTeam_MultipleSubagentsOneStops();
+    void testSubagentTracking_TeamName();
+    void testSubagentTracking_TeammateIdle();
+    void testSubagentTracking_TaskCompleted();
 };
 
 }

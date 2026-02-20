@@ -544,6 +544,171 @@ void ClaudeSessionYoloTest::testSetTripleYoloMode_CreatesAndRemovesTeamFile()
     QVERIFY2(!QFile::exists(teamYoloPath), "Team yolo file should be removed after disabling");
 }
 
+// ============================================================
+// hasActiveTeam and subagent tracking tests
+// ============================================================
+
+void ClaudeSessionYoloTest::testHasActiveTeam_NoSubagents()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // No subagents → no active team
+    QVERIFY(!session.hasActiveTeam());
+    QVERIFY(session.subagents().isEmpty());
+}
+
+void ClaudeSessionYoloTest::testHasActiveTeam_WithWorkingSubagent()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Simulate SubagentStart via the session's ClaudeProcess
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QStringLiteral("agent-test-001");
+    data[QStringLiteral("agent_type")] = QStringLiteral("general-purpose");
+
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    // Should now have an active team
+    QVERIFY(session.hasActiveTeam());
+    QCOMPARE(session.subagents().size(), 1);
+    QCOMPARE(session.subagents().value(QStringLiteral("agent-test-001")).agentType, QStringLiteral("general-purpose"));
+    QCOMPARE(session.subagents().value(QStringLiteral("agent-test-001")).state, ClaudeProcess::State::Working);
+}
+
+void ClaudeSessionYoloTest::testHasActiveTeam_SubagentStoppedNoTeam()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Start a subagent
+    QJsonObject startData;
+    startData[QStringLiteral("agent_id")] = QStringLiteral("agent-test-002");
+    startData[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(startData).toJson()));
+    QVERIFY(session.hasActiveTeam());
+
+    // Stop the subagent
+    QJsonObject stopData;
+    stopData[QStringLiteral("agent_id")] = QStringLiteral("agent-test-002");
+    stopData[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    stopData[QStringLiteral("agent_transcript_path")] = QStringLiteral("/tmp/done.jsonl");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStop"), QString::fromUtf8(QJsonDocument(stopData).toJson()));
+
+    // Team should no longer be active (only subagent is NotRunning)
+    QVERIFY(!session.hasActiveTeam());
+    QCOMPARE(session.subagents().size(), 1); // Entry remains but state is NotRunning
+    QCOMPARE(session.subagents().value(QStringLiteral("agent-test-002")).state, ClaudeProcess::State::NotRunning);
+}
+
+void ClaudeSessionYoloTest::testHasActiveTeam_MultipleSubagentsOneStops()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Start two subagents
+    for (const auto &id : {QStringLiteral("agent-a"), QStringLiteral("agent-b")}) {
+        QJsonObject data;
+        data[QStringLiteral("agent_id")] = id;
+        data[QStringLiteral("agent_type")] = QStringLiteral("general-purpose");
+        session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(data).toJson()));
+    }
+    QCOMPARE(session.subagents().size(), 2);
+    QVERIFY(session.hasActiveTeam());
+
+    // Stop only one
+    QJsonObject stopData;
+    stopData[QStringLiteral("agent_id")] = QStringLiteral("agent-a");
+    stopData[QStringLiteral("agent_type")] = QStringLiteral("general-purpose");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStop"), QString::fromUtf8(QJsonDocument(stopData).toJson()));
+
+    // Still has active team (agent-b is still Working)
+    QVERIFY(session.hasActiveTeam());
+
+    // Stop second
+    stopData[QStringLiteral("agent_id")] = QStringLiteral("agent-b");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStop"), QString::fromUtf8(QJsonDocument(stopData).toJson()));
+
+    // No more active team
+    QVERIFY(!session.hasActiveTeam());
+}
+
+void ClaudeSessionYoloTest::testSubagentTracking_TeamName()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Start a subagent
+    QJsonObject startData;
+    startData[QStringLiteral("agent_id")] = QStringLiteral("agent-team-1");
+    startData[QStringLiteral("agent_type")] = QStringLiteral("general-purpose");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(startData).toJson()));
+
+    // TeammateIdle sets team name
+    QJsonObject idleData;
+    idleData[QStringLiteral("teammate_name")] = QStringLiteral("researcher");
+    idleData[QStringLiteral("team_name")] = QStringLiteral("my-project-team");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("TeammateIdle"), QString::fromUtf8(QJsonDocument(idleData).toJson()));
+
+    QCOMPARE(session.teamName(), QStringLiteral("my-project-team"));
+}
+
+void ClaudeSessionYoloTest::testSubagentTracking_TeammateIdle()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    // Start a subagent
+    QJsonObject startData;
+    startData[QStringLiteral("agent_id")] = QStringLiteral("agent-idle-1");
+    startData[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(startData).toJson()));
+
+    QCOMPARE(session.subagents().value(QStringLiteral("agent-idle-1")).state, ClaudeProcess::State::Working);
+
+    // TeammateIdle should set state to Idle and assign teammate name
+    QJsonObject idleData;
+    idleData[QStringLiteral("teammate_name")] = QStringLiteral("explorer");
+    idleData[QStringLiteral("team_name")] = QStringLiteral("test-team");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("TeammateIdle"), QString::fromUtf8(QJsonDocument(idleData).toJson()));
+
+    const auto &info = session.subagents().value(QStringLiteral("agent-idle-1"));
+    QCOMPARE(info.state, ClaudeProcess::State::Idle);
+    QCOMPARE(info.teammateName, QStringLiteral("explorer"));
+    QVERIFY(info.lastUpdated.isValid());
+
+    // Idle subagent should still count as active team
+    QVERIFY(session.hasActiveTeam());
+}
+
+void ClaudeSessionYoloTest::testSubagentTracking_TaskCompleted()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QSignalSpy teamSpy(&session, &ClaudeSession::teamInfoChanged);
+
+    // Start a subagent
+    QJsonObject startData;
+    startData[QStringLiteral("agent_id")] = QStringLiteral("agent-task-1");
+    startData[QStringLiteral("agent_type")] = QStringLiteral("general-purpose");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(startData).toJson()));
+
+    // Assign teammate name via TeammateIdle
+    QJsonObject idleData;
+    idleData[QStringLiteral("teammate_name")] = QStringLiteral("builder");
+    idleData[QStringLiteral("team_name")] = QStringLiteral("build-team");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("TeammateIdle"), QString::fromUtf8(QJsonDocument(idleData).toJson()));
+
+    // TaskCompleted should set task subject on the matching subagent
+    QJsonObject taskData;
+    taskData[QStringLiteral("task_id")] = QStringLiteral("task-42");
+    taskData[QStringLiteral("task_subject")] = QStringLiteral("Implement auth module");
+    taskData[QStringLiteral("teammate_name")] = QStringLiteral("builder");
+    taskData[QStringLiteral("team_name")] = QStringLiteral("build-team");
+    session.claudeProcess()->handleHookEvent(QStringLiteral("TaskCompleted"), QString::fromUtf8(QJsonDocument(taskData).toJson()));
+
+    const auto &info = session.subagents().value(QStringLiteral("agent-task-1"));
+    QCOMPARE(info.currentTaskSubject, QStringLiteral("Implement auth module"));
+
+    // teamInfoChanged should have been emitted (TeammateIdle + TaskCompleted)
+    QVERIFY(teamSpy.count() >= 2);
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionYoloTest)
 
 #include "moc_ClaudeSessionYoloTest.cpp"

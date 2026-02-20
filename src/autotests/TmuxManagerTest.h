@@ -62,6 +62,16 @@ private Q_SLOTS:
     void testCapturePaneAsyncNonexistent();
     void testListKonsolaiSessionsAsync();
     void testGetPanePidAsyncNonexistent();
+
+    // Attach command passthrough
+    void testBuildAttachCommandPassthrough();
+
+    // Build new session command with all options
+    void testBuildNewSessionCommandAllOptions();
+
+    // Session name edge cases
+    void testBuildSessionNameMultipleBadChars();
+    void testBuildSessionNameTemplateNoPlaceholders();
 };
 
 }

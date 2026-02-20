@@ -708,6 +708,100 @@ void ClaudeProcessTest::testYoloApprovalCountsWithSpy()
     QCOMPARE(toolNames.size(), 10);
 }
 
+// ============================================================
+// Subagent edge cases
+// ============================================================
+
+void ClaudeProcessTest::testSubagentStopFallbackAgentType()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::subagentStopped);
+
+    // Use subagent_type instead of agent_type (fallback field name)
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QStringLiteral("agent-fallback-stop");
+    data[QStringLiteral("subagent_type")] = QStringLiteral("Bash");
+    data[QStringLiteral("agent_transcript_path")] = QStringLiteral("/tmp/out.md");
+
+    process.handleHookEvent(QStringLiteral("SubagentStop"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("agent-fallback-stop"));
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Bash"));
+    QCOMPARE(spy.at(0).at(2).toString(), QStringLiteral("/tmp/out.md"));
+}
+
+void ClaudeProcessTest::testSubagentStartEmptyAgentId()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::subagentStarted);
+
+    // Empty agent_id — should still emit signal
+    QJsonObject data;
+    data[QStringLiteral("agent_id")] = QString();
+    data[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+
+    process.handleHookEvent(QStringLiteral("SubagentStart"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(spy.at(0).at(0).toString().isEmpty());
+    QCOMPARE(spy.at(0).at(1).toString(), QStringLiteral("Explore"));
+}
+
+// ============================================================
+// Event sequence tests
+// ============================================================
+
+void ClaudeProcessTest::testStopThenPreToolUseResumesWorking()
+{
+    ClaudeProcess process;
+
+    // Working → Idle → Working again
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+
+    // New PreToolUse brings back to Working
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+    QCOMPARE(stateSpy.count(), 1);
+}
+
+void ClaudeProcessTest::testPermissionRequestThenStopResolvesToIdle()
+{
+    ClaudeProcess process;
+
+    // Working → WaitingInput (permission) → Idle (stop)
+    process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+
+    QJsonObject permData;
+    permData[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    permData[QStringLiteral("yolo_approved")] = false;
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(permData).toJson()));
+    QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
+
+    // After user approves, Claude finishes with Stop
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+}
+
+void ClaudeProcessTest::testPostToolUseFromNotRunningStaysNotRunning()
+{
+    ClaudeProcess process;
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
+
+    QSignalSpy stateSpy(&process, &ClaudeProcess::stateChanged);
+
+    // PostToolUse doesn't set state — should remain NotRunning
+    process.handleHookEvent(QStringLiteral("PostToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
+    QCOMPARE(stateSpy.count(), 0);
+}
+
 QTEST_GUILESS_MAIN(ClaudeProcessTest)
 
 #include "moc_ClaudeProcessTest.cpp"

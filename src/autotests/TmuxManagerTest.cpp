@@ -433,6 +433,70 @@ void TmuxManagerTest::testGetPanePidAsyncNonexistent()
     QCOMPARE(pid, qint64(0));
 }
 
+// ============================================================
+// Attach command passthrough
+// ============================================================
+
+void TmuxManagerTest::testBuildAttachCommandPassthrough()
+{
+    TmuxManager manager;
+
+    QString cmd = manager.buildAttachCommand(QStringLiteral("konsolai-test-12345678"));
+
+    // Attach should also suppress DCS passthrough
+    QVERIFY(cmd.contains(QStringLiteral("allow-passthrough")));
+    QVERIFY(cmd.contains(QStringLiteral("off")));
+    QVERIFY(cmd.contains(QStringLiteral("set-option")));
+}
+
+// ============================================================
+// Build new session command with all options combined
+// ============================================================
+
+void TmuxManagerTest::testBuildNewSessionCommandAllOptions()
+{
+    TmuxManager manager;
+
+    QString cmd = manager.buildNewSessionCommand(QStringLiteral("konsolai-full-aabbccdd"),
+                                                 QStringLiteral("claude --model opus"),
+                                                 true,
+                                                 QStringLiteral("/home/user/big-project"));
+
+    QVERIFY(cmd.contains(QStringLiteral("tmux")));
+    QVERIFY(cmd.contains(QStringLiteral("new-session")));
+    QVERIFY(cmd.contains(QStringLiteral("-A"))); // attach existing
+    QVERIFY(cmd.contains(QStringLiteral("-s")));
+    QVERIFY(cmd.contains(QStringLiteral("konsolai-full-aabbccdd")));
+    QVERIFY(cmd.contains(QStringLiteral("-c")));
+    QVERIFY(cmd.contains(QStringLiteral("/home/user/big-project")));
+    QVERIFY(cmd.contains(QStringLiteral("claude --model opus")));
+    QVERIFY(cmd.contains(QStringLiteral("allow-passthrough")));
+    QVERIFY(cmd.contains(QStringLiteral("off")));
+}
+
+// ============================================================
+// Session name edge cases
+// ============================================================
+
+void TmuxManagerTest::testBuildSessionNameMultipleBadChars()
+{
+    // Profile with multiple dots and colons
+    QString name = TmuxManager::buildSessionName(QStringLiteral("my.host:8080.local"), QStringLiteral("deadbeef"));
+
+    // All dots and colons should be replaced with hyphens
+    QVERIFY(!name.contains(QLatin1Char('.')));
+    QVERIFY(!name.contains(QLatin1Char(':')));
+    QCOMPARE(name, QStringLiteral("konsolai-my-host-8080-local-deadbeef"));
+}
+
+void TmuxManagerTest::testBuildSessionNameTemplateNoPlaceholders()
+{
+    // Template with no {profile} or {id} placeholders — static name
+    QString name = TmuxManager::buildSessionName(QStringLiteral("ignored"), QStringLiteral("12345678"), QStringLiteral("my-static-session"));
+
+    QCOMPARE(name, QStringLiteral("my-static-session"));
+}
+
 QTEST_GUILESS_MAIN(TmuxManagerTest)
 
 #include "moc_TmuxManagerTest.cpp"

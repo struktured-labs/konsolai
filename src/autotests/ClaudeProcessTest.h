@@ -86,6 +86,15 @@ private Q_SLOTS:
     void testYoloApprovalMissingToolName();
     void testYoloApprovalThenManualPermission();
     void testYoloApprovalCountsWithSpy();
+
+    // Subagent edge cases
+    void testSubagentStopFallbackAgentType();
+    void testSubagentStartEmptyAgentId();
+
+    // Event sequence tests
+    void testStopThenPreToolUseResumesWorking();
+    void testPermissionRequestThenStopResolvesToIdle();
+    void testPostToolUseFromNotRunningStaysNotRunning();
 };
 
 }
