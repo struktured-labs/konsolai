@@ -110,6 +110,7 @@ struct KONSOLEPRIVATE_EXPORT SubagentInfo {
     QString teammateName; // from TeammateIdle/TaskCompleted events
     ClaudeProcess::State state = ClaudeProcess::State::Working;
     QDateTime startedAt;
+    QDateTime lastUpdated; // last TeammateIdle/TaskCompleted/state change — for zombie detection
     QString transcriptPath; // from SubagentStop
     QString currentTaskSubject; // from TaskCompleted
 };
@@ -480,12 +481,20 @@ public:
     }
 
     /**
-     * Whether an agent team is currently active (has at least one running subagent)
+     * Whether an agent team is currently active (has at least one running subagent).
+     * Subagents that haven't received any hook event for 5+ minutes are considered
+     * zombies and ignored — this prevents stale hook snapshots from permanently
+     * blocking yolo mode.
      */
     bool hasActiveTeam() const
     {
+        const QDateTime now = QDateTime::currentDateTime();
         for (const auto &info : m_subagents) {
             if (info.state == ClaudeProcess::State::Working || info.state == ClaudeProcess::State::Idle) {
+                // Zombie detection: no hook update in 5 minutes → treat as dead
+                if (info.lastUpdated.isValid() && info.lastUpdated.secsTo(now) > 300) {
+                    continue;
+                }
                 return true;
             }
         }

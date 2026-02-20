@@ -622,6 +622,7 @@ void ClaudeSession::connectSignals()
                 info.agentType = agentType;
                 info.state = ClaudeProcess::State::Working;
                 info.startedAt = QDateTime::currentDateTime();
+                info.lastUpdated = info.startedAt;
 
                 // Derive subagent transcript path eagerly from the parent transcript path.
                 // Parent: ~/.claude/projects/{proj}/{uuid}.jsonl
@@ -645,6 +646,7 @@ void ClaudeSession::connectSignals()
         Q_UNUSED(agentType);
         if (m_subagents.contains(agentId)) {
             m_subagents[agentId].state = ClaudeProcess::State::NotRunning;
+            m_subagents[agentId].lastUpdated = QDateTime::currentDateTime();
             // Use agent_transcript_path from SubagentStop as authoritative override
             if (!transcriptPath.isEmpty()) {
                 m_subagents[agentId].transcriptPath = transcriptPath;
@@ -663,6 +665,7 @@ void ClaudeSession::connectSignals()
             if (it->teammateName == teammateName || (it->teammateName.isEmpty() && it->state == ClaudeProcess::State::Working)) {
                 it->teammateName = teammateName;
                 it->state = ClaudeProcess::State::Idle;
+                it->lastUpdated = QDateTime::currentDateTime();
                 break;
             }
         }
@@ -1190,11 +1193,12 @@ void ClaudeSession::pollForPermissionPrompt()
         return;
     }
 
-    // When a team is active, hooks handle L1 — polling would send keystrokes
-    // to the parent tmux pane which interferes with subagents
-    if (hasActiveTeam()) {
-        return;
-    }
+    // NOTE: We intentionally do NOT suppress L1 polling when a team is active.
+    // Permission prompts appear in the parent terminal and approving them
+    // (Down+Enter to select "Always allow") does not interfere with subagents,
+    // which communicate via Claude Code's internal APIs.  Suppressing L1 here
+    // caused a deadlock when hooks were stale: SubagentStop never arrived,
+    // hasActiveTeam() stayed true, and all yolo paths were blocked.
 
     // Skip if an async capture is already in flight
     if (m_permissionPollInFlight) {
