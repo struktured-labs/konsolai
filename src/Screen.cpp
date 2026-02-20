@@ -1845,31 +1845,21 @@ void Screen::setSelectionEnd(const int x, const int y, const bool trimTrailingWh
         }
     } else {
         size_t line = bottomRow - _history->getLines();
+
+        // Clamp line to valid range before any access to _screenLines
+        if (line >= _screenLines.size()) {
+            if (!_screenLines.empty()) {
+                line = _screenLines.size() - 1;
+            } else {
+                // No screen lines at all — nothing to check
+                _selBottomRight = loc(_columns - 1, bottomRow);
+                return;
+            }
+        }
+
         const int lastColumn = (line < _lineProperties.size() && _lineProperties[line].flags.f.doublewidth) ? _columns / 2 : _columns;
-        const auto *data = _screenLines[line].data();
-
-        // This should never happen, but it's happening. this is just to gather some information
-        // about the crash.
-        // Do not let this code go to a release.
-        if (_screenLines.size() < line) {
-            QFile konsoleInfo(QStringLiteral("~/konsole_info_crash_array_out_of_bounds.txt"));
-            konsoleInfo.open(QIODevice::WriteOnly);
-            QTextStream messages(&konsoleInfo);
-
-            messages << "_selBegin" << _selBegin << "\n";
-            messages << "endPos" << endPos << "\n";
-            messages << "_selBottomRight" << _selBottomRight << "\n";
-            messages << "bottomRow Calculation: (_selBottomRight / _columns) = " << _selBottomRight << "/" << _columns << "\n";
-            messages << "line Calculation: (bottomRow - _history->getLines()) = " << bottomRow << "-" << _history->getLines() << "\n";
-            messages << "_screenLines.count()" << _screenLines.size() << "\n";
-            messages << "line" << line << "\n";
-        }
-
-        // HACK: do not crash.
-        if (_screenLines.size() < line) {
-            line = _screenLines.size() - 1;
-        }
         const int length = _screenLines.at(line).count();
+        const auto *data = _screenLines[line].data();
 
         for (int k = bottomColumn; k < lastColumn && k < length; k++) {
             if ((data[k].flags & EF_REAL) != 0 && (!trimTrailingWhitespace || !QChar::isSpace(data[k].character))) {
