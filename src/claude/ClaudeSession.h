@@ -125,6 +125,8 @@ struct KONSOLEPRIVATE_EXPORT ApprovalLogEntry {
     int yoloLevel = 0; // 1=yolo, 2=double, 3=triple
     quint64 totalTokens = 0; // cumulative token count at time of approval
     double estimatedCostUSD = 0.0; // cumulative estimated cost at time of approval
+    QString toolInput; // JSON string of tool_input from PermissionRequest
+    QString toolOutput; // JSON string of tool_response from PostToolUse
 };
 
 /**
@@ -391,7 +393,7 @@ public:
     /**
      * Log an approval (called when auto-approving)
      */
-    void logApproval(const QString &toolName, const QString &action, int yoloLevel)
+    void logApproval(const QString &toolName, const QString &action, int yoloLevel, const QString &toolInput = QString())
     {
         ApprovalLogEntry entry;
         entry.timestamp = QDateTime::currentDateTime();
@@ -400,6 +402,7 @@ public:
         entry.yoloLevel = yoloLevel;
         entry.totalTokens = m_tokenUsage.totalTokens();
         entry.estimatedCostUSD = m_tokenUsage.estimatedCostUSD();
+        entry.toolInput = toolInput;
         m_approvalLog.append(entry);
 
         if (yoloLevel == 1) {

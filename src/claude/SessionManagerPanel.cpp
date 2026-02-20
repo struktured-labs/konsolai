@@ -31,6 +31,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QSet>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QToolBar>
 #include <QUrl>
@@ -1833,6 +1834,8 @@ void SessionManagerPanel::loadMetadata()
             entry.yoloLevel = logObj[QStringLiteral("level")].toInt();
             entry.totalTokens = static_cast<quint64>(logObj[QStringLiteral("tokens")].toInteger(0));
             entry.estimatedCostUSD = logObj[QStringLiteral("cost")].toDouble();
+            entry.toolInput = logObj[QStringLiteral("input")].toString();
+            entry.toolOutput = logObj[QStringLiteral("output")].toString();
             meta.approvalLog.append(entry);
         }
 
@@ -1910,6 +1913,12 @@ void SessionManagerPanel::saveMetadata()
                         logObj[QStringLiteral("tokens")] = static_cast<double>(entry.totalTokens);
                         logObj[QStringLiteral("cost")] = entry.estimatedCostUSD;
                     }
+                    if (!entry.toolInput.isEmpty()) {
+                        logObj[QStringLiteral("input")] = entry.toolInput;
+                    }
+                    if (!entry.toolOutput.isEmpty()) {
+                        logObj[QStringLiteral("output")] = entry.toolOutput;
+                    }
                     logArray.append(logObj);
                 }
                 obj[QStringLiteral("approvalLog")] = logArray;
@@ -1978,7 +1987,9 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
                                &dialog);
     layout->addWidget(summary);
 
-    auto *tree = new QTreeWidget(&dialog);
+    auto *splitter = new QSplitter(Qt::Vertical, &dialog);
+
+    auto *tree = new QTreeWidget(splitter);
     tree->setHeaderLabels({i18n("Time"), i18n("Tool"), i18n("Action"), i18n("Level"), i18n("Tokens"), i18n("Cost")});
     tree->setRootIsDecorated(false);
     tree->setAlternatingRowColors(true);
@@ -2010,6 +2021,8 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
             item->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
             item->setTextAlignment(5, Qt::AlignRight | Qt::AlignVCenter);
         }
+        // Store original log index for detail lookup
+        item->setData(0, Qt::UserRole + 1, i);
     }
 
     tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -2018,13 +2031,50 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
     tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     tree->header()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
-    layout->addWidget(tree);
+
+    auto *detailEdit = new QPlainTextEdit(splitter);
+    detailEdit->setReadOnly(true);
+    detailEdit->setPlaceholderText(i18n("Select an entry above to view tool input/output"));
+
+    splitter->addWidget(tree);
+    splitter->addWidget(detailEdit);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 2);
+    layout->addWidget(splitter);
+
+    // Show tool input/output when an entry is selected
+    QObject::connect(tree, &QTreeWidget::currentItemChanged, &dialog, [&log, detailEdit](QTreeWidgetItem *current, QTreeWidgetItem *) {
+        if (!current) {
+            detailEdit->clear();
+            return;
+        }
+        int idx = current->data(0, Qt::UserRole + 1).toInt();
+        if (idx < 0 || idx >= log.size()) {
+            detailEdit->clear();
+            return;
+        }
+        const auto &entry = log[idx];
+        QString detail;
+        if (!entry.toolInput.isEmpty()) {
+            detail += QStringLiteral("--- Input ---\n") + entry.toolInput;
+        }
+        if (!entry.toolOutput.isEmpty()) {
+            if (!detail.isEmpty()) {
+                detail += QStringLiteral("\n\n");
+            }
+            detail += QStringLiteral("--- Output ---\n") + entry.toolOutput;
+        }
+        if (detail.isEmpty()) {
+            detail = QStringLiteral("(no tool input/output recorded)");
+        }
+        detailEdit->setPlainText(detail);
+    });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons);
 
-    dialog.resize(700, 400);
+    dialog.resize(800, 500);
     dialog.exec();
 }
 

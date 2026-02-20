@@ -448,6 +448,111 @@ void ClaudeSessionYoloTest::testRestoreApprovalState()
 }
 
 // ============================================================
+// Tool input/output in approval log
+// ============================================================
+
+void ClaudeSessionYoloTest::testLogApproval_WithToolInput()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QString toolInput = QStringLiteral("{\n  \"command\": \"ls -la\"\n}");
+    session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1, toolInput);
+
+    QCOMPARE(session.approvalLog().size(), 1);
+    const auto &entry = session.approvalLog().at(0);
+    QCOMPARE(entry.toolName, QStringLiteral("Bash"));
+    QCOMPARE(entry.toolInput, toolInput);
+    QVERIFY(entry.toolOutput.isEmpty());
+}
+
+void ClaudeSessionYoloTest::testYoloApproval_CarriesToolInput()
+{
+    ClaudeProcess process;
+
+    QSignalSpy yoloSpy(&process, &ClaudeProcess::yoloApprovalOccurred);
+
+    // Build a PermissionRequest with a JSON object tool_input
+    QJsonObject inputObj;
+    inputObj[QStringLiteral("command")] = QStringLiteral("git status");
+    inputObj[QStringLiteral("description")] = QStringLiteral("Show git status");
+
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    data[QStringLiteral("tool_input")] = inputObj;
+    data[QStringLiteral("yolo_approved")] = true;
+
+    process.handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(yoloSpy.count(), 1);
+    QCOMPARE(yoloSpy.at(0).at(0).toString(), QStringLiteral("Bash"));
+    // Second argument should be the tool input as formatted JSON
+    QString capturedInput = yoloSpy.at(0).at(1).toString();
+    QVERIFY(capturedInput.contains(QStringLiteral("git status")));
+    QVERIFY(capturedInput.contains(QStringLiteral("description")));
+}
+
+void ClaudeSessionYoloTest::testPostToolUse_EmitsToolUseCompleted()
+{
+    ClaudeProcess process;
+
+    QSignalSpy completedSpy(&process, &ClaudeProcess::toolUseCompleted);
+
+    // Build a PostToolUse event with tool_response
+    QJsonObject responseObj;
+    responseObj[QStringLiteral("success")] = true;
+    responseObj[QStringLiteral("filePath")] = QStringLiteral("/tmp/test.txt");
+
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Write");
+    data[QStringLiteral("tool_response")] = responseObj;
+
+    process.handleHookEvent(QStringLiteral("PostToolUse"), QString::fromUtf8(QJsonDocument(data).toJson()));
+
+    QCOMPARE(completedSpy.count(), 1);
+    QCOMPARE(completedSpy.at(0).at(0).toString(), QStringLiteral("Write"));
+    QString capturedResponse = completedSpy.at(0).at(1).toString();
+    QVERIFY(capturedResponse.contains(QStringLiteral("success")));
+    QVERIFY(capturedResponse.contains(QStringLiteral("/tmp/test.txt")));
+}
+
+void ClaudeSessionYoloTest::testToolOutput_CorrelatedWithApproval()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+
+    // Simulate: PermissionRequest (yolo-approved) → PostToolUse for same tool
+    QJsonObject inputObj;
+    inputObj[QStringLiteral("command")] = QStringLiteral("echo hello");
+
+    QJsonObject permData;
+    permData[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    permData[QStringLiteral("tool_input")] = inputObj;
+    permData[QStringLiteral("yolo_approved")] = true;
+
+    process->handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(permData).toJson()));
+
+    // Should have logged the approval with toolInput
+    QCOMPARE(session.approvalLog().size(), 1);
+    QVERIFY(session.approvalLog().at(0).toolInput.contains(QStringLiteral("echo hello")));
+    QVERIFY(session.approvalLog().at(0).toolOutput.isEmpty());
+
+    // Now PostToolUse fires with tool_response
+    QJsonObject responseObj;
+    responseObj[QStringLiteral("stdout")] = QStringLiteral("hello\n");
+
+    QJsonObject postData;
+    postData[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+    postData[QStringLiteral("tool_response")] = responseObj;
+
+    process->handleHookEvent(QStringLiteral("PostToolUse"), QString::fromUtf8(QJsonDocument(postData).toJson()));
+
+    // The tool output should now be attached to the approval entry
+    QCOMPARE(session.approvalLog().size(), 1);
+    QVERIFY(!session.approvalLog().at(0).toolOutput.isEmpty());
+    QVERIFY(session.approvalLog().at(0).toolOutput.contains(QStringLiteral("hello")));
+}
+
+// ============================================================
 // Yolo mode signal tests
 // ============================================================
 

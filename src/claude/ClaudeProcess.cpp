@@ -117,18 +117,34 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         QString toolName = obj.value(QStringLiteral("tool_name")).toString();
         setCurrentTask(QStringLiteral("Using tool: %1").arg(toolName));
     } else if (eventType == QStringLiteral("PostToolUse")) {
-        // Claude finished using a tool
-        // Stay in Working state, tool completed
+        // Claude finished using a tool — extract tool_response for approval log
+        QString toolName = obj.value(QStringLiteral("tool_name")).toString();
+        QJsonValue responseVal = obj.value(QStringLiteral("tool_response"));
+        QString responseStr;
+        if (responseVal.isObject()) {
+            responseStr = QString::fromUtf8(QJsonDocument(responseVal.toObject()).toJson(QJsonDocument::Indented));
+        } else if (responseVal.isString()) {
+            responseStr = responseVal.toString();
+        }
+        if (!toolName.isEmpty()) {
+            Q_EMIT toolUseCompleted(toolName, responseStr);
+        }
     } else if (eventType == QStringLiteral("PermissionRequest")) {
         // Permission dialog appeared
         QString toolName = obj.value(QStringLiteral("tool_name")).toString();
-        QString toolInput = obj.value(QStringLiteral("tool_input")).toString();
+        QJsonValue inputVal = obj.value(QStringLiteral("tool_input"));
+        QString toolInput;
+        if (inputVal.isObject()) {
+            toolInput = QString::fromUtf8(QJsonDocument(inputVal.toObject()).toJson(QJsonDocument::Indented));
+        } else if (inputVal.isString()) {
+            toolInput = inputVal.toString();
+        }
         bool yoloApproved = obj.value(QStringLiteral("yolo_approved")).toBool();
 
         if (yoloApproved) {
             // Hook handler auto-approved this via yolo mode
             qDebug() << "ClaudeProcess: Permission auto-approved by yolo mode for:" << toolName;
-            Q_EMIT yoloApprovalOccurred(toolName);
+            Q_EMIT yoloApprovalOccurred(toolName, toolInput);
         } else {
             // Need user approval
             setState(State::WaitingInput);

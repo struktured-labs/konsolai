@@ -75,6 +75,12 @@ private Q_SLOTS:
     void testSetYoloMode_CreatesAndRemovesFile();
     void testSetTripleYoloMode_CreatesAndRemovesTeamFile();
 
+    // Tool input/output in approval log
+    void testLogApproval_WithToolInput();
+    void testYoloApproval_CarriesToolInput();
+    void testPostToolUse_EmitsToolUseCompleted();
+    void testToolOutput_CorrelatedWithApproval();
+
     // hasActiveTeam and subagent tracking
     void testHasActiveTeam_NoSubagents();
     void testHasActiveTeam_WithWorkingSubagent();

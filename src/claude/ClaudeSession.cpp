@@ -716,9 +716,20 @@ void ClaudeSession::connectSignals()
     });
 
     // Handle yolo auto-approvals from hook handler
-    connect(m_claudeProcess, &ClaudeProcess::yoloApprovalOccurred, this, [this](const QString &toolName) {
+    connect(m_claudeProcess, &ClaudeProcess::yoloApprovalOccurred, this, [this](const QString &toolName, const QString &toolInput) {
         qDebug() << "ClaudeSession: Yolo hook auto-approved:" << toolName;
-        logApproval(toolName, QStringLiteral("auto-approved"), 1);
+        logApproval(toolName, QStringLiteral("auto-approved"), 1, toolInput);
+    });
+
+    // Attach tool output from PostToolUse to the most recent matching approval entry
+    connect(m_claudeProcess, &ClaudeProcess::toolUseCompleted, this, [this](const QString &toolName, const QString &toolResponse) {
+        // Walk backwards to find the most recent approval for this tool that has no output yet
+        for (int i = m_approvalLog.size() - 1; i >= 0; --i) {
+            if (m_approvalLog[i].toolName == toolName && m_approvalLog[i].toolOutput.isEmpty()) {
+                m_approvalLog[i].toolOutput = toolResponse;
+                break;
+            }
+        }
     });
 
     // Refresh token usage when Claude finishes a task (state → Idle)

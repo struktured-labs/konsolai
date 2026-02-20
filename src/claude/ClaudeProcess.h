@@ -134,7 +134,12 @@ Q_SIGNALS:
     /**
      * Emitted when yolo mode auto-approved a permission
      */
-    void yoloApprovalOccurred(const QString &toolName);
+    void yoloApprovalOccurred(const QString &toolName, const QString &toolInput);
+
+    /**
+     * Emitted when a tool use completes (from PostToolUse hook event)
+     */
+    void toolUseCompleted(const QString &toolName, const QString &toolResponse);
 
     /**
      * Emitted when a subagent starts (from SubagentStart hook event)
