@@ -947,10 +947,13 @@ void ClaudeSession::detach()
     qDebug() << "ClaudeSession::detach() called for session:" << m_sessionName;
 
     if (!m_sessionName.isEmpty()) {
-        QProcess process;
-        process.start(QStringLiteral("tmux"), {QStringLiteral("detach-client"), QStringLiteral("-s"), m_sessionName});
-        process.waitForFinished(5000);
-        qDebug() << "ClaudeSession::detach() - tmux detach-client exit code:" << process.exitCode();
+        // Use async QProcess to avoid blocking the main thread
+        auto *process = new QProcess(this);
+        connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [process](int exitCode, QProcess::ExitStatus) {
+            qDebug() << "ClaudeSession::detach() - tmux detach-client exit code:" << exitCode;
+            process->deleteLater();
+        });
+        process->start(QStringLiteral("tmux"), {QStringLiteral("detach-client"), QStringLiteral("-s"), m_sessionName});
     }
 
     // tmux detach-client will cause the "tmux attach" command in our terminal to exit,

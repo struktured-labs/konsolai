@@ -503,52 +503,62 @@ void MainWindow::setupActions()
     connect(_claudeMenu, &Konsolai::ClaudeMenu::reattachRequested, this, [this](const QString &sessionName) {
         qDebug() << "Reattach requested for session:" << sessionName;
 
-        // Verify the tmux session still exists before attempting reattach
-        Konsolai::TmuxManager tmux;
-        if (!tmux.sessionExists(sessionName)) {
-            _sessionPanel->markExpired(sessionName);
-            KMessageBox::information(this, i18n("The session '%1' no longer exists. It has been moved to Archived.", sessionName), i18n("Session Not Found"));
-            return;
-        }
-
-        // Get the Claude profile
-        Profile::Ptr claudeProfile;
-        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
-        for (const Profile::Ptr &profile : profiles) {
-            if (profile->property<bool>(Profile::ClaudeEnabled)) {
-                claudeProfile = profile;
-                break;
+        // Verify the tmux session still exists asynchronously to avoid blocking the UI
+        auto *tmux = new Konsolai::TmuxManager(this);
+        QPointer<MainWindow> guard(this);
+        tmux->sessionExistsAsync(sessionName, [guard, tmux, sessionName](bool exists) {
+            tmux->deleteLater();
+            if (!guard) {
+                return;
             }
-        }
 
-        if (!claudeProfile) {
-            qWarning() << "No Claude profile found for reattaching";
-            return;
-        }
+            if (!exists) {
+                guard->_sessionPanel->markExpired(sessionName);
+                KMessageBox::information(guard,
+                                         i18n("The session '%1' no longer exists. It has been moved to Archived.", sessionName),
+                                         i18n("Session Not Found"));
+                return;
+            }
 
-        // Create a ClaudeSession for reattach
-        auto *claudeSession = Konsolai::ClaudeSession::createForReattach(sessionName, this);
+            // Get the Claude profile
+            Profile::Ptr claudeProfile;
+            const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+            for (const Profile::Ptr &profile : profiles) {
+                if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                    claudeProfile = profile;
+                    break;
+                }
+            }
 
-        // Apply profile settings
-        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+            if (!claudeProfile) {
+                qWarning() << "No Claude profile found for reattaching";
+                return;
+            }
 
-        // Create view and add to container
-        auto *view = _viewManager->createView(claudeSession);
-        _viewManager->activeContainer()->addView(view);
+            // Create a ClaudeSession for reattach
+            auto *claudeSession = Konsolai::ClaudeSession::createForReattach(sessionName, guard);
 
-        // Start the session (attaches to existing tmux session)
-        if (!claudeSession->isRunning()) {
-            claudeSession->run();
-        }
+            // Apply profile settings
+            SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
-        // Register with registry and connect to UI
-        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
-        if (registry) {
-            registry->registerSession(claudeSession);
-        }
-        _sessionPanel->registerSession(claudeSession);
-        _claudeMenu->setActiveSession(claudeSession);
-        _claudeStatusWidget->setSession(claudeSession);
+            // Create view and add to container
+            auto *view = guard->_viewManager->createView(claudeSession);
+            guard->_viewManager->activeContainer()->addView(view);
+
+            // Start the session (attaches to existing tmux session)
+            if (!claudeSession->isRunning()) {
+                claudeSession->run();
+            }
+
+            // Register with registry and connect to UI
+            auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+            if (registry) {
+                registry->registerSession(claudeSession);
+            }
+            guard->_sessionPanel->registerSession(claudeSession);
+            guard->_claudeMenu->setActiveSession(claudeSession);
+            guard->_claudeStatusWidget->setSession(claudeSession);
+        });
     });
     connect(_claudeMenu, &Konsolai::ClaudeMenu::configureHooksRequested,
             this, [this]() {
