@@ -750,6 +750,16 @@ void MainWindow::setupActions()
         connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, this, [claudeSession, notifyMgr](const QString &error) {
             notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Error"), error, claudeSession);
         });
+
+        // Yolo approval notification (only fires when yolo mode is active)
+        connect(claudeSession, &Konsolai::ClaudeSession::approvalLogged, this, [claudeSession, notifyMgr](const Konsolai::ApprovalLogEntry &entry) {
+            if (entry.yoloLevel == 1) {
+                notifyMgr->notify(Konsolai::NotificationManager::NotificationType::YoloApproval,
+                                  i18n("Auto-Approved"),
+                                  i18n("Yolo approved: %1", entry.toolName),
+                                  claudeSession);
+            }
+        });
     });
 }
 

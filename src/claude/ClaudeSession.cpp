@@ -514,6 +514,11 @@ void ClaudeSession::connectSignals()
     connect(m_claudeProcess, &ClaudeProcess::taskFinished,
             this, &ClaudeSession::taskFinished);
 
+    // Forward AskUserQuestion detection as waitingForInput
+    connect(m_claudeProcess, &ClaudeProcess::userQuestionDetected, this, [this](const QString &question) {
+        Q_EMIT waitingForInput(question);
+    });
+
     // Handle yolo mode auto-approval for permission requests
     connect(m_claudeProcess, &ClaudeProcess::permissionRequested, this, [this](const QString &action, const QString &description) {
         Q_UNUSED(description);

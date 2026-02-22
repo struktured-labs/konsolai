@@ -151,6 +151,26 @@ public:
     double monthlyBudgetUSD() const;
     void setMonthlyBudgetUSD(double budget);
 
+    // ========== Notification Settings ==========
+
+    bool notificationAudioEnabled() const;
+    void setNotificationAudioEnabled(bool enabled);
+
+    bool notificationDesktopEnabled() const;
+    void setNotificationDesktopEnabled(bool enabled);
+
+    bool notificationSystemTrayEnabled() const;
+    void setNotificationSystemTrayEnabled(bool enabled);
+
+    bool notificationInTerminalEnabled() const;
+    void setNotificationInTerminalEnabled(bool enabled);
+
+    double notificationAudioVolume() const;
+    void setNotificationAudioVolume(double volume);
+
+    bool notificationYoloEnabled() const;
+    void setNotificationYoloEnabled(bool enabled);
+
     /**
      * Save settings to disk
      */

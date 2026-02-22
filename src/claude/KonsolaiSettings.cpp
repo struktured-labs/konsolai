@@ -278,6 +278,86 @@ void KonsolaiSettings::setMonthlyBudgetUSD(double budget)
     Q_EMIT settingsChanged();
 }
 
+// ========== Notification Settings ==========
+
+bool KonsolaiSettings::notificationAudioEnabled() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    return group.readEntry("AudioEnabled", true);
+}
+
+void KonsolaiSettings::setNotificationAudioEnabled(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    group.writeEntry("AudioEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::notificationDesktopEnabled() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    return group.readEntry("DesktopEnabled", true);
+}
+
+void KonsolaiSettings::setNotificationDesktopEnabled(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    group.writeEntry("DesktopEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::notificationSystemTrayEnabled() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    return group.readEntry("SystemTrayEnabled", true);
+}
+
+void KonsolaiSettings::setNotificationSystemTrayEnabled(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    group.writeEntry("SystemTrayEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::notificationInTerminalEnabled() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    return group.readEntry("InTerminalEnabled", true);
+}
+
+void KonsolaiSettings::setNotificationInTerminalEnabled(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    group.writeEntry("InTerminalEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
+double KonsolaiSettings::notificationAudioVolume() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    return group.readEntry("AudioVolume", 0.7);
+}
+
+void KonsolaiSettings::setNotificationAudioVolume(double volume)
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    group.writeEntry("AudioVolume", volume);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::notificationYoloEnabled() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    return group.readEntry("YoloNotificationsEnabled", false);
+}
+
+void KonsolaiSettings::setNotificationYoloEnabled(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("Notifications"));
+    group.writeEntry("YoloNotificationsEnabled", enabled);
+    Q_EMIT settingsChanged();
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

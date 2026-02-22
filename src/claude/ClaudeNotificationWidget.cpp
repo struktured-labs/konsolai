@@ -172,6 +172,11 @@ void ClaudeNotificationWidget::updateColors(NotificationManager::NotificationTyp
         m_textColor = QColor(255, 255, 255);
         m_borderColor = QColor(56, 142, 60);
         break;
+    case NotificationManager::NotificationType::YoloApproval:
+        m_backgroundColor = QColor(255, 179, 0, 180); // Gold (semi-transparent)
+        m_textColor = QColor(33, 33, 33);
+        m_borderColor = QColor(255, 143, 0);
+        break;
     case NotificationManager::NotificationType::Info:
     default:
         m_backgroundColor = QColor(66, 66, 66, 230);   // Gray

@@ -7,6 +7,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
@@ -139,6 +140,20 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
                 QString cmd = inputVal.toObject().value(QStringLiteral("command")).toString();
                 if (!cmd.isEmpty()) {
                     Q_EMIT bashToolStarted(cmd);
+                }
+            }
+        }
+
+        // Detect AskUserQuestion tool for notification
+        if (toolName == QStringLiteral("AskUserQuestion")) {
+            QJsonValue inputVal = obj.value(QStringLiteral("tool_input"));
+            if (inputVal.isObject()) {
+                QJsonArray questions = inputVal.toObject().value(QStringLiteral("questions")).toArray();
+                if (!questions.isEmpty()) {
+                    QString question = questions[0].toObject().value(QStringLiteral("question")).toString();
+                    if (!question.isEmpty()) {
+                        Q_EMIT userQuestionDetected(question);
+                    }
                 }
             }
         }

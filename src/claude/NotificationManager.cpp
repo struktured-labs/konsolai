@@ -5,6 +5,7 @@
 
 #include "NotificationManager.h"
 #include "ClaudeSession.h"
+#include "KonsolaiSettings.h"
 
 #include <KLocalizedString>
 #include <KNotification>
@@ -29,6 +30,7 @@ NotificationManager::NotificationManager(QObject *parent)
         s_notificationManagerInstance = this;
     }
 
+    loadSettings();
     initSystemTray();
 }
 
@@ -100,6 +102,7 @@ void NotificationManager::updateSystemTray(NotificationType type, const QString 
         status = KStatusNotifierItem::Active;
         break;
     case NotificationType::TaskComplete:
+    case NotificationType::YoloApproval:
     case NotificationType::Info:
     default:
         status = KStatusNotifierItem::Passive;
@@ -132,6 +135,9 @@ void NotificationManager::showDesktopNotification(NotificationType type, const Q
     case NotificationType::TaskComplete:
         eventName = QStringLiteral("taskComplete");
         break;
+    case NotificationType::YoloApproval:
+        eventName = QStringLiteral("yoloApproval");
+        break;
     case NotificationType::Info:
     default:
         eventName = QStringLiteral("info");
@@ -149,9 +155,21 @@ void NotificationManager::showDesktopNotification(NotificationType type, const Q
 
 void NotificationManager::playSound(NotificationType type)
 {
-    // Only play sounds for important notifications
-    if (type == NotificationType::Info || type == NotificationType::TaskComplete) {
+    // Skip sounds for Info type (no sound file)
+    if (type == NotificationType::Info) {
         return;
+    }
+
+    // YoloApproval: skip if yolo notifications are disabled, or apply cooldown (max 1 per 5s)
+    if (type == NotificationType::YoloApproval) {
+        if (!m_yoloNotificationsEnabled) {
+            return;
+        }
+        QDateTime now = QDateTime::currentDateTime();
+        if (m_lastYoloNotificationTime.isValid() && m_lastYoloNotificationTime.msecsTo(now) < 5000) {
+            return;
+        }
+        m_lastYoloNotificationTime = now;
     }
 
     QString path = soundPath(type);
@@ -159,7 +177,7 @@ void NotificationManager::playSound(NotificationType type)
         return;
     }
 
-    QSoundEffect *sound = new QSoundEffect(this);
+    auto *sound = new QSoundEffect(this);
     sound->setSource(QUrl::fromLocalFile(path));
     sound->setVolume(m_audioVolume);
 
@@ -207,6 +225,9 @@ QString NotificationManager::soundPath(NotificationType type)
     case NotificationType::TaskComplete:
         soundName = QStringLiteral("complete");
         break;
+    case NotificationType::YoloApproval:
+        soundName = QStringLiteral("yolo");
+        break;
     case NotificationType::Info:
     default:
         return QString();
@@ -238,10 +259,59 @@ QString NotificationManager::iconName(NotificationType type)
         return QStringLiteral("dialog-question");
     case NotificationType::TaskComplete:
         return QStringLiteral("dialog-ok");
+    case NotificationType::YoloApproval:
+        return QStringLiteral("dialog-ok-apply");
     case NotificationType::Info:
     default:
         return QStringLiteral("dialog-information");
     }
+}
+
+void NotificationManager::setYoloNotificationsEnabled(bool enabled)
+{
+    m_yoloNotificationsEnabled = enabled;
+    saveSettings();
+}
+
+void NotificationManager::loadSettings()
+{
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    // Rebuild enabled channels from individual settings
+    m_enabledChannels = Channel::None;
+    if (settings->notificationAudioEnabled()) {
+        m_enabledChannels |= Channel::Audio;
+    }
+    if (settings->notificationDesktopEnabled()) {
+        m_enabledChannels |= Channel::Desktop;
+    }
+    if (settings->notificationSystemTrayEnabled()) {
+        m_enabledChannels |= Channel::SystemTray;
+    }
+    if (settings->notificationInTerminalEnabled()) {
+        m_enabledChannels |= Channel::InTerminal;
+    }
+    m_audioVolume = qBound(0.0, settings->notificationAudioVolume(), 1.0);
+    m_yoloNotificationsEnabled = settings->notificationYoloEnabled();
+}
+
+void NotificationManager::saveSettings()
+{
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    settings->setNotificationAudioEnabled(m_enabledChannels.testFlag(Channel::Audio));
+    settings->setNotificationDesktopEnabled(m_enabledChannels.testFlag(Channel::Desktop));
+    settings->setNotificationSystemTrayEnabled(m_enabledChannels.testFlag(Channel::SystemTray));
+    settings->setNotificationInTerminalEnabled(m_enabledChannels.testFlag(Channel::InTerminal));
+    settings->setNotificationAudioVolume(m_audioVolume);
+    settings->setNotificationYoloEnabled(m_yoloNotificationsEnabled);
+    settings->save();
 }
 
 } // namespace Konsolai

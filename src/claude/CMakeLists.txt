@@ -55,6 +55,7 @@ target_link_libraries(konsolai_claude
     KF6::CoreAddons
     KF6::ConfigCore
     KF6::Notifications
+    KF6::NotifyConfig
     KF6::I18n
 )
 

@@ -9,6 +9,7 @@
 #include "konsoleprivate_export.h"
 
 #include "config-konsole.h"
+#include <QDateTime>
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -50,7 +51,8 @@ public:
         TaskComplete,   // Task completed successfully
         WaitingInput,   // Waiting for user input
         Permission,     // Permission required
-        Error           // Error occurred
+        Error, // Error occurred
+        YoloApproval // Yolo mode auto-approved an action
     };
     Q_ENUM(NotificationType)
 
@@ -130,6 +132,25 @@ public:
     void setAudioVolume(qreal volume);
 
     /**
+     * Whether yolo approval notifications are enabled (silent by default)
+     */
+    bool yoloNotificationsEnabled() const
+    {
+        return m_yoloNotificationsEnabled;
+    }
+    void setYoloNotificationsEnabled(bool enabled);
+
+    /**
+     * Save notification settings to KonsolaiSettings
+     */
+    void saveSettings();
+
+    /**
+     * Load notification settings from KonsolaiSettings
+     */
+    void loadSettings();
+
+    /**
      * Get sound file path for notification type
      */
     static QString soundPath(NotificationType type);
@@ -155,14 +176,15 @@ Q_SIGNALS:
 
 private:
     void initSystemTray();
-    void initSounds();
 
 #if HAVE_KSTATUSNOTIFIERITEM
     KStatusNotifierItem *m_systemTray = nullptr;
 #endif
     Channels m_enabledChannels = Channel::All;
     qreal m_audioVolume = 0.7;
+    bool m_yoloNotificationsEnabled = false;
     NotificationType m_currentTrayStatus = NotificationType::Info;
+    QDateTime m_lastYoloNotificationTime; // cooldown for yolo notification spam
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(NotificationManager::Channels)

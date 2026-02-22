@@ -152,6 +152,11 @@ Q_SIGNALS:
     void bashToolStarted(const QString &command);
 
     /**
+     * Emitted when Claude presents a question to the user (AskUserQuestion tool)
+     */
+    void userQuestionDetected(const QString &question);
+
+    /**
      * Emitted when a Task tool call is about to spawn a subagent (from PreToolUse hook event)
      */
     void taskToolCalled(const QString &description);

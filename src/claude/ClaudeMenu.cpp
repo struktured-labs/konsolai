@@ -8,9 +8,11 @@
 #include "ClaudeSessionRegistry.h"
 #include "ClaudeSessionState.h"
 #include "KonsolaiSettings.h"
+#include "NotificationManager.h"
 #include "TmuxManager.h"
 
 #include <KLocalizedString>
+#include <KNotifyConfigWidget>
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -60,6 +62,7 @@ ClaudeMenu::ClaudeMenu(QWidget *parent)
 
     createActions();
     createReattachMenu();
+    createNotificationMenu();
 
     // Update menu before showing
     connect(this, &QMenu::aboutToShow, this, &ClaudeMenu::onAboutToShow);
@@ -282,6 +285,7 @@ void ClaudeMenu::onAboutToShow()
 {
     updateActionStates();
     updateReattachMenu();
+    syncNotificationToggles();
 }
 
 void ClaudeMenu::onReattachSession()
@@ -641,6 +645,98 @@ void ClaudeMenu::onArchiveSession()
     if (m_registry) {
         m_registry->refreshOrphanedSessions();
     }
+}
+
+void ClaudeMenu::createNotificationMenu()
+{
+    m_notificationMenu = new QMenu(i18n("&Notifications"), this);
+    m_notificationMenu->setIcon(QIcon::fromTheme(QStringLiteral("preferences-desktop-notification")));
+
+    // Configure Events... (opens standard KDE notification config dialog)
+    m_configureNotificationsAction = m_notificationMenu->addAction(QIcon::fromTheme(QStringLiteral("configure")), i18n("Configure &Events..."));
+    connect(m_configureNotificationsAction, &QAction::triggered, this, &ClaudeMenu::onConfigureNotifications);
+
+    m_notificationMenu->addSeparator();
+
+    // Channel toggles
+    m_soundToggleAction = m_notificationMenu->addAction(i18n("&Sound"));
+    m_soundToggleAction->setCheckable(true);
+    m_soundToggleAction->setData(static_cast<int>(NotificationManager::Channel::Audio));
+    connect(m_soundToggleAction, &QAction::toggled, this, &ClaudeMenu::onToggleNotificationChannel);
+
+    m_desktopToggleAction = m_notificationMenu->addAction(i18n("&Desktop Popups"));
+    m_desktopToggleAction->setCheckable(true);
+    m_desktopToggleAction->setData(static_cast<int>(NotificationManager::Channel::Desktop));
+    connect(m_desktopToggleAction, &QAction::toggled, this, &ClaudeMenu::onToggleNotificationChannel);
+
+    m_systemTrayToggleAction = m_notificationMenu->addAction(i18n("System &Tray"));
+    m_systemTrayToggleAction->setCheckable(true);
+    m_systemTrayToggleAction->setData(static_cast<int>(NotificationManager::Channel::SystemTray));
+    connect(m_systemTrayToggleAction, &QAction::toggled, this, &ClaudeMenu::onToggleNotificationChannel);
+
+    m_inTerminalToggleAction = m_notificationMenu->addAction(i18n("&In-Terminal Overlay"));
+    m_inTerminalToggleAction->setCheckable(true);
+    m_inTerminalToggleAction->setData(static_cast<int>(NotificationManager::Channel::InTerminal));
+    connect(m_inTerminalToggleAction, &QAction::toggled, this, &ClaudeMenu::onToggleNotificationChannel);
+
+    m_notificationMenu->addSeparator();
+
+    // Yolo notification toggle
+    m_yoloNotifyToggleAction = m_notificationMenu->addAction(i18n("&Yolo Approval Sounds"));
+    m_yoloNotifyToggleAction->setCheckable(true);
+    m_yoloNotifyToggleAction->setToolTip(i18n("Play a subtle sound when yolo mode auto-approves an action"));
+    connect(m_yoloNotifyToggleAction, &QAction::toggled, this, [](bool checked) {
+        if (auto *mgr = NotificationManager::instance()) {
+            mgr->setYoloNotificationsEnabled(checked);
+        }
+    });
+
+    syncNotificationToggles();
+
+    // Insert before "Configure Hooks..."
+    insertMenu(m_configureHooksAction, m_notificationMenu);
+}
+
+void ClaudeMenu::syncNotificationToggles()
+{
+    auto *mgr = NotificationManager::instance();
+    if (!mgr) {
+        return;
+    }
+
+    auto block = [](QAction *a, bool checked) {
+        a->blockSignals(true);
+        a->setChecked(checked);
+        a->blockSignals(false);
+    };
+
+    block(m_soundToggleAction, mgr->isChannelEnabled(NotificationManager::Channel::Audio));
+    block(m_desktopToggleAction, mgr->isChannelEnabled(NotificationManager::Channel::Desktop));
+    block(m_systemTrayToggleAction, mgr->isChannelEnabled(NotificationManager::Channel::SystemTray));
+    block(m_inTerminalToggleAction, mgr->isChannelEnabled(NotificationManager::Channel::InTerminal));
+    block(m_yoloNotifyToggleAction, mgr->yoloNotificationsEnabled());
+}
+
+void ClaudeMenu::onConfigureNotifications()
+{
+    KNotifyConfigWidget::configure(this, QStringLiteral("konsolai"));
+}
+
+void ClaudeMenu::onToggleNotificationChannel()
+{
+    auto *action = qobject_cast<QAction *>(sender());
+    if (!action) {
+        return;
+    }
+
+    auto *mgr = NotificationManager::instance();
+    if (!mgr) {
+        return;
+    }
+
+    auto channel = static_cast<NotificationManager::Channel>(action->data().toInt());
+    mgr->enableChannel(channel, action->isChecked());
+    mgr->saveSettings();
 }
 
 } // namespace Konsolai

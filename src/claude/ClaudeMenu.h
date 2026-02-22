@@ -6,6 +6,7 @@
 #ifndef CLAUDEMENU_H
 #define CLAUDEMENU_H
 
+#include "NotificationManager.h"
 #include "konsoleprivate_export.h"
 
 #include <QAction>
@@ -180,6 +181,8 @@ private Q_SLOTS:
     void onSetAutoContinuePrompt();
     void onArchiveAll();
     void onArchiveSession();
+    void onConfigureNotifications();
+    void onToggleNotificationChannel();
 
 private:
     void createActions();
@@ -219,6 +222,17 @@ private:
 
     // Whether double yolo fires before triple yolo
     bool m_trySuggestionsFirst = true;
+
+    // Notification submenu
+    QMenu *m_notificationMenu = nullptr;
+    QAction *m_configureNotificationsAction = nullptr;
+    QAction *m_soundToggleAction = nullptr;
+    QAction *m_desktopToggleAction = nullptr;
+    QAction *m_systemTrayToggleAction = nullptr;
+    QAction *m_inTerminalToggleAction = nullptr;
+    QAction *m_yoloNotifyToggleAction = nullptr;
+    void createNotificationMenu();
+    void syncNotificationToggles();
 };
 
 } // namespace Konsolai
