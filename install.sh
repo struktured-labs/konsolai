@@ -8,10 +8,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build"
 
 if [ ! -d "$BUILD_DIR" ]; then
-    echo "Error: Build directory not found at $BUILD_DIR"
-    echo "Run cmake and build first."
-    exit 1
+    echo "Build directory not found, configuring..."
+    cmake -B "$BUILD_DIR" -G Ninja "$SCRIPT_DIR"
 fi
+
+# Build (ninja is incremental — only rebuilds stale targets)
+echo "Building Konsolai..."
+cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 echo "Installing Konsolai to system (requires sudo)..."
 sudo cmake --install "$BUILD_DIR"
