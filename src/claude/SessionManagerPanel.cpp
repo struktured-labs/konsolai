@@ -1731,7 +1731,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session && !session->subagents().isEmpty()) {
-            const auto &subagents = session->subagents();
+            // Take a snapshot — the live map could be modified by async hook events
+            const auto subagents = session->subagents();
             bool hideCompleted = m_hideCompletedAgents.contains(meta.sessionId);
 
             // Helper: create a subagent tree item under a given parent
