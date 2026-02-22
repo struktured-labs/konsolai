@@ -56,6 +56,27 @@ struct KONSOLEPRIVATE_EXPORT SessionBudget {
         return timeLimitMinutes > 0 || costCeilingUSD > 0.0 || tokenCeiling > 0;
     }
 
+    /**
+     * Returns the maximum percent used across all budget dimensions, or -1 if no limits are set.
+     */
+    double usedPercent(double currentCostUSD, quint64 currentTokens) const
+    {
+        if (!hasAnyLimit()) {
+            return -1.0;
+        }
+        double maxPct = 0.0;
+        if (costCeilingUSD > 0.0) {
+            maxPct = qMax(maxPct, currentCostUSD / costCeilingUSD * 100.0);
+        }
+        if (tokenCeiling > 0) {
+            maxPct = qMax(maxPct, static_cast<double>(currentTokens) / static_cast<double>(tokenCeiling) * 100.0);
+        }
+        if (timeLimitMinutes > 0) {
+            maxPct = qMax(maxPct, static_cast<double>(elapsedMinutes()) / static_cast<double>(timeLimitMinutes) * 100.0);
+        }
+        return maxPct;
+    }
+
     int elapsedMinutes() const
     {
         if (!startedAt.isValid()) {

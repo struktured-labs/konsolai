@@ -1943,6 +1943,51 @@ void SessionManagerPanel::saveMetadata()
     if (file.open(QIODevice::WriteOnly)) {
         file.write(QJsonDocument(array).toJson());
     }
+
+    Q_EMIT usageAggregateChanged();
+}
+
+double SessionManagerPanel::weeklySpentUSD() const
+{
+    // Sum estimatedCostUSD from approval log entries in the current week (Mon-Sun)
+    QDateTime now = QDateTime::currentDateTime();
+    QDate today = now.date();
+    // dayOfWeek: 1=Mon .. 7=Sun
+    QDate weekStart = today.addDays(-(today.dayOfWeek() - 1));
+    QDateTime windowStart(weekStart, QTime(0, 0, 0));
+
+    double total = 0.0;
+    for (const auto &meta : m_metadata) {
+        if (meta.approvalLog.isEmpty()) {
+            continue;
+        }
+        // Use the last entry's cost (cumulative per-session)
+        const auto &last = meta.approvalLog.last();
+        // Only count sessions active this week
+        if (last.timestamp >= windowStart) {
+            total += last.estimatedCostUSD;
+        }
+    }
+    return total;
+}
+
+double SessionManagerPanel::monthlySpentUSD() const
+{
+    QDateTime now = QDateTime::currentDateTime();
+    QDate monthStart(now.date().year(), now.date().month(), 1);
+    QDateTime windowStart(monthStart, QTime(0, 0, 0));
+
+    double total = 0.0;
+    for (const auto &meta : m_metadata) {
+        if (meta.approvalLog.isEmpty()) {
+            continue;
+        }
+        const auto &last = meta.approvalLog.last();
+        if (last.timestamp >= windowStart) {
+            total += last.estimatedCostUSD;
+        }
+    }
+    return total;
 }
 
 SessionMetadata *SessionManagerPanel::findMetadata(const QString &sessionId)

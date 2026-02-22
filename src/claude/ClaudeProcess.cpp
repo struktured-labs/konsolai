@@ -84,6 +84,21 @@ QString ClaudeProcess::modelName(Model model)
     }
 }
 
+QString ClaudeProcess::shortModelName(Model model)
+{
+    switch (model) {
+    case Model::Opus:
+        return QStringLiteral("opus");
+    case Model::Sonnet:
+        return QStringLiteral("sonnet");
+    case Model::Haiku:
+        return QStringLiteral("haiku");
+    case Model::Default:
+    default:
+        return QString();
+    }
+}
+
 ClaudeProcess::Model ClaudeProcess::parseModel(const QString &name)
 {
     const QString lower = name.toLower();

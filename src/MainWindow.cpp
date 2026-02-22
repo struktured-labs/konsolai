@@ -627,6 +627,18 @@ void MainWindow::setupActions()
         triggerAction(QStringLiteral("new-tab"));
     });
 
+    // Update status widget with aggregated weekly/monthly usage
+    auto updateUsageAggregates = [this]() {
+        auto *settings = Konsolai::KonsolaiSettings::instance();
+        double weeklyBudget = settings ? settings->weeklyBudgetUSD() : 0.0;
+        double monthlyBudget = settings ? settings->monthlyBudgetUSD() : 0.0;
+        _claudeStatusWidget->setWeeklyUsage(_sessionPanel->weeklySpentUSD(), weeklyBudget);
+        _claudeStatusWidget->setMonthlyUsage(_sessionPanel->monthlySpentUSD(), monthlyBudget);
+    };
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::usageAggregateChanged, this, updateUsageAggregates);
+    // Set initial values
+    updateUsageAggregates();
+
     connect(_sessionPanel, &Konsolai::SessionManagerPanel::unarchiveRequested, this, [this](const QString &sessionId, const QString &workingDirectory) {
         // Create a new session with the archived session's working directory
         // Get the Claude profile

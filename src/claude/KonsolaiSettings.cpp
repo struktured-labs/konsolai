@@ -252,6 +252,32 @@ void KonsolaiSettings::setBudgetWarningThresholdPercent(double percent)
     Q_EMIT settingsChanged();
 }
 
+double KonsolaiSettings::weeklyBudgetUSD() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return group.readEntry("WeeklyBudgetUSD", 0.0);
+}
+
+void KonsolaiSettings::setWeeklyBudgetUSD(double budget)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("WeeklyBudgetUSD", budget);
+    Q_EMIT settingsChanged();
+}
+
+double KonsolaiSettings::monthlyBudgetUSD() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    return group.readEntry("MonthlyBudgetUSD", 0.0);
+}
+
+void KonsolaiSettings::setMonthlyBudgetUSD(double budget)
+{
+    KConfigGroup group(m_config, QStringLiteral("Budget"));
+    group.writeEntry("MonthlyBudgetUSD", budget);
+    Q_EMIT settingsChanged();
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

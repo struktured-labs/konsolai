@@ -91,6 +91,11 @@ public:
     static QString modelName(Model model);
 
     /**
+     * Get a short display name: "opus", "sonnet", "haiku", or empty for Default
+     */
+    static QString shortModelName(Model model);
+
+    /**
      * Parse model from string
      */
     static Model parseModel(const QString &name);

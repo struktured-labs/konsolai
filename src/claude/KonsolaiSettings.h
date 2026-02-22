@@ -140,6 +140,18 @@ public:
     void setBudgetWarningThresholdPercent(double percent);
 
     /**
+     * Weekly spending budget in USD (0.0 = unlimited)
+     */
+    double weeklyBudgetUSD() const;
+    void setWeeklyBudgetUSD(double budget);
+
+    /**
+     * Monthly spending budget in USD (0.0 = unlimited)
+     */
+    double monthlyBudgetUSD() const;
+    void setMonthlyBudgetUSD(double budget);
+
+    /**
      * Save settings to disk
      */
     void save();

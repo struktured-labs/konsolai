@@ -48,6 +48,16 @@ public:
     void clearSession();
 
     /**
+     * Set aggregated weekly usage (called from MainWindow)
+     */
+    void setWeeklyUsage(double spent, double budget);
+
+    /**
+     * Set aggregated monthly usage (called from MainWindow)
+     */
+    void setMonthlyUsage(double spent, double budget);
+
+    /**
      * Get the current session
      */
     ClaudeSession *session() const
@@ -82,6 +92,12 @@ private:
 
     ClaudeProcess::State m_currentState = ClaudeProcess::State::NotRunning;
     QString m_currentTask;
+
+    // Aggregated usage
+    double m_weeklySpent = 0.0;
+    double m_weeklyBudget = 0.0;
+    double m_monthlySpent = 0.0;
+    double m_monthlyBudget = 0.0;
 
     // Spinner animation
     QTimer *m_spinnerTimer = nullptr;

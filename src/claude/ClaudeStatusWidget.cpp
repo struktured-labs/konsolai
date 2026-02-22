@@ -4,6 +4,7 @@
 */
 
 #include "ClaudeStatusWidget.h"
+#include "BudgetController.h"
 #include "ClaudeSession.h"
 
 #include <QHBoxLayout>
@@ -129,6 +130,20 @@ void ClaudeStatusWidget::onSessionDestroyed()
     updateDisplay();
 }
 
+void ClaudeStatusWidget::setWeeklyUsage(double spent, double budget)
+{
+    m_weeklySpent = spent;
+    m_weeklyBudget = budget;
+    updateDisplay();
+}
+
+void ClaudeStatusWidget::setMonthlyUsage(double spent, double budget)
+{
+    m_monthlySpent = spent;
+    m_monthlyBudget = budget;
+    updateDisplay();
+}
+
 void ClaudeStatusWidget::updateDisplay()
 {
     QString stateStr = stateText(m_currentState);
@@ -139,10 +154,19 @@ void ClaudeStatusWidget::updateDisplay()
         icon = QString::fromUtf8(SPINNER_FRAMES[m_spinnerIndex]);
     }
 
-    // Build status text with approval count and token usage (using rich text for colored bolts)
+    // Build status text (rich text for colored elements)
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
+
+    // Model name
+    if (m_session) {
+        QString model = ClaudeProcess::shortModelName(m_session->claudeModel());
+        if (!model.isEmpty()) {
+            statusText += QStringLiteral(" (%1)").arg(model);
+        }
+    }
+
+    // Yolo bolts + approval count
     if (m_session && m_session->totalApprovalCount() > 0) {
-        // Show one bolt per enabled yolo level, each in its own color
         QString bolts;
         if (m_session->yoloMode()) {
             bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
@@ -154,16 +178,67 @@ void ClaudeStatusWidget::updateDisplay()
             bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
         }
         if (bolts.isEmpty()) {
-            // Approvals exist but no yolo levels active (manual approvals)
             statusText += QStringLiteral(" │ %1").arg(QString::number(m_session->totalApprovalCount()));
         } else {
             statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
         }
     }
+
+    // Token usage + cost
     if (m_session && m_session->tokenUsage().totalTokens() > 0) {
         const auto &usage = m_session->tokenUsage();
         statusText += QStringLiteral(" │ %1 ($%2)").arg(usage.formatCompact(), QString::number(usage.estimatedCostUSD(), 'f', 2));
     }
+
+    // Session budget percent
+    if (m_session) {
+        auto *bc = m_session->budgetController();
+        if (bc && bc->budget().hasAnyLimit()) {
+            double pct = bc->budget().usedPercent(m_session->tokenUsage().estimatedCostUSD(), m_session->tokenUsage().totalTokens());
+            if (pct >= 0.0) {
+                QString pctStr = QStringLiteral("%1%").arg(pct, 0, 'f', 0);
+                if (pct >= 100.0) {
+                    statusText += QStringLiteral(" │ <span style='color:#f44336'>%1</span>").arg(pctStr);
+                } else if (pct >= 80.0) {
+                    statusText += QStringLiteral(" │ <span style='color:#ff9800'>%1</span>").arg(pctStr);
+                } else {
+                    statusText += QStringLiteral(" │ %1").arg(pctStr);
+                }
+            }
+        }
+    }
+
+    // Weekly spending
+    if (m_weeklySpent > 0.0 || m_weeklyBudget > 0.0) {
+        QString weekStr = QStringLiteral("W:$%1").arg(m_weeklySpent, 0, 'f', 2);
+        if (m_weeklyBudget > 0.0) {
+            weekStr += QStringLiteral("/$%1").arg(m_weeklyBudget, 0, 'f', 0);
+            double pct = m_weeklySpent / m_weeklyBudget * 100.0;
+            if (pct >= 100.0) {
+                weekStr = QStringLiteral("<span style='color:#f44336'>%1</span>").arg(weekStr);
+            } else if (pct >= 80.0) {
+                weekStr = QStringLiteral("<span style='color:#ff9800'>%1</span>").arg(weekStr);
+            }
+        }
+        statusText += QStringLiteral(" │ %1").arg(weekStr);
+    }
+
+    // Monthly spending
+    if (m_monthlySpent > 0.0 || m_monthlyBudget > 0.0) {
+        QString monthStr = QStringLiteral("M:$%1").arg(m_monthlySpent, 0, 'f', 2);
+        if (m_monthlyBudget > 0.0) {
+            monthStr += QStringLiteral("/$%1").arg(m_monthlyBudget, 0, 'f', 0);
+            double pct = m_monthlySpent / m_monthlyBudget * 100.0;
+            if (pct >= 100.0) {
+                monthStr = QStringLiteral("<span style='color:#f44336'>%1</span>").arg(monthStr);
+            } else if (pct >= 80.0) {
+                monthStr = QStringLiteral("<span style='color:#ff9800'>%1</span>").arg(monthStr);
+            }
+        }
+        statusText += QStringLiteral(" │ %1").arg(monthStr);
+    }
+
+    // Resource usage
     if (m_session && (m_session->resourceUsage().rssBytes > 0 || m_session->resourceUsage().cpuPercent > 0.0)) {
         statusText += QStringLiteral(" │ %1").arg(m_session->resourceUsage().formatCompact());
     }

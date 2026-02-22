@@ -121,6 +121,16 @@ public:
         return m_collapsed;
     }
 
+    /**
+     * Sum of estimated cost across all sessions for the current week (Mon-Sun)
+     */
+    double weeklySpentUSD() const;
+
+    /**
+     * Sum of estimated cost across all sessions for the current calendar month
+     */
+    double monthlySpentUSD() const;
+
 public Q_SLOTS:
     /**
      * Toggle panel collapsed state
@@ -207,6 +217,11 @@ Q_SIGNALS:
      * Emitted when collapsed state changes
      */
     void collapsedChanged(bool collapsed);
+
+    /**
+     * Emitted when aggregated usage may have changed (after metadata save)
+     */
+    void usageAggregateChanged();
 
 private Q_SLOTS:
     void onItemDoubleClicked(QTreeWidgetItem *item, int column);
