@@ -2026,6 +2026,19 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     return stateRank(a->state) < stateRank(b->state);
                 });
 
+                // Compute aggregate state for this round (used by both prompt group and subtasks nodes)
+                bool roundAnyWorking = false, roundAnyIdle = false;
+                for (const auto *a : roundAgents) {
+                    if (a->state == ClaudeProcess::State::Working)
+                        roundAnyWorking = true;
+                    if (a->state == ClaudeProcess::State::Idle)
+                        roundAnyIdle = true;
+                }
+                for (const auto *p : roundProcs) {
+                    if (p->status == SubprocessInfo::Running)
+                        roundAnyWorking = true;
+                }
+
                 // Determine parent for this round's items
                 QTreeWidgetItem *roundParent = item;
                 if (multipleRounds) {
@@ -2040,23 +2053,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     promptItem->setData(0, Qt::UserRole + 1, meta.sessionId);
                     promptItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
 
-                    // Aggregate state icon
-                    bool anyWorking = false, anyIdle = false;
-                    for (const auto *a : roundAgents) {
-                        if (a->state == ClaudeProcess::State::Working)
-                            anyWorking = true;
-                        if (a->state == ClaudeProcess::State::Idle)
-                            anyIdle = true;
-                    }
-                    for (const auto *p : roundProcs) {
-                        if (p->status == SubprocessInfo::Running)
-                            anyWorking = true;
-                    }
-
-                    if (anyWorking) {
+                    if (roundAnyWorking) {
                         promptItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
                         promptItem->setForeground(0, QBrush(Qt::darkGreen));
-                    } else if (anyIdle) {
+                    } else if (roundAnyIdle) {
                         promptItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
                         promptItem->setForeground(0, QBrush(Qt::gray));
                     } else {
@@ -2067,6 +2067,28 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     promptItem->setExpanded(true);
                     roundParent = promptItem;
                 }
+
+                // Create "Subtasks" container node — collapsible wrapper for agents and processes
+                auto *subtasksItem = new QTreeWidgetItem(roundParent);
+                int totalItems = roundAgents.size() + roundProcs.size();
+                subtasksItem->setText(0, QStringLiteral("Subtasks (%1)").arg(totalItems));
+                subtasksItem->setData(0, Qt::UserRole + 5, QStringLiteral("subtasks"));
+                subtasksItem->setData(0, Qt::UserRole + 1, meta.sessionId);
+                subtasksItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+
+                if (roundAnyWorking) {
+                    subtasksItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
+                    subtasksItem->setForeground(0, QBrush(Qt::darkGreen));
+                } else if (roundAnyIdle) {
+                    subtasksItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
+                    subtasksItem->setForeground(0, QBrush(Qt::gray));
+                } else {
+                    subtasksItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
+                    subtasksItem->setForeground(0, QBrush(QColor(140, 140, 140)));
+                }
+
+                // Smart expand: show details when active, collapse when all done
+                subtasksItem->setExpanded(roundAnyWorking || roundAnyIdle);
 
                 // Group agents by taskDescription within this round
                 QMap<QString, QList<const SubagentInfo *>> groups;
@@ -2095,25 +2117,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     const auto &agentList = groups[groupKey];
 
                     if (groupKey.isEmpty()) {
-                        // Ungrouped agents: add flat
+                        // Ungrouped agents: add flat under subtasks
                         for (const auto *info : agentList) {
-                            addSubagentItem(roundParent, *info);
+                            addSubagentItem(subtasksItem, *info);
                         }
                     } else if (agentList.size() == 1) {
                         // Single agent in group: show description inline
-                        auto *childItem = addSubagentItem(roundParent, *agentList.first());
+                        auto *childItem = addSubagentItem(subtasksItem, *agentList.first());
                         QString existingText = childItem->text(0);
                         childItem->setText(0, QStringLiteral("%1 \u2014 %2").arg(groupKey, existingText));
                     } else {
-                        // Multiple agents: create task group node
-                        auto *groupItem = new QTreeWidgetItem(roundParent);
+                        // Multiple agents: create task group node under subtasks
+                        auto *groupItem = new QTreeWidgetItem(subtasksItem);
 
-                        bool anyWorking = false, anyIdle = false;
+                        bool groupAnyWorking = false, groupAnyIdle = false;
                         for (const auto *info : agentList) {
                             if (info->state == ClaudeProcess::State::Working)
-                                anyWorking = true;
+                                groupAnyWorking = true;
                             if (info->state == ClaudeProcess::State::Idle)
-                                anyIdle = true;
+                                groupAnyIdle = true;
                         }
 
                         groupItem->setText(0, QStringLiteral("%1 (%2 agents)").arg(groupKey).arg(agentList.size()));
@@ -2121,10 +2143,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         groupItem->setData(0, Qt::UserRole + 1, meta.sessionId);
                         groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
 
-                        if (anyWorking) {
+                        if (groupAnyWorking) {
                             groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
                             groupItem->setForeground(0, QBrush(Qt::darkGreen));
-                        } else if (anyIdle) {
+                        } else if (groupAnyIdle) {
                             groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
                             groupItem->setForeground(0, QBrush(Qt::gray));
                         } else {
@@ -2141,9 +2163,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     }
                 }
 
-                // Add subprocess items for this round
+                // Add subprocess items for this round under subtasks
                 for (const auto *procInfo : roundProcs) {
-                    addSubprocessItem(roundParent, *procInfo);
+                    addSubprocessItem(subtasksItem, *procInfo);
                 }
             }
 
