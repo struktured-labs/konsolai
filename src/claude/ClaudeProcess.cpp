@@ -132,6 +132,17 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         QString toolName = obj.value(QStringLiteral("tool_name")).toString();
         setCurrentTask(QStringLiteral("Using tool: %1").arg(toolName));
 
+        // Capture Bash tool command for subprocess tracking
+        if (toolName == QStringLiteral("Bash")) {
+            QJsonValue inputVal = obj.value(QStringLiteral("tool_input"));
+            if (inputVal.isObject()) {
+                QString cmd = inputVal.toObject().value(QStringLiteral("command")).toString();
+                if (!cmd.isEmpty()) {
+                    Q_EMIT bashToolStarted(cmd);
+                }
+            }
+        }
+
         // Capture Task tool description for subagent grouping
         if (toolName == QStringLiteral("Task")) {
             QJsonValue inputVal = obj.value(QStringLiteral("tool_input"));

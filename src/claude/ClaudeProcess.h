@@ -147,6 +147,11 @@ Q_SIGNALS:
     void toolUseCompleted(const QString &toolName, const QString &toolResponse);
 
     /**
+     * Emitted when a Bash tool call starts (from PreToolUse hook event)
+     */
+    void bashToolStarted(const QString &command);
+
+    /**
      * Emitted when a Task tool call is about to spawn a subagent (from PreToolUse hook event)
      */
     void taskToolCalled(const QString &description);

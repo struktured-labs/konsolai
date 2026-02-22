@@ -20,6 +20,7 @@
 #include <QTimer>
 
 #ifdef Q_OS_LINUX
+#include <signal.h> // kill(), SIGTERM, SIGKILL
 #include <unistd.h> // sysconf(_SC_CLK_TCK)
 #endif
 
@@ -612,9 +613,33 @@ void ClaudeSession::connectSignals()
         }
     });
 
+    // Advance prompt round when Claude finishes a response
+    connect(m_claudeProcess, &ClaudeProcess::taskFinished, this, [this]() {
+        m_currentPromptRound++;
+    });
+
     // Capture Task tool descriptions for subagent grouping
     connect(m_claudeProcess, &ClaudeProcess::taskToolCalled, this, [this](const QString &description) {
         m_pendingTaskDescriptions.enqueue(description);
+    });
+
+    // Track Bash tool starts as subprocesses
+    connect(m_claudeProcess, &ClaudeProcess::bashToolStarted, this, [this](const QString &command) {
+        SubprocessInfo info;
+        info.id = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+        info.command = command.length() > 60 ? command.left(57) + QStringLiteral("...") : command;
+        info.fullCommand = command;
+        info.status = SubprocessInfo::Running;
+        info.startedAt = QDateTime::currentDateTime();
+        info.promptGroupId = m_currentPromptRound;
+
+        if (!m_promptGroupLabels.contains(m_currentPromptRound)) {
+            m_promptGroupLabels[m_currentPromptRound] = QStringLiteral("Prompt #%1").arg(m_currentPromptRound + 1);
+        }
+
+        m_subprocesses.insert(info.id, info);
+        m_pendingBashIds.enqueue(info.id);
+        Q_EMIT subprocessChanged(info.id);
     });
 
     // Handle subagent/team events
@@ -628,6 +653,12 @@ void ClaudeSession::connectSignals()
                 info.state = ClaudeProcess::State::Working;
                 info.startedAt = QDateTime::currentDateTime();
                 info.lastUpdated = info.startedAt;
+
+                // Assign prompt group
+                info.promptGroupId = m_currentPromptRound;
+                if (!m_promptGroupLabels.contains(m_currentPromptRound)) {
+                    m_promptGroupLabels[m_currentPromptRound] = QStringLiteral("Prompt #%1").arg(m_currentPromptRound + 1);
+                }
 
                 // Correlate with pending Task tool description
                 if (!m_pendingTaskDescriptions.isEmpty()) {
@@ -738,6 +769,26 @@ void ClaudeSession::connectSignals()
             if (m_approvalLog[i].toolName == toolName && m_approvalLog[i].toolOutput.isEmpty()) {
                 m_approvalLog[i].toolOutput = toolResponse;
                 break;
+            }
+        }
+
+        // Track Bash tool completion for subprocess tracking
+        if (toolName == QStringLiteral("Bash") && !m_pendingBashIds.isEmpty()) {
+            QString id = m_pendingBashIds.dequeue();
+            if (m_subprocesses.contains(id)) {
+                auto &info = m_subprocesses[id];
+                info.status = SubprocessInfo::Completed;
+                info.finishedAt = QDateTime::currentDateTime();
+                info.output = toolResponse;
+                // Try to parse exit code from response JSON
+                QJsonDocument doc = QJsonDocument::fromJson(toolResponse.toUtf8());
+                if (doc.isObject()) {
+                    info.exitCode = doc.object().value(QStringLiteral("exitCode")).toInt(0);
+                    if (info.exitCode != 0) {
+                        info.status = SubprocessInfo::Failed;
+                    }
+                }
+                Q_EMIT subprocessChanged(id);
             }
         }
     });
@@ -1138,6 +1189,10 @@ void ClaudeSession::restart()
     m_subagents.clear();
     m_pendingTaskDescriptions.clear();
     m_teamName.clear();
+    m_currentPromptRound = 0;
+    m_promptGroupLabels.clear();
+    m_subprocesses.clear();
+    m_pendingBashIds.clear();
     if (m_claudeProcess) {
         m_claudeProcess->reset();
     }
@@ -2024,6 +2079,128 @@ void ClaudeSession::refreshResourceUsage()
         m_resourceUsage = usage;
         Q_EMIT resourceUsageChanged();
     }
+
+    // Scan child processes for subprocess PID resolution and resource stats
+    if (m_claudePid > 0 && !m_subprocesses.isEmpty()) {
+        QList<qint64> childPids = getChildPids(m_claudePid);
+
+        for (auto it = m_subprocesses.begin(); it != m_subprocesses.end(); ++it) {
+            if (it->status == SubprocessInfo::Running && it->pid <= 0) {
+                // Try to match a child process by command similarity
+                for (qint64 cpid : childPids) {
+                    QString cmdline = readCmdline(cpid);
+                    if (cmdline.contains(it->fullCommand.left(40))) {
+                        it->pid = cpid;
+                        break;
+                    }
+                }
+            }
+            // Update resource usage for resolved PIDs
+            if (it->pid > 0 && QDir(QStringLiteral("/proc/%1").arg(it->pid)).exists()) {
+                it->resourceUsage = readProcessResources(it->pid);
+            } else if (it->pid > 0) {
+                // Process gone — mark completed if still "Running"
+                if (it->status == SubprocessInfo::Running) {
+                    it->status = SubprocessInfo::Completed;
+                    it->finishedAt = QDateTime::currentDateTime();
+                    Q_EMIT subprocessChanged(it->id);
+                }
+            }
+        }
+    }
+}
+
+QList<qint64> ClaudeSession::getChildPids(qint64 parentPid)
+{
+    QList<qint64> result;
+#ifdef Q_OS_LINUX
+    // Try /proc/{pid}/task/{pid}/children first
+    QFile childrenFile(QStringLiteral("/proc/%1/task/%1/children").arg(parentPid));
+    if (childrenFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QString childrenStr = QString::fromUtf8(childrenFile.readAll()).trimmed();
+        childrenFile.close();
+        if (!childrenStr.isEmpty()) {
+            const QStringList parts = childrenStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            for (const QString &p : parts) {
+                bool ok = false;
+                qint64 pid = p.toLongLong(&ok);
+                if (ok && pid > 0) {
+                    result.append(pid);
+                    // Also add grandchildren (one level)
+                    result.append(getChildPids(pid));
+                }
+            }
+        }
+    }
+
+    // Fallback: scan /proc for processes whose ppid matches parentPid
+    if (result.isEmpty()) {
+        QDir procDir(QStringLiteral("/proc"));
+        const QStringList entries = procDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &entry : entries) {
+            bool isNum = false;
+            qint64 pid = entry.toLongLong(&isNum);
+            if (!isNum || pid <= 0) {
+                continue;
+            }
+            QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
+            if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                continue;
+            }
+            QString statLine = QString::fromUtf8(statFile.readAll()).trimmed();
+            statFile.close();
+            int closeParenIdx = statLine.lastIndexOf(QLatin1Char(')'));
+            if (closeParenIdx < 0) {
+                continue;
+            }
+            QStringList fields = statLine.mid(closeParenIdx + 2).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            if (fields.size() > 1 && fields[1].toLongLong() == parentPid) {
+                result.append(pid);
+            }
+        }
+    }
+#else
+    Q_UNUSED(parentPid)
+#endif
+    return result;
+}
+
+QString ClaudeSession::readCmdline(qint64 pid)
+{
+#ifdef Q_OS_LINUX
+    QFile cmdlineFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
+    if (cmdlineFile.open(QIODevice::ReadOnly)) {
+        QByteArray data = cmdlineFile.readAll();
+        cmdlineFile.close();
+        // cmdline uses NUL separators — replace with spaces
+        data.replace('\0', ' ');
+        return QString::fromUtf8(data).trimmed();
+    }
+#else
+    Q_UNUSED(pid)
+#endif
+    return QString();
+}
+
+void ClaudeSession::killSubprocess(const QString &id, int signal)
+{
+#ifdef Q_OS_LINUX
+    if (!m_subprocesses.contains(id)) {
+        return;
+    }
+    auto &info = m_subprocesses[id];
+    if (info.pid > 0 && info.status == SubprocessInfo::Running) {
+        ::kill(static_cast<pid_t>(info.pid), signal);
+        if (signal == SIGKILL || signal == SIGTERM) {
+            info.status = SubprocessInfo::Completed;
+            info.finishedAt = QDateTime::currentDateTime();
+            Q_EMIT subprocessChanged(id);
+        }
+    }
+#else
+    Q_UNUSED(id)
+    Q_UNUSED(signal)
+#endif
 }
 
 void ClaudeSession::cleanupRemoteHooks()

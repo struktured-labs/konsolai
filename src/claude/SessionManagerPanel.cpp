@@ -19,6 +19,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QFont>
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
@@ -422,6 +423,11 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         scheduleTreeUpdate();
     });
     connect(session, &ClaudeSession::teamInfoChanged, this, [this]() {
+        scheduleTreeUpdate();
+    });
+
+    // Connect to subprocess changes to update tree with running commands
+    connect(session, &ClaudeSession::subprocessChanged, this, [this]() {
         scheduleTreeUpdate();
     });
 }
@@ -840,12 +846,35 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         return;
     }
 
-    // Check if this is a subagent child item (parent is a session item, not a category)
+    // Check if this is a subagent/subprocess child item (parent is a session item, not a category)
     QTreeWidgetItem *parentItem = item->parent();
     if (parentItem && parentItem->parent() != nullptr) {
+        // Check if this is a prompt group item (toggle expand/collapse)
+        QVariant promptGroupVar = item->data(0, Qt::UserRole + 3);
+        if (promptGroupVar.isValid() && !promptGroupVar.isNull()) {
+            item->setExpanded(!item->isExpanded());
+            return;
+        }
+
         // Check if this is a task group item (toggle expand/collapse)
         if (!item->data(0, Qt::UserRole + 2).toString().isEmpty()) {
             item->setExpanded(!item->isExpanded());
+            return;
+        }
+
+        // Check if this is a subprocess item
+        QString subprocessId = item->data(0, Qt::UserRole + 4).toString();
+        if (!subprocessId.isEmpty()) {
+            QString parentSessionId = item->data(0, Qt::UserRole + 1).toString();
+            if (m_activeSessions.contains(parentSessionId)) {
+                ClaudeSession *session = m_activeSessions[parentSessionId];
+                if (session) {
+                    const auto &procs = session->subprocesses();
+                    if (procs.contains(subprocessId)) {
+                        showSubprocessOutput(procs[subprocessId]);
+                    }
+                }
+            }
             return;
         }
 
@@ -911,10 +940,29 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         return;
     }
 
-    // Handle items deeper than direct children of categories (subagents, task groups)
+    // Handle items deeper than direct children of categories (subagents, subprocesses, task/prompt groups)
     QTreeWidgetItem *parentItem = item->parent();
     if (parentItem && parentItem->parent() != nullptr) {
-        // Check if this is a task group item
+        // Check if this is a prompt group item (UserRole + 3)
+        QVariant promptGroupVar = item->data(0, Qt::UserRole + 3);
+        if (promptGroupVar.isValid() && !promptGroupVar.isNull()) {
+            QMenu menu(this);
+            QAction *expandAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-tree")), i18n("Expand All"));
+            connect(expandAll, &QAction::triggered, this, [item]() {
+                item->setExpanded(true);
+                for (int i = 0; i < item->childCount(); ++i) {
+                    item->child(i)->setExpanded(true);
+                }
+            });
+            QAction *collapseAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-text")), i18n("Collapse"));
+            connect(collapseAll, &QAction::triggered, this, [item]() {
+                item->setExpanded(false);
+            });
+            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+            return;
+        }
+
+        // Check if this is a task group item (UserRole + 2)
         QString taskGroupDesc = item->data(0, Qt::UserRole + 2).toString();
         if (!taskGroupDesc.isEmpty()) {
             QMenu menu(this);
@@ -934,6 +982,53 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             connect(copyDesc, &QAction::triggered, this, [taskGroupDesc]() {
                 QApplication::clipboard()->setText(taskGroupDesc);
             });
+            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+            return;
+        }
+
+        // Check if this is a subprocess item (UserRole + 4)
+        QString subprocessId = item->data(0, Qt::UserRole + 4).toString();
+        if (!subprocessId.isEmpty()) {
+            QString parentSessionId = item->data(0, Qt::UserRole + 1).toString();
+            if (!m_activeSessions.contains(parentSessionId)) {
+                return;
+            }
+            ClaudeSession *session = m_activeSessions[parentSessionId];
+            if (!session) {
+                return;
+            }
+            const auto &procs = session->subprocesses();
+            if (!procs.contains(subprocessId)) {
+                return;
+            }
+            const auto &procInfo = procs[subprocessId];
+
+            QMenu menu(this);
+
+            QAction *viewOutput = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("View Output"));
+            viewOutput->setEnabled(!procInfo.output.isEmpty() || procInfo.status != SubprocessInfo::Running);
+            connect(viewOutput, &QAction::triggered, this, [this, procInfo]() {
+                showSubprocessOutput(procInfo);
+            });
+
+            if (procInfo.status == SubprocessInfo::Running) {
+                menu.addSeparator();
+                QAction *killAction = menu.addAction(QIcon::fromTheme(QStringLiteral("process-stop")), i18n("Kill (SIGTERM)"));
+                connect(killAction, &QAction::triggered, this, [session, subprocessId]() {
+                    session->killSubprocess(subprocessId, 15); // SIGTERM
+                });
+                QAction *forceKillAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Force Kill (SIGKILL)"));
+                connect(forceKillAction, &QAction::triggered, this, [session, subprocessId]() {
+                    session->killSubprocess(subprocessId, 9); // SIGKILL
+                });
+            }
+
+            menu.addSeparator();
+            QAction *copyCmd = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Command"));
+            connect(copyCmd, &QAction::triggered, this, [procInfo]() {
+                QApplication::clipboard()->setText(procInfo.fullCommand);
+            });
+
             menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
             return;
         }
@@ -1727,12 +1822,15 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // Add nested subagent children for active sessions with subagents (active or completed)
+    // Add nested subagent + subprocess children for active sessions
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
-        if (session && !session->subagents().isEmpty()) {
-            // Take a snapshot — the live map could be modified by async hook events
+        bool hasItems = session && (!session->subagents().isEmpty() || !session->subprocesses().isEmpty());
+        if (session && hasItems) {
+            // Take snapshots — live maps could be modified by async hook events
             const auto subagents = session->subagents();
+            const auto subprocesses = session->subprocesses();
+            const auto promptLabels = session->promptGroupLabels();
             bool hideCompleted = m_hideCompletedAgents.contains(meta.sessionId);
 
             // Helper: create a subagent tree item under a given parent
@@ -1803,118 +1901,253 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 return childItem;
             };
 
-            // Group subagents by taskDescription
-            QMap<QString, QList<const SubagentInfo *>> groups; // key: taskDescription (empty = ungrouped)
-            QStringList groupOrder; // preserve insertion order
-            for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
-                const QString &key = it->taskDescription;
-                if (!groups.contains(key)) {
-                    groupOrder.append(key);
-                }
-                groups[key].append(&it.value());
-            }
+            // Helper: create a subprocess tree item under a given parent
+            auto addSubprocessItem = [&](QTreeWidgetItem *parentItem, const SubprocessInfo &info) -> QTreeWidgetItem * {
+                auto *childItem = new QTreeWidgetItem(parentItem);
 
-            // Sort each group: Working first, Idle second, NotRunning last
-            auto stateRank = [](ClaudeProcess::State s) -> int {
-                if (s == ClaudeProcess::State::Working)
-                    return 0;
-                if (s == ClaudeProcess::State::Idle)
-                    return 1;
-                return 2;
+                childItem->setText(0, info.command);
+
+                // Store subprocess ID and parent sessionId for context menu / double-click
+                childItem->setData(0, Qt::UserRole + 4, info.id); // subprocess ID
+                childItem->setData(0, Qt::UserRole + 1, meta.sessionId);
+
+                // Elapsed duration + resource stats in column 1
+                QString col1;
+                QString elapsed = formatElapsed(info.startedAt);
+                if (!elapsed.isEmpty()) {
+                    col1 = elapsed;
+                }
+                if (info.resourceUsage.rssBytes > 0 || info.resourceUsage.cpuPercent > 0.0) {
+                    if (!col1.isEmpty())
+                        col1 += QStringLiteral(" ");
+                    col1 += info.resourceUsage.formatCompact();
+                }
+                if (!col1.isEmpty()) {
+                    auto *statsLabel = new QLabel(col1);
+                    statsLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
+                    m_treeWidget->setItemWidget(childItem, 1, statsLabel);
+                }
+
+                // Icon and color by status
+                if (info.status == SubprocessInfo::Running) {
+                    childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
+                    childItem->setForeground(0, QBrush(Qt::darkGreen));
+                } else if (info.status == SubprocessInfo::Failed) {
+                    childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-error")));
+                    childItem->setForeground(0, QBrush(Qt::red));
+                } else {
+                    childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
+                    childItem->setForeground(0, QBrush(QColor(140, 140, 140)));
+                }
+
+                // Tooltip
+                QString tooltip = QStringLiteral("Command: %1").arg(info.fullCommand);
+                if (info.pid > 0) {
+                    tooltip += QStringLiteral("\nPID: %1").arg(info.pid);
+                }
+                if (info.startedAt.isValid()) {
+                    tooltip += QStringLiteral("\nStarted: %1").arg(info.startedAt.toString(Qt::ISODate));
+                }
+                if (info.finishedAt.isValid()) {
+                    tooltip += QStringLiteral("\nFinished: %1").arg(info.finishedAt.toString(Qt::ISODate));
+                }
+                if (info.exitCode >= 0 && info.status != SubprocessInfo::Running) {
+                    tooltip += QStringLiteral("\nExit code: %1").arg(info.exitCode);
+                }
+                childItem->setToolTip(0, tooltip);
+                childItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                return childItem;
             };
-            for (auto it = groups.begin(); it != groups.end(); ++it) {
-                std::sort(it->begin(), it->end(), [&stateRank](const SubagentInfo *a, const SubagentInfo *b) {
-                    return stateRank(a->state) < stateRank(b->state);
-                });
+
+            // Collect all items per prompt round
+            QSet<int> promptRounds;
+            for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
+                promptRounds.insert(it->promptGroupId);
             }
-
-            // Sort groups: groups with active agents first
-            std::sort(groupOrder.begin(), groupOrder.end(), [&groups, &stateRank](const QString &a, const QString &b) {
-                int bestA = 2, bestB = 2;
-                for (const auto *info : groups[a]) {
-                    bestA = qMin(bestA, stateRank(info->state));
-                }
-                for (const auto *info : groups[b]) {
-                    bestB = qMin(bestB, stateRank(info->state));
-                }
-                return bestA < bestB;
-            });
-
-            bool hasActiveAgents = false;
-            for (const QString &groupKey : std::as_const(groupOrder)) {
-                const auto &agentList = groups[groupKey];
-
-                // Filter out completed agents if toggle is on
-                QList<const SubagentInfo *> visible;
-                for (const auto *info : agentList) {
-                    bool completed = (info->state != ClaudeProcess::State::Working && info->state != ClaudeProcess::State::Idle);
-                    if (completed && hideCompleted) {
+            for (auto it = subprocesses.constBegin(); it != subprocesses.constEnd(); ++it) {
+                // Filter: skip completed subprocesses that ran < 2 seconds (instant commands)
+                if (it->status != SubprocessInfo::Running) {
+                    if (it->startedAt.isValid() && it->finishedAt.isValid() && it->startedAt.secsTo(it->finishedAt) < 2) {
                         continue;
                     }
-                    if (!completed) {
-                        hasActiveAgents = true;
-                    }
-                    visible.append(info);
                 }
-                if (visible.isEmpty()) {
+                promptRounds.insert(it->promptGroupId);
+            }
+
+            bool multipleRounds = promptRounds.size() > 1;
+            QList<int> sortedRounds = promptRounds.values();
+            std::sort(sortedRounds.begin(), sortedRounds.end());
+
+            bool hasActiveItems = false;
+
+            for (int round : sortedRounds) {
+                // Collect agents and subprocesses for this round
+                QList<const SubagentInfo *> roundAgents;
+                for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
+                    if (it->promptGroupId != round)
+                        continue;
+                    bool completed = (it->state != ClaudeProcess::State::Working && it->state != ClaudeProcess::State::Idle);
+                    if (completed && hideCompleted)
+                        continue;
+                    if (!completed)
+                        hasActiveItems = true;
+                    roundAgents.append(&it.value());
+                }
+
+                QList<const SubprocessInfo *> roundProcs;
+                for (auto it = subprocesses.constBegin(); it != subprocesses.constEnd(); ++it) {
+                    if (it->promptGroupId != round)
+                        continue;
+                    // Filter instant commands
+                    if (it->status != SubprocessInfo::Running) {
+                        if (it->startedAt.isValid() && it->finishedAt.isValid() && it->startedAt.secsTo(it->finishedAt) < 2) {
+                            continue;
+                        }
+                        if (hideCompleted)
+                            continue;
+                    } else {
+                        hasActiveItems = true;
+                    }
+                    roundProcs.append(&it.value());
+                }
+
+                if (roundAgents.isEmpty() && roundProcs.isEmpty())
                     continue;
-                }
 
-                if (groupKey.isEmpty()) {
-                    // Ungrouped agents: add flat under session (backward compatible)
-                    for (const auto *info : visible) {
-                        addSubagentItem(item, *info);
-                    }
-                } else if (visible.size() == 1) {
-                    // Single agent in group: show description inline, no intermediate node
-                    auto *childItem = addSubagentItem(item, *visible.first());
-                    // Prepend task description to agent name
-                    QString existingText = childItem->text(0);
-                    childItem->setText(0, QStringLiteral("%1 \u2014 %2").arg(groupKey, existingText));
-                } else {
-                    // Multiple agents: create task group node
-                    auto *groupItem = new QTreeWidgetItem(item);
+                // Sort agents: Working first, Idle second, NotRunning last
+                auto stateRank = [](ClaudeProcess::State s) -> int {
+                    if (s == ClaudeProcess::State::Working)
+                        return 0;
+                    if (s == ClaudeProcess::State::Idle)
+                        return 1;
+                    return 2;
+                };
+                std::sort(roundAgents.begin(), roundAgents.end(), [&stateRank](const SubagentInfo *a, const SubagentInfo *b) {
+                    return stateRank(a->state) < stateRank(b->state);
+                });
 
-                    // Determine aggregate state for group icon
+                // Determine parent for this round's items
+                QTreeWidgetItem *roundParent = item;
+                if (multipleRounds) {
+                    // Create prompt group node
+                    auto *promptItem = new QTreeWidgetItem(item);
+                    int totalItems = roundAgents.size() + roundProcs.size();
+                    QString label = promptLabels.value(round, QStringLiteral("Prompt #%1").arg(round + 1));
+                    promptItem->setText(0, QStringLiteral("%1 (%2 items)").arg(label).arg(totalItems));
+
+                    // Store prompt group ID for context menu detection
+                    promptItem->setData(0, Qt::UserRole + 3, round);
+                    promptItem->setData(0, Qt::UserRole + 1, meta.sessionId);
+                    promptItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+
+                    // Aggregate state icon
                     bool anyWorking = false, anyIdle = false;
-                    for (const auto *info : visible) {
-                        if (info->state == ClaudeProcess::State::Working)
+                    for (const auto *a : roundAgents) {
+                        if (a->state == ClaudeProcess::State::Working)
                             anyWorking = true;
-                        if (info->state == ClaudeProcess::State::Idle)
+                        if (a->state == ClaudeProcess::State::Idle)
                             anyIdle = true;
                     }
+                    for (const auto *p : roundProcs) {
+                        if (p->status == SubprocessInfo::Running)
+                            anyWorking = true;
+                    }
 
-                    QString groupLabel = QStringLiteral("%1 (%2 agents)").arg(groupKey).arg(visible.size());
-                    groupItem->setText(0, groupLabel);
-
-                    // Mark as task group (not an agent) for context menu detection
-                    groupItem->setData(0, Qt::UserRole + 2, groupKey);
-                    groupItem->setData(0, Qt::UserRole + 1, meta.sessionId);
-                    groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-
-                    // Group icon/color based on aggregate state
                     if (anyWorking) {
-                        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
-                        groupItem->setForeground(0, QBrush(Qt::darkGreen));
+                        promptItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
+                        promptItem->setForeground(0, QBrush(Qt::darkGreen));
                     } else if (anyIdle) {
-                        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
-                        groupItem->setForeground(0, QBrush(Qt::gray));
+                        promptItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
+                        promptItem->setForeground(0, QBrush(Qt::gray));
                     } else {
-                        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
-                        groupItem->setForeground(0, QBrush(QColor(140, 140, 140)));
+                        promptItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
+                        promptItem->setForeground(0, QBrush(QColor(140, 140, 140)));
                     }
 
-                    groupItem->setToolTip(0, QStringLiteral("Task: %1\nAgents: %2").arg(groupKey).arg(visible.size()));
-                    groupItem->setExpanded(true);
+                    promptItem->setExpanded(true);
+                    roundParent = promptItem;
+                }
 
-                    // Add agent children under group
-                    for (const auto *info : visible) {
-                        addSubagentItem(groupItem, *info);
+                // Group agents by taskDescription within this round
+                QMap<QString, QList<const SubagentInfo *>> groups;
+                QStringList groupOrder;
+                for (const auto *agentInfo : roundAgents) {
+                    const QString &key = agentInfo->taskDescription;
+                    if (!groups.contains(key)) {
+                        groupOrder.append(key);
                     }
+                    groups[key].append(agentInfo);
+                }
+
+                // Sort groups: groups with active agents first
+                std::sort(groupOrder.begin(), groupOrder.end(), [&groups, &stateRank](const QString &a, const QString &b) {
+                    int bestA = 2, bestB = 2;
+                    for (const auto *info : groups[a]) {
+                        bestA = qMin(bestA, stateRank(info->state));
+                    }
+                    for (const auto *info : groups[b]) {
+                        bestB = qMin(bestB, stateRank(info->state));
+                    }
+                    return bestA < bestB;
+                });
+
+                for (const QString &groupKey : std::as_const(groupOrder)) {
+                    const auto &agentList = groups[groupKey];
+
+                    if (groupKey.isEmpty()) {
+                        // Ungrouped agents: add flat
+                        for (const auto *info : agentList) {
+                            addSubagentItem(roundParent, *info);
+                        }
+                    } else if (agentList.size() == 1) {
+                        // Single agent in group: show description inline
+                        auto *childItem = addSubagentItem(roundParent, *agentList.first());
+                        QString existingText = childItem->text(0);
+                        childItem->setText(0, QStringLiteral("%1 \u2014 %2").arg(groupKey, existingText));
+                    } else {
+                        // Multiple agents: create task group node
+                        auto *groupItem = new QTreeWidgetItem(roundParent);
+
+                        bool anyWorking = false, anyIdle = false;
+                        for (const auto *info : agentList) {
+                            if (info->state == ClaudeProcess::State::Working)
+                                anyWorking = true;
+                            if (info->state == ClaudeProcess::State::Idle)
+                                anyIdle = true;
+                        }
+
+                        groupItem->setText(0, QStringLiteral("%1 (%2 agents)").arg(groupKey).arg(agentList.size()));
+                        groupItem->setData(0, Qt::UserRole + 2, groupKey);
+                        groupItem->setData(0, Qt::UserRole + 1, meta.sessionId);
+                        groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+
+                        if (anyWorking) {
+                            groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
+                            groupItem->setForeground(0, QBrush(Qt::darkGreen));
+                        } else if (anyIdle) {
+                            groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
+                            groupItem->setForeground(0, QBrush(Qt::gray));
+                        } else {
+                            groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
+                            groupItem->setForeground(0, QBrush(QColor(140, 140, 140)));
+                        }
+
+                        groupItem->setToolTip(0, QStringLiteral("Task: %1\nAgents: %2").arg(groupKey).arg(agentList.size()));
+                        groupItem->setExpanded(true);
+
+                        for (const auto *info : agentList) {
+                            addSubagentItem(groupItem, *info);
+                        }
+                    }
+                }
+
+                // Add subprocess items for this round
+                for (const auto *procInfo : roundProcs) {
+                    addSubprocessItem(roundParent, *procInfo);
                 }
             }
 
-            if (hasActiveAgents) {
+            if (hasActiveItems) {
                 item->setExpanded(true);
 
                 // Start duration timer if not already running
@@ -2430,6 +2663,67 @@ void SessionManagerPanel::showSubagentDetails(const SubagentInfo &info)
     }
 
     QMessageBox::information(this, title, details);
+}
+
+void SessionManagerPanel::showSubprocessOutput(const SubprocessInfo &info)
+{
+    QString title = i18n("Subprocess Output");
+
+    auto *dialog = new QDialog(this);
+    dialog->setWindowTitle(title);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->resize(700, 500);
+
+    auto *layout = new QVBoxLayout(dialog);
+
+    // Header with command and status info
+    QString statusStr;
+    switch (info.status) {
+    case SubprocessInfo::Running:
+        statusStr = i18n("Running");
+        break;
+    case SubprocessInfo::Completed:
+        statusStr = i18n("Completed (exit %1)", info.exitCode);
+        break;
+    case SubprocessInfo::Failed:
+        statusStr = i18n("Failed (exit %1)", info.exitCode);
+        break;
+    }
+
+    QString header;
+    header += QStringLiteral("<b>Command:</b> %1<br>").arg(info.fullCommand.toHtmlEscaped());
+    header += QStringLiteral("<b>Status:</b> %1<br>").arg(statusStr);
+    if (info.pid > 0) {
+        header += QStringLiteral("<b>PID:</b> %1<br>").arg(info.pid);
+    }
+    if (info.startedAt.isValid()) {
+        header += QStringLiteral("<b>Started:</b> %1<br>").arg(info.startedAt.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss")));
+        header += QStringLiteral("<b>Elapsed:</b> %1<br>").arg(formatElapsed(info.startedAt));
+    }
+    if (info.resourceUsage.rssBytes > 0) {
+        header += QStringLiteral("<b>Resources:</b> %1<br>").arg(info.resourceUsage.formatCompact());
+    }
+
+    auto *headerLabel = new QLabel(header);
+    headerLabel->setTextFormat(Qt::RichText);
+    headerLabel->setWordWrap(true);
+    layout->addWidget(headerLabel);
+
+    // Output text
+    auto *outputEdit = new QPlainTextEdit();
+    outputEdit->setReadOnly(true);
+    outputEdit->setFont(QFont(QStringLiteral("monospace"), 9));
+    outputEdit->setPlainText(info.output.isEmpty() ? i18n("(no output captured)") : info.output);
+    layout->addWidget(outputEdit);
+
+    // Copy button
+    auto *copyButton = new QPushButton(i18n("Copy Output"));
+    connect(copyButton, &QPushButton::clicked, dialog, [outputEdit]() {
+        QApplication::clipboard()->setText(outputEdit->toPlainText());
+    });
+    layout->addWidget(copyButton);
+
+    dialog->show();
 }
 
 void SessionManagerPanel::editSessionDescription(const QString &sessionId)

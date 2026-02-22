@@ -240,6 +240,7 @@ private:
     void showApprovalLog(ClaudeSession *session);
     void showSubagentTranscript(const SubagentInfo &info);
     void showSubagentDetails(const SubagentInfo &info);
+    void showSubprocessOutput(const SubprocessInfo &info);
     void editSessionDescription(const QString &sessionId);
     void cleanupStaleSockets();
     void ensureHooksConfigured(ClaudeSession *session);

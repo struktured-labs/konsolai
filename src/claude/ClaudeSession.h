@@ -23,6 +23,7 @@
 #include <QQueue>
 #include <QString>
 #include <QTimer>
+#include <QUuid>
 #include <QVector>
 
 // Konsole includes
@@ -115,6 +116,30 @@ struct KONSOLEPRIVATE_EXPORT SubagentInfo {
     QString transcriptPath; // from SubagentStop
     QString currentTaskSubject; // from TaskCompleted
     QString taskDescription; // from PreToolUse(Task) — short label for tree grouping
+    int promptGroupId = 0; // which prompt round spawned this agent
+};
+
+/**
+ * Information about a long-running Bash subprocess spawned by Claude Code
+ */
+struct KONSOLEPRIVATE_EXPORT SubprocessInfo {
+    QString id; // unique ID (generated on PreToolUse)
+    QString command; // from tool_input.command (truncated for display)
+    QString fullCommand; // full command text
+    enum Status {
+        Running,
+        Completed,
+        Failed
+    };
+    Status status = Running;
+    QDateTime startedAt;
+    QDateTime finishedAt;
+    int exitCode = -1;
+    QString output; // captured stdout/stderr from PostToolUse
+    qint64 pid = 0; // resolved from process tree (0 = unresolved)
+    ResourceUsage resourceUsage;
+    int promptGroupId = 0;
+    bool isBackground = false; // survived past tool call completion
 };
 
 /**
@@ -486,6 +511,27 @@ public:
     }
 
     /**
+     * Get the map of tracked subprocesses (keyed by generated ID)
+     */
+    const QMap<QString, SubprocessInfo> &subprocesses() const
+    {
+        return m_subprocesses;
+    }
+
+    /**
+     * Get prompt group labels (keyed by prompt round number)
+     */
+    const QMap<int, QString> &promptGroupLabels() const
+    {
+        return m_promptGroupLabels;
+    }
+
+    /**
+     * Kill a tracked subprocess by ID
+     */
+    void killSubprocess(const QString &id, int signal = 15 /* SIGTERM */);
+
+    /**
      * Whether an agent team is currently active (has at least one running subagent).
      * Subagents that haven't received any hook event for 5+ minutes are considered
      * zombies and ignored — this prevents stale hook snapshots from permanently
@@ -732,6 +778,11 @@ Q_SIGNALS:
      */
     void teamInfoChanged();
 
+    /**
+     * Emitted when a subprocess is added, updated, or completed
+     */
+    void subprocessChanged(const QString &id);
+
 private:
     ClaudeSession(QObject *parent);  // Private constructor for reattach
 
@@ -765,6 +816,14 @@ private:
     QString m_teamName;
     QQueue<QString> m_pendingTaskDescriptions; // FIFO queue from PreToolUse(Task) → SubagentStart correlation
 
+    // Prompt round tracking
+    int m_currentPromptRound = 0;
+    QMap<int, QString> m_promptGroupLabels;
+
+    // Subprocess tracking
+    QMap<QString, SubprocessInfo> m_subprocesses; // keyed by generated ID
+    QQueue<QString> m_pendingBashIds; // correlate PreToolUse(Bash) → PostToolUse(Bash)
+
     // Per-session yolo mode settings
     bool m_yoloMode = false;
     bool m_doubleYoloMode = false;
@@ -797,6 +856,8 @@ private:
     void startResourceTracking();
     void refreshResourceUsage();
     qint64 findClaudePid(qint64 panePid);
+    QList<qint64> getChildPids(qint64 parentPid);
+    QString readCmdline(qint64 pid);
     ResourceUsage readProcessResources(qint64 pid);
 
     // Permission prompt polling for yolo mode
