@@ -2064,7 +2064,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         promptItem->setForeground(0, QBrush(QColor(140, 140, 140)));
                     }
 
-                    promptItem->setExpanded(true);
+                    promptItem->setExpanded(roundAnyWorking || roundAnyIdle);
                     roundParent = promptItem;
                 }
 
@@ -2155,7 +2155,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         }
 
                         groupItem->setToolTip(0, QStringLiteral("Task: %1\nAgents: %2").arg(groupKey).arg(agentList.size()));
-                        groupItem->setExpanded(true);
+                        groupItem->setExpanded(groupAnyWorking || groupAnyIdle);
 
                         for (const auto *info : agentList) {
                             addSubagentItem(groupItem, *info);
