@@ -638,17 +638,22 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
     }
 
     // Kill the tmux session asynchronously, then update tree after kill completes
-    auto *tmux = new TmuxManager(nullptr);
-    QPointer<SessionManagerPanel> guard(this);
-    tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
-        if (exists) {
-            tmux->killSession(sessionName);
-        }
-        tmux->deleteLater();
-        if (guard) {
-            guard->updateTreeWidget();
-        }
-    });
+    if (sessionName.isEmpty()) {
+        qDebug() << "SessionManagerPanel::archiveSession - no session name, skipping tmux kill";
+        updateTreeWidget();
+    } else {
+        auto *tmux = new TmuxManager(nullptr);
+        QPointer<SessionManagerPanel> guard(this);
+        tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
+            if (exists) {
+                tmux->killSession(sessionName);
+            }
+            tmux->deleteLater();
+            if (guard) {
+                guard->updateTreeWidget();
+            }
+        });
+    }
 }
 
 void SessionManagerPanel::closeSession(const QString &sessionId)
@@ -695,17 +700,22 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
     // Kill the tmux session asynchronously, then update tree AFTER kill completes.
     // This avoids a race where the tree queries tmux before the kill finishes,
     // causing the session to appear "Detached" instead of "Closed".
-    auto *tmux = new TmuxManager(nullptr);
-    QPointer<SessionManagerPanel> guard(this);
-    tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
-        if (exists) {
-            tmux->killSession(sessionName);
-        }
-        tmux->deleteLater();
-        if (guard) {
-            guard->updateTreeWidget();
-        }
-    });
+    if (sessionName.isEmpty()) {
+        qDebug() << "SessionManagerPanel::closeSession - no session name, skipping tmux kill";
+        updateTreeWidget();
+    } else {
+        auto *tmux = new TmuxManager(nullptr);
+        QPointer<SessionManagerPanel> guard(this);
+        tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
+            if (exists) {
+                tmux->killSession(sessionName);
+            }
+            tmux->deleteLater();
+            if (guard) {
+                guard->updateTreeWidget();
+            }
+        });
+    }
 }
 
 void SessionManagerPanel::unarchiveSession(const QString &sessionId)
@@ -722,21 +732,34 @@ void SessionManagerPanel::unarchiveSession(const QString &sessionId)
 
 void SessionManagerPanel::markExpired(const QString &sessionName)
 {
-    // Find metadata by session name
-    for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) {
-        if (it->sessionName == sessionName) {
-            // Mark as expired but NOT archived - let it go to Closed category
-            // User must explicitly archive if they don't want to see it
-            it->isExpired = true;
-            it->lastAccessed = QDateTime::currentDateTime();
-            m_activeSessions.remove(it->sessionId);
-            saveMetadata();
-            updateTreeWidget();
-            qDebug() << "SessionManagerPanel: Marked session as expired (tmux dead):" << sessionName;
-            return;
+    // Find metadata by session name, falling back to sessionId lookup
+    auto it = m_metadata.end();
+
+    // Try direct sessionId lookup first (caller may pass sessionId)
+    if (m_metadata.contains(sessionName)) {
+        it = m_metadata.find(sessionName);
+    } else {
+        // Linear search by sessionName
+        for (auto search = m_metadata.begin(); search != m_metadata.end(); ++search) {
+            if (search->sessionName == sessionName) {
+                it = search;
+                break;
+            }
         }
     }
-    qDebug() << "SessionManagerPanel: Could not find session to mark expired:" << sessionName;
+
+    if (it != m_metadata.end()) {
+        // Mark as expired but NOT archived - let it go to Closed category
+        // User must explicitly archive if they don't want to see it
+        it->isExpired = true;
+        it->lastAccessed = QDateTime::currentDateTime();
+        m_activeSessions.remove(it->sessionId);
+        saveMetadata();
+        updateTreeWidget();
+        qDebug() << "SessionManagerPanel: Marked session as expired (tmux dead):" << sessionName;
+    } else {
+        qDebug() << "SessionManagerPanel: Could not find session to mark expired:" << sessionName;
+    }
 }
 
 void SessionManagerPanel::dismissSession(const QString &sessionId)
@@ -1975,7 +1998,7 @@ void SessionManagerPanel::loadMetadata()
         meta.budgetCostCeilingUSD = obj[QStringLiteral("budgetCostCeilingUSD")].toDouble();
         meta.budgetTokenCeiling = static_cast<quint64>(obj[QStringLiteral("budgetTokenCeiling")].toInteger(0));
 
-        if (!meta.sessionId.isEmpty()) {
+        if (!meta.sessionId.isEmpty() && !meta.sessionName.isEmpty()) {
             m_metadata[meta.sessionId] = meta;
         }
     }
