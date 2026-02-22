@@ -8,6 +8,7 @@
 #include "ClaudeAgentTeamTest.h"
 
 // Qt
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
@@ -315,6 +316,109 @@ void ClaudeAgentTeamTest::testMultipleSubagents()
     }
 
     QCOMPARE(stopSpy.count(), 2);
+}
+
+// ============================================================
+// Task tool description capture
+// ============================================================
+
+void ClaudeAgentTeamTest::testPreToolUseTaskEmitsSignal()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::taskToolCalled);
+
+    QJsonObject toolInput;
+    toolInput[QStringLiteral("description")] = QStringLiteral("Check obs for bugs");
+    toolInput[QStringLiteral("prompt")] = QStringLiteral("Look for bugs in obs-studio");
+    toolInput[QStringLiteral("subagent_type")] = QStringLiteral("Explore");
+
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Task");
+    data[QStringLiteral("tool_input")] = toolInput;
+
+    process.handleHookEvent(QStringLiteral("PreToolUse"), toJson(data));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("Check obs for bugs"));
+}
+
+void ClaudeAgentTeamTest::testPreToolUseNonTaskNoSignal()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::taskToolCalled);
+
+    QJsonObject data;
+    data[QStringLiteral("tool_name")] = QStringLiteral("Bash");
+
+    process.handleHookEvent(QStringLiteral("PreToolUse"), toJson(data));
+
+    QCOMPARE(spy.count(), 0);
+}
+
+void ClaudeAgentTeamTest::testTaskDescriptionCorrelation()
+{
+    // Simulate: PreToolUse(Task) → SubagentStart → verify taskDescription is assigned
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+    QVERIFY(process);
+
+    // 1. PreToolUse with Task description
+    QJsonObject toolInput;
+    toolInput[QStringLiteral("description")] = QStringLiteral("Fix login bug");
+    QJsonObject preToolData;
+    preToolData[QStringLiteral("tool_name")] = QStringLiteral("Task");
+    preToolData[QStringLiteral("tool_input")] = toolInput;
+    process->handleHookEvent(QStringLiteral("PreToolUse"), toJson(preToolData));
+
+    // 2. SubagentStart
+    QJsonObject startData;
+    startData[QStringLiteral("agent_id")] = QStringLiteral("agent-abc");
+    startData[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    process->handleHookEvent(QStringLiteral("SubagentStart"), toJson(startData));
+
+    // 3. Verify taskDescription was correlated
+    const auto &agents = session.subagents();
+    QVERIFY(agents.contains(QStringLiteral("agent-abc")));
+    QCOMPARE(agents[QStringLiteral("agent-abc")].taskDescription, QStringLiteral("Fix login bug"));
+}
+
+void ClaudeAgentTeamTest::testTaskDescriptionCorrelationMultiple()
+{
+    // Simulate: 2 PreToolUse(Task) → 2 SubagentStart → verify FIFO ordering
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+    QVERIFY(process);
+
+    // 1. Two Task tool calls
+    QJsonObject input1;
+    input1[QStringLiteral("description")] = QStringLiteral("Search codebase");
+    QJsonObject pre1;
+    pre1[QStringLiteral("tool_name")] = QStringLiteral("Task");
+    pre1[QStringLiteral("tool_input")] = input1;
+    process->handleHookEvent(QStringLiteral("PreToolUse"), toJson(pre1));
+
+    QJsonObject input2;
+    input2[QStringLiteral("description")] = QStringLiteral("Run tests");
+    QJsonObject pre2;
+    pre2[QStringLiteral("tool_name")] = QStringLiteral("Task");
+    pre2[QStringLiteral("tool_input")] = input2;
+    process->handleHookEvent(QStringLiteral("PreToolUse"), toJson(pre2));
+
+    // 2. Two SubagentStart in order
+    QJsonObject start1;
+    start1[QStringLiteral("agent_id")] = QStringLiteral("agent-1");
+    start1[QStringLiteral("agent_type")] = QStringLiteral("Explore");
+    process->handleHookEvent(QStringLiteral("SubagentStart"), toJson(start1));
+
+    QJsonObject start2;
+    start2[QStringLiteral("agent_id")] = QStringLiteral("agent-2");
+    start2[QStringLiteral("agent_type")] = QStringLiteral("Bash");
+    process->handleHookEvent(QStringLiteral("SubagentStart"), toJson(start2));
+
+    // 3. Verify FIFO correlation
+    const auto &agents = session.subagents();
+    QCOMPARE(agents[QStringLiteral("agent-1")].taskDescription, QStringLiteral("Search codebase"));
+    QCOMPARE(agents[QStringLiteral("agent-2")].taskDescription, QStringLiteral("Run tests"));
 }
 
 void ClaudeAgentTeamTest::testUnknownEventNoSubagentSignal()

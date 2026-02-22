@@ -147,6 +147,11 @@ Q_SIGNALS:
     void toolUseCompleted(const QString &toolName, const QString &toolResponse);
 
     /**
+     * Emitted when a Task tool call is about to spawn a subagent (from PreToolUse hook event)
+     */
+    void taskToolCalled(const QString &description);
+
+    /**
      * Emitted when a subagent starts (from SubagentStart hook event)
      */
     void subagentStarted(const QString &agentId, const QString &agentType, const QString &transcriptPath);
@@ -186,6 +191,12 @@ public Q_SLOTS:
      * Clear the current task
      */
     void clearTask();
+
+    /**
+     * Reset state to NotRunning and clear current task.
+     * Used when restarting the Claude process.
+     */
+    void reset();
 
 private:
     void setState(State newState);

@@ -131,6 +131,18 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         setState(State::Working);
         QString toolName = obj.value(QStringLiteral("tool_name")).toString();
         setCurrentTask(QStringLiteral("Using tool: %1").arg(toolName));
+
+        // Capture Task tool description for subagent grouping
+        if (toolName == QStringLiteral("Task")) {
+            QJsonValue inputVal = obj.value(QStringLiteral("tool_input"));
+            if (inputVal.isObject()) {
+                QString desc = inputVal.toObject().value(QStringLiteral("description")).toString();
+                if (!desc.isEmpty()) {
+                    qDebug() << "ClaudeProcess: Task tool call detected, description:" << desc;
+                    Q_EMIT taskToolCalled(desc);
+                }
+            }
+        }
     } else if (eventType == QStringLiteral("PostToolUse")) {
         // Claude finished using a tool — extract tool_response for approval log
         QString toolName = obj.value(QStringLiteral("tool_name")).toString();
@@ -235,6 +247,12 @@ void ClaudeProcess::clearTask()
 {
     m_currentTask.clear();
     Q_EMIT taskFinished();
+}
+
+void ClaudeProcess::reset()
+{
+    clearTask();
+    setState(State::NotRunning);
 }
 
 void ClaudeProcess::setState(State newState)

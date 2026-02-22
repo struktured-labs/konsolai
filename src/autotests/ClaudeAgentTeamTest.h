@@ -46,6 +46,12 @@ private Q_SLOTS:
     // Multiple subagents
     void testMultipleSubagents();
 
+    // Task tool description capture
+    void testPreToolUseTaskEmitsSignal();
+    void testPreToolUseNonTaskNoSignal();
+    void testTaskDescriptionCorrelation();
+    void testTaskDescriptionCorrelationMultiple();
+
     // Unknown events still ignored
     void testUnknownEventNoSubagentSignal();
 };

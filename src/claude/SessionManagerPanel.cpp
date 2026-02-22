@@ -623,16 +623,6 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
     saveMetadata();
 
-    // Kill the tmux session asynchronously to avoid blocking the event loop
-    auto *tmux = new TmuxManager(nullptr);
-    tmux->sessionExistsAsync(sessionName, [tmux, sessionName](bool exists) {
-        if (exists) {
-            // Use sync kill since we're already in an async context
-            tmux->killSession(sessionName);
-        }
-        tmux->deleteLater();
-    });
-
     // Clean up stale socket, yolo, and yolo-team files
     QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
     if (QFile::exists(socketPath)) {
@@ -647,8 +637,18 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
         QFile::remove(teamYoloPath);
     }
 
-    // Update the tree widget (async tmux query will run)
-    updateTreeWidget();
+    // Kill the tmux session asynchronously, then update tree after kill completes
+    auto *tmux = new TmuxManager(nullptr);
+    QPointer<SessionManagerPanel> guard(this);
+    tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
+        if (exists) {
+            tmux->killSession(sessionName);
+        }
+        tmux->deleteLater();
+        if (guard) {
+            guard->updateTreeWidget();
+        }
+    });
 }
 
 void SessionManagerPanel::closeSession(const QString &sessionId)
@@ -670,18 +670,13 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
     // Remove from active sessions
     m_activeSessions.remove(sessionId);
 
+    // Mark as explicitly closed so tree categorization skips the tmux-alive check
+    // (tmux kill is async and may not have finished by tree update time)
+    m_explicitlyClosed.insert(sessionId);
+
     // Update last accessed but do NOT mark as archived — it will appear in Closed
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
     saveMetadata();
-
-    // Kill the tmux session asynchronously
-    auto *tmux = new TmuxManager(nullptr);
-    tmux->sessionExistsAsync(sessionName, [tmux, sessionName](bool exists) {
-        if (exists) {
-            tmux->killSession(sessionName);
-        }
-        tmux->deleteLater();
-    });
 
     // Clean up stale socket, yolo, and yolo-team files
     QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
@@ -697,8 +692,20 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
         QFile::remove(teamYoloPath);
     }
 
-    // Update the tree widget (session will land in "Closed" since tmux is dead and isArchived is false)
-    updateTreeWidget();
+    // Kill the tmux session asynchronously, then update tree AFTER kill completes.
+    // This avoids a race where the tree queries tmux before the kill finishes,
+    // causing the session to appear "Detached" instead of "Closed".
+    auto *tmux = new TmuxManager(nullptr);
+    QPointer<SessionManagerPanel> guard(this);
+    tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
+        if (exists) {
+            tmux->killSession(sessionName);
+        }
+        tmux->deleteLater();
+        if (guard) {
+            guard->updateTreeWidget();
+        }
+    });
 }
 
 void SessionManagerPanel::unarchiveSession(const QString &sessionId)
@@ -813,7 +820,13 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
     // Check if this is a subagent child item (parent is a session item, not a category)
     QTreeWidgetItem *parentItem = item->parent();
     if (parentItem && parentItem->parent() != nullptr) {
-        // This is a grandchild of a category → subagent child item
+        // Check if this is a task group item (toggle expand/collapse)
+        if (!item->data(0, Qt::UserRole + 2).toString().isEmpty()) {
+            item->setExpanded(!item->isExpanded());
+            return;
+        }
+
+        // Subagent child item (depth 2 or 3)
         QString agentId = item->data(0, Qt::UserRole).toString();
         QString parentSessionId = item->data(0, Qt::UserRole + 1).toString();
         if (!agentId.isEmpty() && m_activeSessions.contains(parentSessionId)) {
@@ -875,9 +888,34 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         return;
     }
 
-    // Handle subagent child items (grandchild of a category)
+    // Handle items deeper than direct children of categories (subagents, task groups)
     QTreeWidgetItem *parentItem = item->parent();
     if (parentItem && parentItem->parent() != nullptr) {
+        // Check if this is a task group item
+        QString taskGroupDesc = item->data(0, Qt::UserRole + 2).toString();
+        if (!taskGroupDesc.isEmpty()) {
+            QMenu menu(this);
+            QAction *expandAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-tree")), i18n("Expand All"));
+            connect(expandAll, &QAction::triggered, this, [item]() {
+                item->setExpanded(true);
+                for (int i = 0; i < item->childCount(); ++i) {
+                    item->child(i)->setExpanded(true);
+                }
+            });
+            QAction *collapseAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-text")), i18n("Collapse"));
+            connect(collapseAll, &QAction::triggered, this, [item]() {
+                item->setExpanded(false);
+            });
+            menu.addSeparator();
+            QAction *copyDesc = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Task Description"));
+            connect(copyDesc, &QAction::triggered, this, [taskGroupDesc]() {
+                QApplication::clipboard()->setText(taskGroupDesc);
+            });
+            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+            return;
+        }
+
+        // Subagent child item
         QString agentId = item->data(0, Qt::UserRole).toString();
         QString parentSessionId = item->data(0, Qt::UserRole + 1).toString();
         if (agentId.isEmpty() || !m_activeSessions.contains(parentSessionId)) {
@@ -1398,6 +1436,13 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     for (const auto &meta : sortedMeta) {
         bool isActive = m_activeSessions.contains(meta.sessionId);
         bool tmuxAlive = liveNames.contains(meta.sessionName);
+        bool wasClosed = m_explicitlyClosed.contains(meta.sessionId);
+
+        // Clear from explicitly-closed set once tmux is actually dead
+        if (wasClosed && !tmuxAlive) {
+            m_explicitlyClosed.remove(meta.sessionId);
+            wasClosed = false; // already categorized correctly via tmuxAlive=false
+        }
 
         if (meta.isDismissed) {
             addSessionToTree(meta, m_dismissedCategory);
@@ -1407,11 +1452,11 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             addSessionToTree(meta, m_pinnedCategory);
         } else if (isActive) {
             addSessionToTree(meta, m_activeCategory);
-        } else if (tmuxAlive) {
+        } else if (tmuxAlive && !wasClosed) {
             // Tab closed but tmux still running → Detached
             addSessionToTree(meta, m_detachedCategory);
         } else {
-            // tmux session is dead → Closed
+            // tmux session is dead (or explicitly closed) → Closed
             addSessionToTree(meta, m_closedCategory);
         }
     }
@@ -1666,37 +1711,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             const auto &subagents = session->subagents();
             bool hideCompleted = m_hideCompletedAgents.contains(meta.sessionId);
 
-            // Sort agents: Working first, Idle second, NotRunning last
-            QList<const SubagentInfo *> sorted;
-            for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
-                sorted.append(&it.value());
-            }
-            std::sort(sorted.begin(), sorted.end(), [](const SubagentInfo *a, const SubagentInfo *b) {
-                auto rank = [](ClaudeProcess::State s) -> int {
-                    if (s == ClaudeProcess::State::Working)
-                        return 0;
-                    if (s == ClaudeProcess::State::Idle)
-                        return 1;
-                    return 2; // NotRunning
-                };
-                return rank(a->state) < rank(b->state);
-            });
-
-            bool hasActiveAgents = false;
-            for (const auto *infoPtr : sorted) {
-                const auto &info = *infoPtr;
-                bool isCompleted = (info.state != ClaudeProcess::State::Working && info.state != ClaudeProcess::State::Idle);
-
-                // Skip completed agents if per-session toggle says hide them
-                if (isCompleted && hideCompleted) {
-                    continue;
-                }
-
-                if (!isCompleted) {
-                    hasActiveAgents = true;
-                }
-
-                auto *childItem = new QTreeWidgetItem(item);
+            // Helper: create a subagent tree item under a given parent
+            auto addSubagentItem = [&](QTreeWidgetItem *parentItem, const SubagentInfo &info) -> QTreeWidgetItem * {
+                auto *childItem = new QTreeWidgetItem(parentItem);
 
                 // Display: agentType (teammateName) — taskSubject (truncated)
                 QString childName = info.agentType;
@@ -1732,7 +1749,6 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
                     childItem->setForeground(0, QBrush(Qt::gray));
                 } else {
-                    // Completed (NotRunning) — checkmark icon and dimmed text
                     childItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
                     childItem->setForeground(0, QBrush(QColor(140, 140, 140)));
                 }
@@ -1742,8 +1758,11 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!info.teammateName.isEmpty()) {
                     childTooltip += QStringLiteral("\nName: %1").arg(info.teammateName);
                 }
+                if (!info.taskDescription.isEmpty()) {
+                    childTooltip += QStringLiteral("\nTask: %1").arg(info.taskDescription);
+                }
                 if (!info.currentTaskSubject.isEmpty()) {
-                    childTooltip += QStringLiteral("\nTask: %1").arg(info.currentTaskSubject);
+                    childTooltip += QStringLiteral("\nSubject: %1").arg(info.currentTaskSubject);
                 }
                 if (info.startedAt.isValid()) {
                     childTooltip += QStringLiteral("\nElapsed: %1").arg(formatElapsed(info.startedAt));
@@ -1751,12 +1770,124 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!info.transcriptPath.isEmpty()) {
                     childTooltip += QStringLiteral("\nTranscript: %1").arg(info.transcriptPath);
                 }
-                if (isCompleted) {
+                bool completed = (info.state != ClaudeProcess::State::Working && info.state != ClaudeProcess::State::Idle);
+                if (completed) {
                     childTooltip += QStringLiteral("\nStatus: Completed");
                 }
                 childItem->setToolTip(0, childTooltip);
-
                 childItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                return childItem;
+            };
+
+            // Group subagents by taskDescription
+            QMap<QString, QList<const SubagentInfo *>> groups; // key: taskDescription (empty = ungrouped)
+            QStringList groupOrder; // preserve insertion order
+            for (auto it = subagents.constBegin(); it != subagents.constEnd(); ++it) {
+                const QString &key = it->taskDescription;
+                if (!groups.contains(key)) {
+                    groupOrder.append(key);
+                }
+                groups[key].append(&it.value());
+            }
+
+            // Sort each group: Working first, Idle second, NotRunning last
+            auto stateRank = [](ClaudeProcess::State s) -> int {
+                if (s == ClaudeProcess::State::Working)
+                    return 0;
+                if (s == ClaudeProcess::State::Idle)
+                    return 1;
+                return 2;
+            };
+            for (auto it = groups.begin(); it != groups.end(); ++it) {
+                std::sort(it->begin(), it->end(), [&stateRank](const SubagentInfo *a, const SubagentInfo *b) {
+                    return stateRank(a->state) < stateRank(b->state);
+                });
+            }
+
+            // Sort groups: groups with active agents first
+            std::sort(groupOrder.begin(), groupOrder.end(), [&groups, &stateRank](const QString &a, const QString &b) {
+                int bestA = 2, bestB = 2;
+                for (const auto *info : groups[a]) {
+                    bestA = qMin(bestA, stateRank(info->state));
+                }
+                for (const auto *info : groups[b]) {
+                    bestB = qMin(bestB, stateRank(info->state));
+                }
+                return bestA < bestB;
+            });
+
+            bool hasActiveAgents = false;
+            for (const QString &groupKey : std::as_const(groupOrder)) {
+                const auto &agentList = groups[groupKey];
+
+                // Filter out completed agents if toggle is on
+                QList<const SubagentInfo *> visible;
+                for (const auto *info : agentList) {
+                    bool completed = (info->state != ClaudeProcess::State::Working && info->state != ClaudeProcess::State::Idle);
+                    if (completed && hideCompleted) {
+                        continue;
+                    }
+                    if (!completed) {
+                        hasActiveAgents = true;
+                    }
+                    visible.append(info);
+                }
+                if (visible.isEmpty()) {
+                    continue;
+                }
+
+                if (groupKey.isEmpty()) {
+                    // Ungrouped agents: add flat under session (backward compatible)
+                    for (const auto *info : visible) {
+                        addSubagentItem(item, *info);
+                    }
+                } else if (visible.size() == 1) {
+                    // Single agent in group: show description inline, no intermediate node
+                    auto *childItem = addSubagentItem(item, *visible.first());
+                    // Prepend task description to agent name
+                    QString existingText = childItem->text(0);
+                    childItem->setText(0, QStringLiteral("%1 \u2014 %2").arg(groupKey, existingText));
+                } else {
+                    // Multiple agents: create task group node
+                    auto *groupItem = new QTreeWidgetItem(item);
+
+                    // Determine aggregate state for group icon
+                    bool anyWorking = false, anyIdle = false;
+                    for (const auto *info : visible) {
+                        if (info->state == ClaudeProcess::State::Working)
+                            anyWorking = true;
+                        if (info->state == ClaudeProcess::State::Idle)
+                            anyIdle = true;
+                    }
+
+                    QString groupLabel = QStringLiteral("%1 (%2 agents)").arg(groupKey).arg(visible.size());
+                    groupItem->setText(0, groupLabel);
+
+                    // Mark as task group (not an agent) for context menu detection
+                    groupItem->setData(0, Qt::UserRole + 2, groupKey);
+                    groupItem->setData(0, Qt::UserRole + 1, meta.sessionId);
+                    groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+
+                    // Group icon/color based on aggregate state
+                    if (anyWorking) {
+                        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
+                        groupItem->setForeground(0, QBrush(Qt::darkGreen));
+                    } else if (anyIdle) {
+                        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
+                        groupItem->setForeground(0, QBrush(Qt::gray));
+                    } else {
+                        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok"), QIcon::fromTheme(QStringLiteral("task-complete"))));
+                        groupItem->setForeground(0, QBrush(QColor(140, 140, 140)));
+                    }
+
+                    groupItem->setToolTip(0, QStringLiteral("Task: %1\nAgents: %2").arg(groupKey).arg(visible.size()));
+                    groupItem->setExpanded(true);
+
+                    // Add agent children under group
+                    for (const auto *info : visible) {
+                        addSubagentItem(groupItem, *info);
+                    }
+                }
             }
 
             if (hasActiveAgents) {

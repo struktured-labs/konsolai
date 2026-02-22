@@ -201,6 +201,13 @@ public:
      */
     void getPanePidAsync(const QString &sessionName, std::function<void(qint64)> callback);
 
+    /**
+     * Kill the current pane process and restart it with a new command (asynchronous).
+     * Uses tmux respawn-pane -k to atomically replace the running process.
+     * The callback receives (bool success).
+     */
+    void respawnPaneAsync(const QString &sessionName, const QString &command, std::function<void(bool)> callback);
+
 Q_SIGNALS:
     /**
      * Emitted when an error occurs during tmux operations

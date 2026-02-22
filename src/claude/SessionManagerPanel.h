@@ -280,6 +280,10 @@ private:
 
     // Per-session toggle: sessions in this set hide completed (NotRunning) agents
     QSet<QString> m_hideCompletedAgents;
+
+    // Sessions explicitly closed via closeSession() — forced to "Closed" category
+    // even if tmux hasn't died yet (async kill race)
+    QSet<QString> m_explicitlyClosed;
 };
 
 } // namespace Konsolai

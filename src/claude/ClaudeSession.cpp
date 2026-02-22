@@ -612,6 +612,11 @@ void ClaudeSession::connectSignals()
         }
     });
 
+    // Capture Task tool descriptions for subagent grouping
+    connect(m_claudeProcess, &ClaudeProcess::taskToolCalled, this, [this](const QString &description) {
+        m_pendingTaskDescriptions.enqueue(description);
+    });
+
     // Handle subagent/team events
     connect(m_claudeProcess,
             &ClaudeProcess::subagentStarted,
@@ -623,6 +628,11 @@ void ClaudeSession::connectSignals()
                 info.state = ClaudeProcess::State::Working;
                 info.startedAt = QDateTime::currentDateTime();
                 info.lastUpdated = info.startedAt;
+
+                // Correlate with pending Task tool description
+                if (!m_pendingTaskDescriptions.isEmpty()) {
+                    info.taskDescription = m_pendingTaskDescriptions.dequeue();
+                }
 
                 // Derive subagent transcript path eagerly from the parent transcript path.
                 // Parent: ~/.claude/projects/{proj}/{uuid}.jsonl
@@ -1117,11 +1127,41 @@ void ClaudeSession::stop()
 
 void ClaudeSession::restart()
 {
-    // Kill and restart by sending a new claude command
-    stop();
-    // Wait a bit, then send claude command
-    // This is a simple implementation - could be improved
-    sendText(QStringLiteral("claude\n"));
+    if (!m_tmuxManager) {
+        qWarning() << "ClaudeSession::restart() - no tmux manager";
+        return;
+    }
+
+    qDebug() << "ClaudeSession::restart() - restarting session:" << m_sessionName;
+
+    // Reset internal state
+    m_subagents.clear();
+    m_pendingTaskDescriptions.clear();
+    m_teamName.clear();
+    if (m_claudeProcess) {
+        m_claudeProcess->reset();
+    }
+
+    // Build the claude command (same as initial launch)
+    QStringList extraArgs;
+    if (!m_resumeSessionId.isEmpty()) {
+        extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
+    }
+    QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
+
+    // Use respawn-pane to atomically kill the current process and start a new one.
+    // This keeps the tmux session alive so the Konsole tab stays connected.
+    QPointer<ClaudeSession> guard(this);
+    m_tmuxManager->respawnPaneAsync(m_sessionName, claudeCmd, [guard](bool ok) {
+        if (!guard) {
+            return;
+        }
+        if (ok) {
+            qDebug() << "ClaudeSession::restart() - respawn successful";
+        } else {
+            qWarning() << "ClaudeSession::restart() - respawn-pane failed";
+        }
+    });
 }
 
 QString ClaudeSession::getTranscript(int lines)

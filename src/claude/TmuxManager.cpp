@@ -414,6 +414,18 @@ QList<TmuxManager::SessionInfo> TmuxManager::parseSessionList(const QString &out
     return sessions;
 }
 
+void TmuxManager::respawnPaneAsync(const QString &sessionName, const QString &command, std::function<void(bool)> callback)
+{
+    // respawn-pane -k kills the current pane process and starts a new one.
+    // Target "session:0.0" addresses the first pane of the first window.
+    executeCommandAsync({QStringLiteral("respawn-pane"), QStringLiteral("-k"), QStringLiteral("-t"), sessionName + QStringLiteral(":0.0"), command},
+                        [callback](bool ok, const QString &) {
+                            if (callback) {
+                                callback(ok);
+                            }
+                        });
+}
+
 } // namespace Konsolai
 
 #include "moc_TmuxManager.cpp"

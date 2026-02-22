@@ -20,6 +20,7 @@
 #include <QMap>
 #include <QObject>
 #include <QPointer>
+#include <QQueue>
 #include <QString>
 #include <QTimer>
 #include <QVector>
@@ -113,6 +114,7 @@ struct KONSOLEPRIVATE_EXPORT SubagentInfo {
     QDateTime lastUpdated; // last TeammateIdle/TaskCompleted/state change — for zombie detection
     QString transcriptPath; // from SubagentStop
     QString currentTaskSubject; // from TaskCompleted
+    QString taskDescription; // from PreToolUse(Task) — short label for tree grouping
 };
 
 /**
@@ -761,6 +763,7 @@ private:
     // Subagent / team tracking
     QMap<QString, SubagentInfo> m_subagents; // keyed by agent_id
     QString m_teamName;
+    QQueue<QString> m_pendingTaskDescriptions; // FIFO queue from PreToolUse(Task) → SubagentStart correlation
 
     // Per-session yolo mode settings
     bool m_yoloMode = false;
