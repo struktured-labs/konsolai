@@ -515,7 +515,7 @@ void MainWindow::setupActions()
             if (!exists) {
                 guard->_sessionPanel->markExpired(sessionName);
                 KMessageBox::information(guard,
-                                         i18n("The session '%1' no longer exists. It has been moved to Archived.", sessionName),
+                                         i18n("The session '%1' no longer exists. It has been moved to Closed. Double-click to restart.", sessionName),
                                          i18n("Session Not Found"));
                 return;
             }

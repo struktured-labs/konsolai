@@ -927,6 +927,9 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         if (session) {
             Q_EMIT focusSessionRequested(session);
         }
+    } else if (item->parent() == m_closedCategory) {
+        // Closed session — tmux is dead, recreate like unarchive
+        unarchiveSession(sessionId);
     } else {
         // Detached session — reattach
         Q_EMIT attachRequested(meta.sessionName);
@@ -1859,7 +1862,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         if (hasItems) {
             const auto subagents = subagentsMap;
             const auto subprocesses = subprocessesMap;
-            bool hideCompleted = m_hideCompletedAgents.contains(meta.sessionId);
+            // Don't hide completed items in persisted trees — everything is already done
+            bool hideCompleted = !isPersistedTree && m_hideCompletedAgents.contains(meta.sessionId);
 
             // Helper: create a subagent tree item under a given parent
             auto addSubagentItem = [&](QTreeWidgetItem *parentItem, const SubagentInfo &info) -> QTreeWidgetItem * {

@@ -199,6 +199,12 @@ struct KONSOLEPRIVATE_EXPORT SubprocessInfo {
             obj[QStringLiteral("output")] = output.left(1000);
         if (pid > 0)
             obj[QStringLiteral("pid")] = static_cast<double>(pid);
+        if (resourceUsage.cpuPercent > 0.0 || resourceUsage.rssBytes > 0) {
+            QJsonObject resObj;
+            resObj[QStringLiteral("cpu")] = resourceUsage.cpuPercent;
+            resObj[QStringLiteral("rss")] = static_cast<double>(resourceUsage.rssBytes);
+            obj[QStringLiteral("resourceUsage")] = resObj;
+        }
         obj[QStringLiteral("promptGroupId")] = promptGroupId;
         if (isBackground)
             obj[QStringLiteral("isBackground")] = true;
@@ -217,6 +223,11 @@ struct KONSOLEPRIVATE_EXPORT SubprocessInfo {
         info.exitCode = obj[QStringLiteral("exitCode")].toInt(-1);
         info.output = obj[QStringLiteral("output")].toString();
         info.pid = static_cast<qint64>(obj[QStringLiteral("pid")].toDouble(0));
+        if (obj.contains(QStringLiteral("resourceUsage"))) {
+            const QJsonObject resObj = obj[QStringLiteral("resourceUsage")].toObject();
+            info.resourceUsage.cpuPercent = resObj[QStringLiteral("cpu")].toDouble(0.0);
+            info.resourceUsage.rssBytes = static_cast<quint64>(resObj[QStringLiteral("rss")].toDouble(0));
+        }
         info.promptGroupId = obj[QStringLiteral("promptGroupId")].toInt(0);
         info.isBackground = obj[QStringLiteral("isBackground")].toBool();
         return info;
