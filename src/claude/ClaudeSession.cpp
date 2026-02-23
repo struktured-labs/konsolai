@@ -798,10 +798,14 @@ void ClaudeSession::connectSignals()
         }
     });
 
-    // Refresh token usage when Claude finishes a task (state → Idle)
+    // Refresh token usage and emit taskComplete when Claude finishes a task (state → Idle)
     connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
         if (newState == ClaudeProcess::State::Idle) {
             refreshTokenUsage();
+            // Only notify if double/triple yolo won't immediately continue
+            if (!m_doubleYoloMode && !m_tripleYoloMode) {
+                Q_EMIT taskComplete(QString());
+            }
         }
     });
 }

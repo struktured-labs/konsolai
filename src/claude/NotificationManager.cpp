@@ -14,6 +14,7 @@
 #include <KStatusNotifierItem>
 #endif
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QSoundEffect>
 #include <QStandardPaths>
@@ -174,12 +175,22 @@ void NotificationManager::playSound(NotificationType type)
 
     QString path = soundPath(type);
     if (path.isEmpty() || !QFile::exists(path)) {
+        qDebug() << "NotificationManager::playSound: No sound file for type" << static_cast<int>(type) << "path:" << path;
         return;
     }
+
+    qDebug() << "NotificationManager::playSound: Playing" << path << "volume:" << m_audioVolume;
 
     auto *sound = new QSoundEffect(this);
     sound->setSource(QUrl::fromLocalFile(path));
     sound->setVolume(m_audioVolume);
+
+    connect(sound, &QSoundEffect::statusChanged, sound, [sound, path]() {
+        if (sound->status() == QSoundEffect::Error) {
+            qWarning() << "NotificationManager: QSoundEffect error for" << path;
+            sound->deleteLater();
+        }
+    });
 
     connect(sound, &QSoundEffect::playingChanged, sound, [sound]() {
         if (!sound->isPlaying()) {
@@ -243,6 +254,14 @@ QString NotificationManager::soundPath(NotificationType type)
         if (!path.isEmpty() && QFile::exists(path)) {
             return path;
         }
+    }
+
+    // Fallback: look relative to the executable (for uninstalled builds)
+    QString exeDir = QCoreApplication::applicationDirPath();
+    // From build/bin/ → source/data/sounds/
+    QString devPath = QDir(exeDir).filePath(QStringLiteral("../../data/sounds/%1.wav").arg(soundName));
+    if (QFile::exists(devPath)) {
+        return QDir(devPath).canonicalPath();
     }
 
     return QString();
