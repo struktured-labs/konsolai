@@ -613,15 +613,19 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
 
     QString sessionName = m_metadata[sessionId].sessionName;
 
-    // Disconnect any active session signals before removal
+    // Snapshot live session data into metadata BEFORE removing from active map
     if (m_activeSessions.contains(sessionId)) {
         ClaudeSession *session = m_activeSessions[sessionId];
         if (session) {
+            m_metadata[sessionId].subagents = session->subagents().values().toVector();
+            m_metadata[sessionId].subprocesses = session->subprocesses().values().toVector();
+            m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
+            m_metadata[sessionId].currentPromptRound = session->currentPromptRound();
             disconnect(session, nullptr, this, nullptr);
         }
     }
 
-    // Remove from active sessions first
+    // Remove from active sessions
     m_activeSessions.remove(sessionId);
 
     // Mark as archived
@@ -670,10 +674,14 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
 
     QString sessionName = m_metadata[sessionId].sessionName;
 
-    // Disconnect any active session signals before removal
+    // Snapshot live session data into metadata BEFORE removing from active map
     if (m_activeSessions.contains(sessionId)) {
         ClaudeSession *session = m_activeSessions[sessionId];
         if (session) {
+            m_metadata[sessionId].subagents = session->subagents().values().toVector();
+            m_metadata[sessionId].subprocesses = session->subprocesses().values().toVector();
+            m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
+            m_metadata[sessionId].currentPromptRound = session->currentPromptRound();
             disconnect(session, nullptr, this, nullptr);
         }
     }
@@ -2325,8 +2333,10 @@ void SessionManagerPanel::saveMetadata()
     QJsonArray array;
     for (auto &meta : m_metadata) {
         // Snapshot live session data into metadata before serializing
+        // Use QPointer to safely detect if the session was deleted between
+        // the map lookup and the dereference (e.g., during archiveSession).
         if (m_activeSessions.contains(meta.sessionId)) {
-            auto *session = m_activeSessions[meta.sessionId];
+            QPointer<ClaudeSession> session = m_activeSessions[meta.sessionId];
             if (session) {
                 meta.subagents = session->subagents().values().toVector();
                 meta.subprocesses = session->subprocesses().values().toVector();

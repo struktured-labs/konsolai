@@ -113,6 +113,11 @@ MainWindow::MainWindow()
         new Konsolai::KonsolaiSettings(this);
     }
 
+    // Initialize notification manager (singleton)
+    if (!Konsolai::NotificationManager::instance()) {
+        new Konsolai::NotificationManager(this);
+    }
+
     updateUseTransparency();
 
     // create actions for menus
@@ -710,6 +715,7 @@ void MainWindow::setupActions()
         disconnect(claudeSession, nullptr, this, nullptr);
 
         auto *notifyMgr = Konsolai::NotificationManager::instance();
+        Q_ASSERT(notifyMgr);
 
         // Permission requested - notify and maybe auto-approve
         connect(claudeSession,
