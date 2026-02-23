@@ -1673,7 +1673,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
     }
 
-    // Add team badge when subagents exist (active or completed)
+    // Add team badge when subagents exist (active or completed/persisted)
     if (isActive) {
         ClaudeSession *activeSession = m_activeSessions[meta.sessionId];
         if (activeSession && !activeSession->subagents().isEmpty()) {
@@ -1694,6 +1694,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 displayName += QStringLiteral(" [%1: %2]").arg(badgeLabel).arg(activeCount);
             }
         }
+    } else if (!meta.subagents.isEmpty()) {
+        // Persisted team badge
+        displayName += QStringLiteral(" [team: done]");
     }
 
     // Add GSD badge when .planning/ or ROADMAP.md exists in working directory
@@ -1822,15 +1825,40 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // Add nested subagent + subprocess children for active sessions
+    // Add nested subagent + subprocess children (from live session or persisted metadata)
+    QMap<QString, SubagentInfo> subagentsMap;
+    QMap<QString, SubprocessInfo> subprocessesMap;
+    QMap<int, QString> promptLabels;
+    bool isPersistedTree = false;
+
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
-        bool hasItems = session && (!session->subagents().isEmpty() || !session->subprocesses().isEmpty());
-        if (session && hasItems) {
+        if (session) {
             // Take snapshots — live maps could be modified by async hook events
-            const auto subagents = session->subagents();
-            const auto subprocesses = session->subprocesses();
-            const auto promptLabels = session->promptGroupLabels();
+            subagentsMap = session->subagents();
+            subprocessesMap = session->subprocesses();
+            promptLabels = session->promptGroupLabels();
+        }
+    } else if (!meta.subagents.isEmpty() || !meta.subprocesses.isEmpty()) {
+        // Use persisted snapshots from metadata
+        isPersistedTree = true;
+        for (const auto &agent : meta.subagents) {
+            SubagentInfo a = agent;
+            // Force all persisted agents to "done" state
+            a.state = ClaudeProcess::State::NotRunning;
+            subagentsMap[a.agentId] = a;
+        }
+        for (const auto &proc : meta.subprocesses) {
+            subprocessesMap[proc.id] = proc;
+        }
+        promptLabels = meta.promptGroupLabels;
+    }
+
+    {
+        bool hasItems = !subagentsMap.isEmpty() || !subprocessesMap.isEmpty();
+        if (hasItems) {
+            const auto subagents = subagentsMap;
+            const auto subprocesses = subprocessesMap;
             bool hideCompleted = m_hideCompletedAgents.contains(meta.sessionId);
 
             // Helper: create a subagent tree item under a given parent
@@ -2181,6 +2209,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!m_durationTimer->isActive()) {
                     m_durationTimer->start();
                 }
+            } else if (isPersistedTree) {
+                // Persisted tree: collapse by default (all items are "done")
+                item->setExpanded(false);
             }
         }
     }
@@ -2254,6 +2285,27 @@ void SessionManagerPanel::loadMetadata()
         meta.budgetCostCeilingUSD = obj[QStringLiteral("budgetCostCeilingUSD")].toDouble();
         meta.budgetTokenCeiling = static_cast<quint64>(obj[QStringLiteral("budgetTokenCeiling")].toInteger(0));
 
+        // Subagent/subprocess snapshots
+        if (obj.contains(QStringLiteral("subagents"))) {
+            const QJsonArray agentArray = obj[QStringLiteral("subagents")].toArray();
+            for (const auto &val : agentArray) {
+                meta.subagents.append(SubagentInfo::fromJson(val.toObject()));
+            }
+        }
+        if (obj.contains(QStringLiteral("subprocesses"))) {
+            const QJsonArray procArray = obj[QStringLiteral("subprocesses")].toArray();
+            for (const auto &val : procArray) {
+                meta.subprocesses.append(SubprocessInfo::fromJson(val.toObject()));
+            }
+        }
+        if (obj.contains(QStringLiteral("promptLabels"))) {
+            const QJsonObject labelsObj = obj[QStringLiteral("promptLabels")].toObject();
+            for (auto it = labelsObj.constBegin(); it != labelsObj.constEnd(); ++it) {
+                meta.promptGroupLabels[it.key().toInt()] = it.value().toString();
+            }
+        }
+        meta.currentPromptRound = obj[QStringLiteral("promptRound")].toInt(0);
+
         if (!meta.sessionId.isEmpty() && !meta.sessionName.isEmpty()) {
             m_metadata[meta.sessionId] = meta;
         }
@@ -2267,7 +2319,18 @@ void SessionManagerPanel::saveMetadata()
     QString filePath = dataPath + QStringLiteral("/sessions.json");
 
     QJsonArray array;
-    for (const auto &meta : m_metadata) {
+    for (auto &meta : m_metadata) {
+        // Snapshot live session data into metadata before serializing
+        if (m_activeSessions.contains(meta.sessionId)) {
+            auto *session = m_activeSessions[meta.sessionId];
+            if (session) {
+                meta.subagents = session->subagents().values().toVector();
+                meta.subprocesses = session->subprocesses().values().toVector();
+                meta.promptGroupLabels = session->promptGroupLabels();
+                meta.currentPromptRound = session->currentPromptRound();
+            }
+        }
+
         QJsonObject obj;
         obj[QStringLiteral("sessionId")] = meta.sessionId;
         obj[QStringLiteral("sessionName")] = meta.sessionName;
@@ -2344,6 +2407,32 @@ void SessionManagerPanel::saveMetadata()
         }
         if (meta.budgetTokenCeiling > 0) {
             obj[QStringLiteral("budgetTokenCeiling")] = static_cast<double>(meta.budgetTokenCeiling);
+        }
+
+        // Subagent/subprocess snapshots (only write if non-empty)
+        if (!meta.subagents.isEmpty()) {
+            QJsonArray agentArray;
+            for (const auto &agent : meta.subagents) {
+                agentArray.append(agent.toJson());
+            }
+            obj[QStringLiteral("subagents")] = agentArray;
+        }
+        if (!meta.subprocesses.isEmpty()) {
+            QJsonArray procArray;
+            for (const auto &proc : meta.subprocesses) {
+                procArray.append(proc.toJson());
+            }
+            obj[QStringLiteral("subprocesses")] = procArray;
+        }
+        if (!meta.promptGroupLabels.isEmpty()) {
+            QJsonObject labelsObj;
+            for (auto it = meta.promptGroupLabels.constBegin(); it != meta.promptGroupLabels.constEnd(); ++it) {
+                labelsObj[QString::number(it.key())] = it.value();
+            }
+            obj[QStringLiteral("promptLabels")] = labelsObj;
+        }
+        if (meta.currentPromptRound > 0) {
+            obj[QStringLiteral("promptRound")] = meta.currentPromptRound;
         }
 
         array.append(obj);

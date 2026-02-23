@@ -68,6 +68,12 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     int budgetTimeLimitMinutes = 0;
     double budgetCostCeilingUSD = 0.0;
     quint64 budgetTokenCeiling = 0;
+
+    // Persisted subagent/subprocess snapshots (survive restart)
+    QVector<SubagentInfo> subagents;
+    QVector<SubprocessInfo> subprocesses;
+    QMap<int, QString> promptGroupLabels;
+    int currentPromptRound = 0;
 };
 
 /**

@@ -17,6 +17,8 @@
 #include "config-konsole.h"
 
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QMap>
 #include <QObject>
 #include <QPointer>
@@ -117,6 +119,44 @@ struct KONSOLEPRIVATE_EXPORT SubagentInfo {
     QString currentTaskSubject; // from TaskCompleted
     QString taskDescription; // from PreToolUse(Task) — short label for tree grouping
     int promptGroupId = 0; // which prompt round spawned this agent
+
+    QJsonObject toJson() const
+    {
+        QJsonObject obj;
+        obj[QStringLiteral("agentId")] = agentId;
+        obj[QStringLiteral("agentType")] = agentType;
+        if (!teammateName.isEmpty())
+            obj[QStringLiteral("teammateName")] = teammateName;
+        obj[QStringLiteral("state")] = static_cast<int>(state);
+        if (startedAt.isValid())
+            obj[QStringLiteral("startedAt")] = startedAt.toString(Qt::ISODate);
+        if (lastUpdated.isValid())
+            obj[QStringLiteral("lastUpdated")] = lastUpdated.toString(Qt::ISODate);
+        if (!transcriptPath.isEmpty())
+            obj[QStringLiteral("transcriptPath")] = transcriptPath;
+        if (!currentTaskSubject.isEmpty())
+            obj[QStringLiteral("currentTaskSubject")] = currentTaskSubject;
+        if (!taskDescription.isEmpty())
+            obj[QStringLiteral("taskDescription")] = taskDescription;
+        obj[QStringLiteral("promptGroupId")] = promptGroupId;
+        return obj;
+    }
+
+    static SubagentInfo fromJson(const QJsonObject &obj)
+    {
+        SubagentInfo info;
+        info.agentId = obj[QStringLiteral("agentId")].toString();
+        info.agentType = obj[QStringLiteral("agentType")].toString();
+        info.teammateName = obj[QStringLiteral("teammateName")].toString();
+        info.state = static_cast<ClaudeProcess::State>(obj[QStringLiteral("state")].toInt(static_cast<int>(ClaudeProcess::State::Working)));
+        info.startedAt = QDateTime::fromString(obj[QStringLiteral("startedAt")].toString(), Qt::ISODate);
+        info.lastUpdated = QDateTime::fromString(obj[QStringLiteral("lastUpdated")].toString(), Qt::ISODate);
+        info.transcriptPath = obj[QStringLiteral("transcriptPath")].toString();
+        info.currentTaskSubject = obj[QStringLiteral("currentTaskSubject")].toString();
+        info.taskDescription = obj[QStringLiteral("taskDescription")].toString();
+        info.promptGroupId = obj[QStringLiteral("promptGroupId")].toInt(0);
+        return info;
+    }
 };
 
 /**
@@ -140,6 +180,47 @@ struct KONSOLEPRIVATE_EXPORT SubprocessInfo {
     ResourceUsage resourceUsage;
     int promptGroupId = 0;
     bool isBackground = false; // survived past tool call completion
+
+    QJsonObject toJson() const
+    {
+        QJsonObject obj;
+        obj[QStringLiteral("id")] = id;
+        obj[QStringLiteral("command")] = command;
+        if (!fullCommand.isEmpty())
+            obj[QStringLiteral("fullCommand")] = fullCommand;
+        obj[QStringLiteral("status")] = static_cast<int>(status);
+        if (startedAt.isValid())
+            obj[QStringLiteral("startedAt")] = startedAt.toString(Qt::ISODate);
+        if (finishedAt.isValid())
+            obj[QStringLiteral("finishedAt")] = finishedAt.toString(Qt::ISODate);
+        if (exitCode >= 0)
+            obj[QStringLiteral("exitCode")] = exitCode;
+        if (!output.isEmpty())
+            obj[QStringLiteral("output")] = output.left(1000);
+        if (pid > 0)
+            obj[QStringLiteral("pid")] = static_cast<double>(pid);
+        obj[QStringLiteral("promptGroupId")] = promptGroupId;
+        if (isBackground)
+            obj[QStringLiteral("isBackground")] = true;
+        return obj;
+    }
+
+    static SubprocessInfo fromJson(const QJsonObject &obj)
+    {
+        SubprocessInfo info;
+        info.id = obj[QStringLiteral("id")].toString();
+        info.command = obj[QStringLiteral("command")].toString();
+        info.fullCommand = obj[QStringLiteral("fullCommand")].toString();
+        info.status = static_cast<Status>(obj[QStringLiteral("status")].toInt(static_cast<int>(Running)));
+        info.startedAt = QDateTime::fromString(obj[QStringLiteral("startedAt")].toString(), Qt::ISODate);
+        info.finishedAt = QDateTime::fromString(obj[QStringLiteral("finishedAt")].toString(), Qt::ISODate);
+        info.exitCode = obj[QStringLiteral("exitCode")].toInt(-1);
+        info.output = obj[QStringLiteral("output")].toString();
+        info.pid = static_cast<qint64>(obj[QStringLiteral("pid")].toDouble(0));
+        info.promptGroupId = obj[QStringLiteral("promptGroupId")].toInt(0);
+        info.isBackground = obj[QStringLiteral("isBackground")].toBool();
+        return info;
+    }
 };
 
 /**
@@ -524,6 +605,14 @@ public:
     const QMap<int, QString> &promptGroupLabels() const
     {
         return m_promptGroupLabels;
+    }
+
+    /**
+     * Get the current prompt round number
+     */
+    int currentPromptRound() const
+    {
+        return m_currentPromptRound;
     }
 
     /**
