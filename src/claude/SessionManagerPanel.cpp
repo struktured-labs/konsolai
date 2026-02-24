@@ -348,14 +348,18 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
 
     // Connect to session finished (PTY died, e.g. tab closed) — fires immediately
     connect(session, &Konsole::Session::finished, this, [this, sessionId]() {
-        m_activeSessions.remove(sessionId);
-        updateTreeWidget();
+        if (m_activeSessions.contains(sessionId)) {
+            m_activeSessions.remove(sessionId);
+            updateTreeWidget();
+        }
     });
 
     // Connect to session destruction (backup, fires later via deleteLater)
     connect(session, &QObject::destroyed, this, [this, sessionId]() {
-        m_activeSessions.remove(sessionId);
-        updateTreeWidget();
+        if (m_activeSessions.contains(sessionId)) {
+            m_activeSessions.remove(sessionId);
+            updateTreeWidget();
+        }
     });
 
     // Connect to working directory changes (after run() gets real path from tmux)
@@ -440,7 +444,12 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
 
     QString sessionId = session->sessionId();
 
-    // Save yolo mode settings and approval state before removing session reference
+    // Guard: skip if already unregistered (e.g., archiveSession already removed it)
+    if (!m_activeSessions.contains(sessionId)) {
+        return;
+    }
+
+    // Save yolo mode settings, approval state, and subagent/subprocess snapshots
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].yoloMode = session->yoloMode();
         m_metadata[sessionId].doubleYoloMode = session->doubleYoloMode();
@@ -449,6 +458,10 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
         m_metadata[sessionId].doubleYoloApprovalCount = session->doubleYoloApprovalCount();
         m_metadata[sessionId].tripleYoloApprovalCount = session->tripleYoloApprovalCount();
         m_metadata[sessionId].approvalLog = session->approvalLog();
+        m_metadata[sessionId].subagents = session->subagents().values().toVector();
+        m_metadata[sessionId].subprocesses = session->subprocesses().values().toVector();
+        m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
+        m_metadata[sessionId].currentPromptRound = session->currentPromptRound();
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
         saveMetadata();
     }
