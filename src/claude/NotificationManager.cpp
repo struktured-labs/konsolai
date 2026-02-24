@@ -245,7 +245,9 @@ QString NotificationManager::soundPath(NotificationType type)
     }
 
     // Look for sound files in standard locations
+    // KNotification resolves Sound= relative to /usr/share/sounds/, so files are at sounds/konsolai/
     const QStringList searchPaths = {
+        QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("sounds/konsolai/%1.wav").arg(soundName)),
         QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("konsolai/sounds/%1.wav").arg(soundName)),
         QStandardPaths::locate(QStandardPaths::AppDataLocation, QStringLiteral("sounds/%1.wav").arg(soundName)),
     };
