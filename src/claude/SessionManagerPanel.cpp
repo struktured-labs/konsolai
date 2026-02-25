@@ -363,9 +363,12 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     });
 
     // Connect to working directory changes (after run() gets real path from tmux)
-    connect(session, &ClaudeSession::workingDirectoryChanged, this, [this, sessionId](const QString &newPath) {
+    connect(session, &ClaudeSession::workingDirectoryChanged, this, [this, session, sessionId](const QString &newPath) {
         if (m_metadata.contains(sessionId) && !newPath.isEmpty()) {
             m_metadata[sessionId].workingDirectory = newPath;
+            // Re-run hook setup now that we have a valid working directory
+            // (hooks require workDir and skip if empty at registerSession time)
+            ensureHooksConfigured(session);
             saveMetadata();
             updateTreeWidget();
             qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;

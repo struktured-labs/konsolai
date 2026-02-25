@@ -61,6 +61,9 @@ void NotificationManager::initSystemTray()
 
 void NotificationManager::notify(NotificationType type, const QString &title, const QString &message, ClaudeSession *session, Channels channels)
 {
+    qDebug() << "NotificationManager::notify:" << static_cast<int>(type) << title << "channels:" << static_cast<int>(channels)
+             << "enabled:" << static_cast<int>(m_enabledChannels);
+
     // Apply enabled channel filter
     channels &= m_enabledChannels;
 
@@ -186,13 +189,15 @@ void NotificationManager::playSound(NotificationType type)
     sound->setVolume(m_audioVolume);
 
     connect(sound, &QSoundEffect::statusChanged, sound, [sound, path]() {
+        qDebug() << "NotificationManager: QSoundEffect status:" << sound->status() << "for" << path;
         if (sound->status() == QSoundEffect::Error) {
             qWarning() << "NotificationManager: QSoundEffect error for" << path;
             sound->deleteLater();
         }
     });
 
-    connect(sound, &QSoundEffect::playingChanged, sound, [sound]() {
+    connect(sound, &QSoundEffect::playingChanged, sound, [sound, path]() {
+        qDebug() << "NotificationManager: QSoundEffect playing:" << sound->isPlaying() << "for" << path;
         if (!sound->isPlaying()) {
             sound->deleteLater();
         }
