@@ -89,6 +89,12 @@ private Q_SLOTS:
     void testSubagentTracking_TeamName();
     void testSubagentTracking_TeammateIdle();
     void testSubagentTracking_TaskCompleted();
+
+    // taskComplete signal emission
+    void testTaskComplete_EmitsWhenYoloDisabled();
+    void testTaskComplete_SuppressedWithDoubleYolo();
+    void testTaskComplete_SuppressedWithTripleYolo();
+    void testTaskComplete_NotEmittedOnNonIdleState();
 };
 
 }

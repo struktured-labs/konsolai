@@ -437,6 +437,168 @@ void ClaudeAgentTeamTest::testUnknownEventNoSubagentSignal()
     QCOMPARE(completedSpy.count(), 0);
 }
 
+// ============================================================
+// SubagentInfo toJson/fromJson round-trip
+// ============================================================
+
+void ClaudeAgentTeamTest::testSubagentInfoRoundTrip()
+{
+    SubagentInfo original;
+    original.agentId = QStringLiteral("agent-rt-123");
+    original.agentType = QStringLiteral("Explore");
+    original.teammateName = QStringLiteral("researcher");
+    original.state = ClaudeProcess::State::Idle;
+    original.startedAt = QDateTime(QDate(2025, 6, 15), QTime(10, 0, 0), QTimeZone::utc());
+    original.lastUpdated = QDateTime(QDate(2025, 6, 15), QTime(10, 5, 0), QTimeZone::utc());
+    original.transcriptPath = QStringLiteral("/home/user/.claude/projects/proj/abc.jsonl");
+    original.currentTaskSubject = QStringLiteral("Fix the login bug");
+    original.taskDescription = QStringLiteral("Search codebase for auth issues");
+    original.promptGroupId = 3;
+
+    QJsonObject json = original.toJson();
+    SubagentInfo restored = SubagentInfo::fromJson(json);
+
+    QCOMPARE(restored.agentId, original.agentId);
+    QCOMPARE(restored.agentType, original.agentType);
+    QCOMPARE(restored.teammateName, original.teammateName);
+    QCOMPARE(static_cast<int>(restored.state), static_cast<int>(original.state));
+    QCOMPARE(restored.startedAt, original.startedAt);
+    QCOMPARE(restored.lastUpdated, original.lastUpdated);
+    QCOMPARE(restored.transcriptPath, original.transcriptPath);
+    QCOMPARE(restored.currentTaskSubject, original.currentTaskSubject);
+    QCOMPARE(restored.taskDescription, original.taskDescription);
+    QCOMPARE(restored.promptGroupId, original.promptGroupId);
+}
+
+void ClaudeAgentTeamTest::testSubagentInfoFromJsonMissingFields()
+{
+    // Minimal JSON — only required fields
+    QJsonObject json;
+    json[QStringLiteral("agentId")] = QStringLiteral("min-agent");
+    json[QStringLiteral("agentType")] = QStringLiteral("Bash");
+
+    SubagentInfo info = SubagentInfo::fromJson(json);
+    QCOMPARE(info.agentId, QStringLiteral("min-agent"));
+    QCOMPARE(info.agentType, QStringLiteral("Bash"));
+    QVERIFY(info.teammateName.isEmpty());
+    QVERIFY(!info.startedAt.isValid());
+    QVERIFY(!info.lastUpdated.isValid());
+    QVERIFY(info.transcriptPath.isEmpty());
+    QVERIFY(info.currentTaskSubject.isEmpty());
+    QVERIFY(info.taskDescription.isEmpty());
+    QCOMPARE(info.promptGroupId, 0);
+}
+
+void ClaudeAgentTeamTest::testSubagentInfoFromJsonStateDefault()
+{
+    // Missing state defaults to Working
+    QJsonObject json;
+    json[QStringLiteral("agentId")] = QStringLiteral("def-agent");
+    json[QStringLiteral("agentType")] = QStringLiteral("Plan");
+
+    SubagentInfo info = SubagentInfo::fromJson(json);
+    QCOMPARE(static_cast<int>(info.state), static_cast<int>(ClaudeProcess::State::Working));
+
+    // Explicit NotRunning
+    json[QStringLiteral("state")] = static_cast<int>(ClaudeProcess::State::NotRunning);
+    SubagentInfo info2 = SubagentInfo::fromJson(json);
+    QCOMPARE(static_cast<int>(info2.state), static_cast<int>(ClaudeProcess::State::NotRunning));
+}
+
+// ============================================================
+// SubprocessInfo toJson/fromJson round-trip
+// ============================================================
+
+void ClaudeAgentTeamTest::testSubprocessInfoRoundTrip()
+{
+    SubprocessInfo original;
+    original.id = QStringLiteral("proc-rt-456");
+    original.command = QStringLiteral("ninja -j4");
+    original.fullCommand = QStringLiteral("ninja -j4 -C /build");
+    original.status = SubprocessInfo::Completed;
+    original.startedAt = QDateTime(QDate(2025, 6, 15), QTime(10, 0, 0), QTimeZone::utc());
+    original.finishedAt = QDateTime(QDate(2025, 6, 15), QTime(10, 2, 0), QTimeZone::utc());
+    original.exitCode = 0;
+    original.output = QStringLiteral("[28/28] Linking CXX executable bin/test");
+    original.pid = 12345;
+    original.promptGroupId = 2;
+    original.isBackground = true;
+
+    QJsonObject json = original.toJson();
+    SubprocessInfo restored = SubprocessInfo::fromJson(json);
+
+    QCOMPARE(restored.id, original.id);
+    QCOMPARE(restored.command, original.command);
+    QCOMPARE(restored.fullCommand, original.fullCommand);
+    QCOMPARE(static_cast<int>(restored.status), static_cast<int>(original.status));
+    QCOMPARE(restored.startedAt, original.startedAt);
+    QCOMPARE(restored.finishedAt, original.finishedAt);
+    QCOMPARE(restored.exitCode, original.exitCode);
+    QCOMPARE(restored.output, original.output);
+    QCOMPARE(restored.pid, original.pid);
+    QCOMPARE(restored.promptGroupId, original.promptGroupId);
+    QCOMPARE(restored.isBackground, original.isBackground);
+}
+
+void ClaudeAgentTeamTest::testSubprocessInfoFromJsonMissingFields()
+{
+    QJsonObject json;
+    json[QStringLiteral("id")] = QStringLiteral("min-proc");
+    json[QStringLiteral("command")] = QStringLiteral("ls");
+
+    SubprocessInfo info = SubprocessInfo::fromJson(json);
+    QCOMPARE(info.id, QStringLiteral("min-proc"));
+    QCOMPARE(info.command, QStringLiteral("ls"));
+    QVERIFY(info.fullCommand.isEmpty());
+    QCOMPARE(static_cast<int>(info.status), static_cast<int>(SubprocessInfo::Running)); // default
+    QVERIFY(!info.startedAt.isValid());
+    QVERIFY(!info.finishedAt.isValid());
+    QCOMPARE(info.exitCode, -1);
+    QVERIFY(info.output.isEmpty());
+    QCOMPARE(info.pid, qint64(0));
+    QCOMPARE(info.promptGroupId, 0);
+    QVERIFY(!info.isBackground);
+}
+
+void ClaudeAgentTeamTest::testSubprocessInfoOutputTruncation()
+{
+    SubprocessInfo info;
+    info.id = QStringLiteral("trunc");
+    info.command = QStringLiteral("cat bigfile");
+    // Output > 1000 chars should be truncated in toJson
+    info.output = QString(2000, QLatin1Char('x'));
+
+    QJsonObject json = info.toJson();
+    QCOMPARE(json[QStringLiteral("output")].toString().length(), 1000);
+
+    // Restore from truncated JSON — output is 1000 chars
+    SubprocessInfo restored = SubprocessInfo::fromJson(json);
+    QCOMPARE(restored.output.length(), 1000);
+}
+
+void ClaudeAgentTeamTest::testSubprocessInfoResourceUsageRoundTrip()
+{
+    SubprocessInfo info;
+    info.id = QStringLiteral("res-usage");
+    info.command = QStringLiteral("build");
+    info.resourceUsage.cpuPercent = 85.5;
+    info.resourceUsage.rssBytes = 1048576; // 1 MB
+
+    QJsonObject json = info.toJson();
+    QVERIFY(json.contains(QStringLiteral("resourceUsage")));
+
+    SubprocessInfo restored = SubprocessInfo::fromJson(json);
+    QCOMPARE(restored.resourceUsage.cpuPercent, 85.5);
+    QCOMPARE(restored.resourceUsage.rssBytes, quint64(1048576));
+
+    // No resourceUsage when both are zero
+    SubprocessInfo info2;
+    info2.id = QStringLiteral("no-res");
+    info2.command = QStringLiteral("echo");
+    QJsonObject json2 = info2.toJson();
+    QVERIFY(!json2.contains(QStringLiteral("resourceUsage")));
+}
+
 QTEST_GUILESS_MAIN(ClaudeAgentTeamTest)
 
 #include "moc_ClaudeAgentTeamTest.cpp"

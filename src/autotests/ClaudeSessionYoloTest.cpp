@@ -814,6 +814,99 @@ void ClaudeSessionYoloTest::testSubagentTracking_TaskCompleted()
     QVERIFY(teamSpy.count() >= 2);
 }
 
+// ============================================================
+// taskComplete signal emission
+// ============================================================
+
+void ClaudeSessionYoloTest::testTaskComplete_EmitsWhenYoloDisabled()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+    QVERIFY(process);
+
+    // Ensure all yolo modes are off
+    session.setYoloMode(false);
+    session.setDoubleYoloMode(false);
+    session.setTripleYoloMode(false);
+
+    QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
+
+    // Working → Idle triggers taskComplete
+    process->handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process->state(), ClaudeProcess::State::Working);
+
+    process->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QCOMPARE(process->state(), ClaudeProcess::State::Idle);
+
+    QCOMPARE(taskCompleteSpy.count(), 1);
+}
+
+void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithDoubleYolo()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+    QVERIFY(process);
+
+    // Enable double yolo — taskComplete should be suppressed
+    session.setYoloMode(false);
+    session.setDoubleYoloMode(true);
+    session.setTripleYoloMode(false);
+
+    QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
+
+    process->handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    process->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QCOMPARE(process->state(), ClaudeProcess::State::Idle);
+
+    QCOMPARE(taskCompleteSpy.count(), 0);
+}
+
+void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithTripleYolo()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+    QVERIFY(process);
+
+    // Enable triple yolo — taskComplete should be suppressed
+    session.setYoloMode(false);
+    session.setDoubleYoloMode(false);
+    session.setTripleYoloMode(true);
+
+    QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
+
+    process->handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    process->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QCOMPARE(process->state(), ClaudeProcess::State::Idle);
+
+    QCOMPARE(taskCompleteSpy.count(), 0);
+}
+
+void ClaudeSessionYoloTest::testTaskComplete_NotEmittedOnNonIdleState()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    auto *process = session.claudeProcess();
+    QVERIFY(process);
+
+    session.setYoloMode(false);
+    session.setDoubleYoloMode(false);
+    session.setTripleYoloMode(false);
+
+    QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
+
+    // PreToolUse → Working state (not Idle)
+    process->handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    QCOMPARE(process->state(), ClaudeProcess::State::Working);
+    QCOMPARE(taskCompleteSpy.count(), 0);
+
+    // PermissionRequest → WaitingInput (not Idle)
+    QJsonObject permData;
+    permData[QStringLiteral("tool_name")] = QStringLiteral("Write");
+    permData[QStringLiteral("yolo_approved")] = false;
+    process->handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(permData).toJson(QJsonDocument::Compact)));
+    QCOMPARE(process->state(), ClaudeProcess::State::WaitingInput);
+    QCOMPARE(taskCompleteSpy.count(), 0);
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionYoloTest)
 
 #include "moc_ClaudeSessionYoloTest.cpp"

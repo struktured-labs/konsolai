@@ -74,6 +74,13 @@ private Q_SLOTS:
     void testMetadataApprovalLogRoundTrip();
     void testMetadataMultipleSessionsRoundTrip();
     void testMetadataSaveLoadIdempotent();
+
+    // Subagent/subprocess metadata persistence
+    void testMetadataSubagentPersistence();
+    void testMetadataSubprocessPersistence();
+    void testMetadataPromptLabelsPersistence();
+    void testMetadataSubagentEmptyNotSerialized();
+    void testMetadataSubagentRoundTrip();
 };
 
 }

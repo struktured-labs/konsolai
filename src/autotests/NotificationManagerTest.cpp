@@ -282,6 +282,115 @@ void NotificationManagerTest::testSystemTrayStatusChangedSignal()
     QVERIFY(spy.isValid());
 }
 
+// ============================================================
+// notify() integration tests
+// ============================================================
+
+void NotificationManagerTest::testNotifyDispatchesInTerminal()
+{
+    NotificationManager *manager = NotificationManager::instance();
+
+    // Enable only InTerminal channel
+    manager->setEnabledChannels(NotificationManager::Channel::InTerminal);
+
+    QSignalSpy terminalSpy(manager, &NotificationManager::showInTerminalNotification);
+
+    manager->notify(NotificationManager::NotificationType::TaskComplete, QStringLiteral("Done"), QStringLiteral("Task finished"), nullptr);
+
+    QCOMPARE(terminalSpy.count(), 1);
+    // Verify signal carries correct type and message
+    auto args = terminalSpy.at(0);
+    QCOMPARE(args.at(0).value<NotificationManager::NotificationType>(), NotificationManager::NotificationType::TaskComplete);
+    QCOMPARE(args.at(1).toString(), QStringLiteral("Done"));
+    QCOMPARE(args.at(2).toString(), QStringLiteral("Task finished"));
+
+    // Restore defaults
+    manager->setEnabledChannels(NotificationManager::Channel::All);
+}
+
+void NotificationManagerTest::testNotifyChannelFiltering()
+{
+    NotificationManager *manager = NotificationManager::instance();
+
+    // Disable all channels
+    manager->setEnabledChannels(NotificationManager::Channel::None);
+
+    QSignalSpy terminalSpy(manager, &NotificationManager::showInTerminalNotification);
+    QSignalSpy traySpy(manager, &NotificationManager::systemTrayStatusChanged);
+
+    manager->notify(NotificationManager::NotificationType::Error, QStringLiteral("Error"), QStringLiteral("Something went wrong"), nullptr);
+
+    // Nothing should fire with all channels disabled
+    QCOMPARE(terminalSpy.count(), 0);
+    QCOMPARE(traySpy.count(), 0);
+
+    // Restore defaults
+    manager->setEnabledChannels(NotificationManager::Channel::All);
+}
+
+void NotificationManagerTest::testNotifyAudioDisabledNoSound()
+{
+    NotificationManager *manager = NotificationManager::instance();
+
+    // Enable only Desktop + InTerminal (no Audio)
+    manager->setEnabledChannels(NotificationManager::Channel::Desktop | NotificationManager::Channel::InTerminal);
+
+    QSignalSpy terminalSpy(manager, &NotificationManager::showInTerminalNotification);
+
+    // This should dispatch to InTerminal but NOT Audio
+    manager->notify(NotificationManager::NotificationType::Permission, QStringLiteral("Permission"), QStringLiteral("Need auth"), nullptr);
+
+    QCOMPARE(terminalSpy.count(), 1);
+    // Audio not easily verifiable without mock, but we verify the channel gating logic works
+
+    // Restore defaults
+    manager->setEnabledChannels(NotificationManager::Channel::All);
+}
+
+void NotificationManagerTest::testNotifySystemTrayEmitsSignal()
+{
+    NotificationManager *manager = NotificationManager::instance();
+
+    // Enable only SystemTray
+    manager->setEnabledChannels(NotificationManager::Channel::SystemTray);
+
+    QSignalSpy traySpy(manager, &NotificationManager::systemTrayStatusChanged);
+
+    manager->notify(NotificationManager::NotificationType::WaitingInput, QStringLiteral("Input"), QStringLiteral("Waiting for user"), nullptr);
+
+    QCOMPARE(traySpy.count(), 1);
+    auto args = traySpy.at(0);
+    QCOMPARE(args.at(0).value<NotificationManager::NotificationType>(), NotificationManager::NotificationType::WaitingInput);
+    QCOMPARE(args.at(1).toString(), QStringLiteral("Waiting for user"));
+
+    // Restore defaults
+    manager->setEnabledChannels(NotificationManager::Channel::All);
+}
+
+void NotificationManagerTest::testYoloCooldown()
+{
+    NotificationManager *manager = NotificationManager::instance();
+
+    // Enable yolo notifications and audio
+    manager->setYoloNotificationsEnabled(true);
+    manager->setEnabledChannels(NotificationManager::Channel::InTerminal);
+
+    QSignalSpy terminalSpy(manager, &NotificationManager::showInTerminalNotification);
+
+    // First yolo notification should go through
+    manager->notify(NotificationManager::NotificationType::YoloApproval, QStringLiteral("Auto"), QStringLiteral("Approved Bash"), nullptr);
+    QCOMPARE(terminalSpy.count(), 1);
+
+    // Second immediate yolo notification should also dispatch to InTerminal
+    // (cooldown only applies to playSound, not other channels)
+    manager->notify(NotificationManager::NotificationType::YoloApproval, QStringLiteral("Auto"), QStringLiteral("Approved Write"), nullptr);
+    QCOMPARE(terminalSpy.count(), 2);
+
+    // Restore defaults
+    manager->setYoloNotificationsEnabled(false);
+    manager->setEnabledChannels(NotificationManager::Channel::All);
+}
+
 QTEST_MAIN(NotificationManagerTest)
 
 #include "moc_NotificationManagerTest.cpp"

@@ -18,6 +18,7 @@
 #include <QTest>
 
 // Konsolai
+#include "../claude/ClaudeSession.h"
 #include "../claude/SessionManagerPanel.h"
 
 using namespace Konsolai;
@@ -829,6 +830,202 @@ void SessionManagerPanelTest::testMetadataSaveLoadIdempotent()
     QCOMPARE(o1.value(QStringLiteral("isPinned")).toBool(), o2.value(QStringLiteral("isPinned")).toBool());
     QCOMPARE(o1.value(QStringLiteral("yoloMode")).toBool(), o2.value(QStringLiteral("yoloMode")).toBool());
     QCOMPARE(o1.value(QStringLiteral("budgetTimeLimitMinutes")).toInt(), o2.value(QStringLiteral("budgetTimeLimitMinutes")).toInt());
+}
+
+// ============================================================
+// Subagent/subprocess metadata persistence
+// ============================================================
+
+void SessionManagerPanelTest::testMetadataSubagentPersistence()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("sag11111"), QStringLiteral("konsolai-test-sag11111"));
+
+    // Add subagents array
+    QJsonArray agentArray;
+    {
+        QJsonObject a;
+        a[QStringLiteral("agentId")] = QStringLiteral("agent-abc");
+        a[QStringLiteral("agentType")] = QStringLiteral("Explore");
+        a[QStringLiteral("teammateName")] = QStringLiteral("researcher");
+        a[QStringLiteral("state")] = 3; // NotRunning
+        a[QStringLiteral("taskDescription")] = QStringLiteral("Find auth bugs");
+        a[QStringLiteral("currentTaskSubject")] = QStringLiteral("Fix login");
+        a[QStringLiteral("promptGroupId")] = 1;
+        agentArray.append(a);
+    }
+    {
+        QJsonObject a;
+        a[QStringLiteral("agentId")] = QStringLiteral("agent-def");
+        a[QStringLiteral("agentType")] = QStringLiteral("Bash");
+        a[QStringLiteral("state")] = 3;
+        a[QStringLiteral("promptGroupId")] = 2;
+        agentArray.append(a);
+    }
+    s[QStringLiteral("subagents")] = agentArray;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].subagents.size(), 2);
+    QCOMPARE(all[0].subagents[0].agentId, QStringLiteral("agent-abc"));
+    QCOMPARE(all[0].subagents[0].agentType, QStringLiteral("Explore"));
+    QCOMPARE(all[0].subagents[0].teammateName, QStringLiteral("researcher"));
+    QCOMPARE(all[0].subagents[0].taskDescription, QStringLiteral("Find auth bugs"));
+    QCOMPARE(all[0].subagents[0].currentTaskSubject, QStringLiteral("Fix login"));
+    QCOMPARE(all[0].subagents[0].promptGroupId, 1);
+    QCOMPARE(all[0].subagents[1].agentId, QStringLiteral("agent-def"));
+    QCOMPARE(all[0].subagents[1].agentType, QStringLiteral("Bash"));
+    QCOMPARE(all[0].subagents[1].promptGroupId, 2);
+}
+
+void SessionManagerPanelTest::testMetadataSubprocessPersistence()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("spr11111"), QStringLiteral("konsolai-test-spr11111"));
+
+    QJsonArray procArray;
+    {
+        QJsonObject p;
+        p[QStringLiteral("id")] = QStringLiteral("proc-001");
+        p[QStringLiteral("command")] = QStringLiteral("ninja -j4");
+        p[QStringLiteral("fullCommand")] = QStringLiteral("ninja -j4 -C /build");
+        p[QStringLiteral("status")] = 1; // Completed
+        p[QStringLiteral("exitCode")] = 0;
+        p[QStringLiteral("pid")] = 12345.0;
+        p[QStringLiteral("promptGroupId")] = 1;
+        p[QStringLiteral("isBackground")] = true;
+        QJsonObject res;
+        res[QStringLiteral("cpu")] = 50.5;
+        res[QStringLiteral("rss")] = 2097152.0;
+        p[QStringLiteral("resourceUsage")] = res;
+        procArray.append(p);
+    }
+    s[QStringLiteral("subprocesses")] = procArray;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].subprocesses.size(), 1);
+
+    const auto &proc = all[0].subprocesses[0];
+    QCOMPARE(proc.id, QStringLiteral("proc-001"));
+    QCOMPARE(proc.command, QStringLiteral("ninja -j4"));
+    QCOMPARE(proc.fullCommand, QStringLiteral("ninja -j4 -C /build"));
+    QCOMPARE(static_cast<int>(proc.status), static_cast<int>(SubprocessInfo::Completed));
+    QCOMPARE(proc.exitCode, 0);
+    QCOMPARE(proc.pid, qint64(12345));
+    QCOMPARE(proc.promptGroupId, 1);
+    QVERIFY(proc.isBackground);
+    QCOMPARE(proc.resourceUsage.cpuPercent, 50.5);
+    QCOMPARE(proc.resourceUsage.rssBytes, quint64(2097152));
+}
+
+void SessionManagerPanelTest::testMetadataPromptLabelsPersistence()
+{
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("plb11111"), QStringLiteral("konsolai-test-plb11111"));
+
+    QJsonObject labels;
+    labels[QStringLiteral("0")] = QStringLiteral("Fix the bug");
+    labels[QStringLiteral("1")] = QStringLiteral("Add tests");
+    labels[QStringLiteral("2")] = QStringLiteral("Refactor auth");
+    s[QStringLiteral("promptLabels")] = labels;
+    s[QStringLiteral("promptRound")] = 2;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QCOMPARE(all[0].promptGroupLabels.size(), 3);
+    QCOMPARE(all[0].promptGroupLabels[0], QStringLiteral("Fix the bug"));
+    QCOMPARE(all[0].promptGroupLabels[1], QStringLiteral("Add tests"));
+    QCOMPARE(all[0].promptGroupLabels[2], QStringLiteral("Refactor auth"));
+    QCOMPARE(all[0].currentPromptRound, 2);
+}
+
+void SessionManagerPanelTest::testMetadataSubagentEmptyNotSerialized()
+{
+    // Session with no subagents/subprocesses — JSON should not contain those keys
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("emp11111"), QStringLiteral("konsolai-test-emp11111")));
+    writeTestSessions(sessions);
+
+    {
+        SessionManagerPanel panel;
+        QList<SessionMetadata> all = panel.allSessions();
+        QCOMPARE(all.size(), 1);
+        QVERIFY(all[0].subagents.isEmpty());
+        QVERIFY(all[0].subprocesses.isEmpty());
+        QVERIFY(all[0].promptGroupLabels.isEmpty());
+        QCOMPARE(all[0].currentPromptRound, 0);
+        // Panel destructor saves
+    }
+
+    // Read raw JSON and verify no subagent/subprocess keys
+    QFile file(sessionsFilePath());
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+
+    QJsonObject obj = doc.array()[0].toObject();
+    QVERIFY(!obj.contains(QStringLiteral("subagents")));
+    QVERIFY(!obj.contains(QStringLiteral("subprocesses")));
+    QVERIFY(!obj.contains(QStringLiteral("promptLabels")));
+    QVERIFY(!obj.contains(QStringLiteral("promptRound")));
+}
+
+void SessionManagerPanelTest::testMetadataSubagentRoundTrip()
+{
+    // Write session with subagents → save → reload → verify
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("art11111"), QStringLiteral("konsolai-test-art11111"));
+
+    QJsonArray agentArray;
+    QJsonObject a;
+    a[QStringLiteral("agentId")] = QStringLiteral("rt-agent");
+    a[QStringLiteral("agentType")] = QStringLiteral("general-purpose");
+    a[QStringLiteral("teammateName")] = QStringLiteral("developer");
+    a[QStringLiteral("state")] = 3;
+    a[QStringLiteral("promptGroupId")] = 1;
+    agentArray.append(a);
+    s[QStringLiteral("subagents")] = agentArray;
+
+    QJsonObject labels;
+    labels[QStringLiteral("0")] = QStringLiteral("Initial prompt");
+    labels[QStringLiteral("1")] = QStringLiteral("Follow up");
+    s[QStringLiteral("promptLabels")] = labels;
+    s[QStringLiteral("promptRound")] = 1;
+
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    // First load & save
+    {
+        SessionManagerPanel panel;
+        QCOMPARE(panel.allSessions().size(), 1);
+        QCOMPARE(panel.allSessions()[0].subagents.size(), 1);
+    }
+
+    // Second load — verify persistence
+    {
+        SessionManagerPanel panel2;
+        QList<SessionMetadata> all = panel2.allSessions();
+        QCOMPARE(all.size(), 1);
+        QCOMPARE(all[0].subagents.size(), 1);
+        QCOMPARE(all[0].subagents[0].agentId, QStringLiteral("rt-agent"));
+        QCOMPARE(all[0].subagents[0].agentType, QStringLiteral("general-purpose"));
+        QCOMPARE(all[0].subagents[0].teammateName, QStringLiteral("developer"));
+        QCOMPARE(all[0].promptGroupLabels.size(), 2);
+        QCOMPARE(all[0].promptGroupLabels[0], QStringLiteral("Initial prompt"));
+        QCOMPARE(all[0].promptGroupLabels[1], QStringLiteral("Follow up"));
+        QCOMPARE(all[0].currentPromptRound, 1);
+    }
 }
 
 QTEST_MAIN(SessionManagerPanelTest)

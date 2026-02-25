@@ -48,6 +48,13 @@ private Q_SLOTS:
     void testShowInTerminalNotificationSignal();
     void testSystemTrayStatusChangedSignal();
 
+    // notify() integration tests
+    void testNotifyDispatchesInTerminal();
+    void testNotifyChannelFiltering();
+    void testNotifyAudioDisabledNoSound();
+    void testNotifySystemTrayEmitsSignal();
+    void testYoloCooldown();
+
 private:
     NotificationManager *m_manager = nullptr;
 };

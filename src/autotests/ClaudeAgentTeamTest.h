@@ -54,6 +54,17 @@ private Q_SLOTS:
 
     // Unknown events still ignored
     void testUnknownEventNoSubagentSignal();
+
+    // SubagentInfo toJson/fromJson round-trip
+    void testSubagentInfoRoundTrip();
+    void testSubagentInfoFromJsonMissingFields();
+    void testSubagentInfoFromJsonStateDefault();
+
+    // SubprocessInfo toJson/fromJson round-trip
+    void testSubprocessInfoRoundTrip();
+    void testSubprocessInfoFromJsonMissingFields();
+    void testSubprocessInfoOutputTruncation();
+    void testSubprocessInfoResourceUsageRoundTrip();
 };
 
 }
