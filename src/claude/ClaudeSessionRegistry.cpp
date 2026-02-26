@@ -365,45 +365,116 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
     QString hashedName = projectPath;
     hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
 
-    QString indexPath = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName + QStringLiteral("/sessions-index.json");
+    QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+    QString indexPath = projectDir + QStringLiteral("/sessions-index.json");
 
+    QSet<QString> indexedIds;
+
+    // Phase 1: Read sessions-index.json (Claude's official index)
     QFile file(indexPath);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
-        return conversations;
-    }
+    if (file.exists() && file.open(QIODevice::ReadOnly)) {
+        QJsonParseError error;
+        QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+        file.close();
 
-    QJsonParseError error;
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
-    file.close();
+        if (error.error == QJsonParseError::NoError) {
+            // Handle both formats: bare array or { "version": N, "entries": [...] }
+            QJsonArray entries;
+            if (doc.isArray()) {
+                entries = doc.array();
+            } else if (doc.isObject()) {
+                entries = doc.object().value(QStringLiteral("entries")).toArray();
+            }
+            for (const QJsonValue &value : entries) {
+                if (!value.isObject()) {
+                    continue;
+                }
 
-    if (error.error != QJsonParseError::NoError) {
-        return conversations;
-    }
+                QJsonObject obj = value.toObject();
+                ClaudeConversation conv;
+                conv.sessionId = obj.value(QStringLiteral("sessionId")).toString();
+                conv.summary = obj.value(QStringLiteral("summary")).toString();
+                conv.firstPrompt = obj.value(QStringLiteral("firstPrompt")).toString();
+                conv.messageCount = obj.value(QStringLiteral("messageCount")).toInt();
+                conv.created = QDateTime::fromString(obj.value(QStringLiteral("created")).toString(), Qt::ISODate);
+                conv.modified = QDateTime::fromString(obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
 
-    // Handle both formats: bare array or { "version": N, "entries": [...] }
-    QJsonArray entries;
-    if (doc.isArray()) {
-        entries = doc.array();
-    } else if (doc.isObject()) {
-        entries = doc.object().value(QStringLiteral("entries")).toArray();
-    } else {
-        return conversations;
-    }
-    for (const QJsonValue &value : entries) {
-        if (!value.isObject()) {
-            continue;
+                if (!conv.sessionId.isEmpty()) {
+                    conversations.append(conv);
+                    indexedIds.insert(conv.sessionId);
+                }
+            }
         }
+    }
 
-        QJsonObject obj = value.toObject();
-        ClaudeConversation conv;
-        conv.sessionId = obj.value(QStringLiteral("sessionId")).toString();
-        conv.summary = obj.value(QStringLiteral("summary")).toString();
-        conv.firstPrompt = obj.value(QStringLiteral("firstPrompt")).toString();
-        conv.messageCount = obj.value(QStringLiteral("messageCount")).toInt();
-        conv.created = QDateTime::fromString(obj.value(QStringLiteral("created")).toString(), Qt::ISODate);
-        conv.modified = QDateTime::fromString(obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
+    // Phase 2: Scan .jsonl files not in the index.
+    // Claude Code doesn't always index every session (e.g., subagent/teammate sessions).
+    // We read the first line of each .jsonl to check if it's a conversation (type=user)
+    // vs a file-history-snapshot (not a conversation).
+    QDir dir(projectDir);
+    if (dir.exists()) {
+        const auto jsonlFiles = dir.entryInfoList({QStringLiteral("*.jsonl")}, QDir::Files);
+        for (const QFileInfo &fi : jsonlFiles) {
+            QString sessionId = fi.completeBaseName();
+            if (indexedIds.contains(sessionId)) {
+                continue;
+            }
 
-        if (!conv.sessionId.isEmpty()) {
+            QFile jsonlFile(fi.absoluteFilePath());
+            if (!jsonlFile.open(QIODevice::ReadOnly)) {
+                continue;
+            }
+
+            // Read first line to check type
+            QByteArray firstLine = jsonlFile.readLine(4096).trimmed();
+            if (firstLine.isEmpty()) {
+                jsonlFile.close();
+                continue;
+            }
+            QJsonParseError lineError;
+            QJsonDocument lineDoc = QJsonDocument::fromJson(firstLine, &lineError);
+            if (lineError.error != QJsonParseError::NoError || !lineDoc.isObject()) {
+                jsonlFile.close();
+                continue;
+            }
+
+            QString lineType = lineDoc.object().value(QStringLiteral("type")).toString();
+            if (lineType != QStringLiteral("user")) {
+                // Not a conversation transcript (e.g., file-history-snapshot)
+                jsonlFile.close();
+                continue;
+            }
+
+            // Extract first user prompt from the first message
+            QString firstPrompt;
+            QJsonObject msgObj = lineDoc.object().value(QStringLiteral("message")).toObject();
+            QJsonValue content = msgObj.value(QStringLiteral("content"));
+            if (content.isString()) {
+                firstPrompt = content.toString().left(200);
+            } else if (content.isArray()) {
+                for (const QJsonValue &part : content.toArray()) {
+                    if (part.isObject() && part.toObject().value(QStringLiteral("type")).toString() == QStringLiteral("text")) {
+                        firstPrompt = part.toObject().value(QStringLiteral("text")).toString().left(200);
+                        break;
+                    }
+                }
+            }
+
+            // Count messages (scan remaining lines)
+            int messageCount = 1;
+            while (!jsonlFile.atEnd()) {
+                jsonlFile.readLine(); // read full line, just counting
+                messageCount++;
+            }
+            jsonlFile.close();
+
+            ClaudeConversation conv;
+            conv.sessionId = sessionId;
+            conv.firstPrompt = firstPrompt;
+            conv.messageCount = messageCount;
+            conv.modified = fi.lastModified();
+            conv.created = fi.birthTime().isValid() ? fi.birthTime() : fi.lastModified();
+
             conversations.append(conv);
         }
     }

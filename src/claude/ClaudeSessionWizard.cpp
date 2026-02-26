@@ -5,6 +5,8 @@
 */
 
 #include "ClaudeSessionWizard.h"
+#include "ClaudeConversationPicker.h"
+#include "ClaudeSessionRegistry.h"
 #include "KonsolaiSettings.h"
 
 #include <QButtonGroup>
@@ -172,6 +174,11 @@ QString ClaudeSessionWizard::claudeArgs() const
 QString ClaudeSessionWizard::taskPrompt() const
 {
     return m_taskPrompt;
+}
+
+QString ClaudeSessionWizard::resumeSessionId() const
+{
+    return m_resumeSessionId;
 }
 
 bool ClaudeSessionWizard::isRemoteSession() const
@@ -358,6 +365,19 @@ void ClaudeSessionWizard::setupUi()
     promptLayout->addWidget(m_promptEdit);
     mainLayout->addWidget(promptGroup);
 
+    // --- Resume previous session ---
+    auto *resumeRow = new QHBoxLayout();
+    m_resumeButton = new QPushButton(i18n("Resume Previous..."), this);
+    m_resumeButton->setEnabled(false);
+    m_resumeButton->setToolTip(i18n("Resume a previous Claude conversation in this project"));
+    connect(m_resumeButton, &QPushButton::clicked, this, &ClaudeSessionWizard::onResumeClicked);
+    resumeRow->addWidget(m_resumeButton);
+    m_resumeLabel = new QLabel(this);
+    m_resumeLabel->setStyleSheet(QStringLiteral("color: gray; font-style: italic;"));
+    resumeRow->addWidget(m_resumeLabel);
+    resumeRow->addStretch();
+    mainLayout->addLayout(resumeRow);
+
     // --- Folder name (right after prompt) ---
     auto *folderRow = new QHBoxLayout();
     folderRow->addWidget(new QLabel(i18n("Folder name:"), this));
@@ -397,6 +417,7 @@ void ClaudeSessionWizard::setupUi()
             }
             m_selectedDirectory = dir;
             m_useExistingDir = true;
+            checkForConversations(dir);
         }
     });
     folderRow->addWidget(m_browseFolderButton);
@@ -571,10 +592,12 @@ void ClaudeSessionWizard::onPromptChanged()
     QString prompt = m_promptEdit->text();
     m_taskPrompt = prompt;
 
-    if (!m_useExistingDir) {
-        m_folderNameEdit->setText(generateFolderName(prompt));
-        m_worktreeNameEdit->setText(generateWorktreeName(prompt));
-    }
+    // Reset browse state so folder auto-generates from prompt again
+    m_useExistingDir = false;
+    m_resumeSessionId.clear();
+
+    m_folderNameEdit->setText(generateFolderName(prompt));
+    m_worktreeNameEdit->setText(generateWorktreeName(prompt));
 
     updatePreview();
 }
@@ -592,6 +615,11 @@ void ClaudeSessionWizard::onFolderNameChanged(const QString &name)
             m_gitModeCombo->setCurrentIndex(GitInit);
             m_sourceRepoEdit->clear();
         }
+        checkForConversations(dir);
+    } else {
+        m_resumeButton->setEnabled(false);
+        m_resumeLabel->clear();
+        m_resumeSessionId.clear();
     }
     updatePreview();
 }
@@ -610,6 +638,11 @@ void ClaudeSessionWizard::onProjectRootChanged(const QString &path)
             m_gitModeCombo->setCurrentIndex(GitInit);
             m_sourceRepoEdit->clear();
         }
+        checkForConversations(dir);
+    } else {
+        m_resumeButton->setEnabled(false);
+        m_resumeLabel->clear();
+        m_resumeSessionId.clear();
     }
     updatePreview();
 }
@@ -1047,6 +1080,57 @@ void ClaudeSessionWizard::loadSshConfigHosts()
                 }
             }
         }
+    }
+}
+
+void ClaudeSessionWizard::checkForConversations(const QString &projectPath)
+{
+    m_resumeSessionId.clear();
+    auto conversations = ClaudeSessionRegistry::readClaudeConversations(projectPath);
+    if (conversations.isEmpty()) {
+        m_resumeButton->setEnabled(false);
+        m_resumeLabel->setText(i18n("No previous sessions"));
+    } else {
+        m_resumeButton->setEnabled(true);
+        m_resumeButton->setText(i18n("Resume Previous (%1)...", conversations.size()));
+        m_resumeLabel->clear();
+    }
+}
+
+void ClaudeSessionWizard::onResumeClicked()
+{
+    QString dir = selectedDirectory();
+    if (dir.isEmpty()) {
+        return;
+    }
+
+    auto conversations = ClaudeSessionRegistry::readClaudeConversations(dir);
+    if (conversations.isEmpty()) {
+        m_resumeButton->setEnabled(false);
+        m_resumeLabel->setText(i18n("No previous sessions"));
+        return;
+    }
+
+    QString id = ClaudeConversationPicker::pick(conversations, this);
+    if (!id.isEmpty()) {
+        m_resumeSessionId = id;
+        // Find the selected conversation to show its summary
+        for (const auto &conv : conversations) {
+            if (conv.sessionId == id) {
+                QString summary = conv.summary.isEmpty() ? conv.firstPrompt : conv.summary;
+                if (summary.length() > 60) {
+                    summary = summary.left(57) + QStringLiteral("...");
+                }
+                m_resumeLabel->setText(i18n("Resuming: %1", summary));
+                m_resumeLabel->setStyleSheet(QStringLiteral("color: green; font-style: italic;"));
+                break;
+            }
+        }
+        accept();
+    } else {
+        // User picked "Start Fresh" — clear resume ID
+        m_resumeSessionId.clear();
+        m_resumeLabel->clear();
     }
 }
 

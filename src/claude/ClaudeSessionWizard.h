@@ -61,6 +61,7 @@ public:
     bool autoApproveRead() const;
     QString claudeArgs() const;
     QString taskPrompt() const;
+    QString resumeSessionId() const;
 
     // SSH remote session support
     bool isRemoteSession() const;
@@ -82,6 +83,7 @@ private Q_SLOTS:
     void onCreatePressed();
     void onLocationChanged();
     void onTestConnectionClicked();
+    void onResumeClicked();
 
 private:
     void setupUi();
@@ -93,6 +95,7 @@ private:
     void updatePreview();
     void updateSshVisibility();
     void loadSshConfigHosts();
+    void checkForConversations(const QString &projectPath);
 
     // Git mode enum
     enum GitMode {
@@ -139,6 +142,10 @@ private:
     QCheckBox *m_autoApproveReadCheck = nullptr;
     QLabel *m_previewLabel = nullptr;
 
+    // Resume session widgets
+    QPushButton *m_resumeButton = nullptr;
+    QLabel *m_resumeLabel = nullptr;
+
     // Budget Controls widgets
     QGroupBox *m_budgetGroup = nullptr;
     QSpinBox *m_timeLimitSpin = nullptr;
@@ -152,6 +159,7 @@ private:
     QString m_selectedDirectory;
     QString m_repoRoot;
     QString m_taskPrompt;
+    QString m_resumeSessionId;
     bool m_isGitRepo = false;
     bool m_useExistingDir = false;
 };

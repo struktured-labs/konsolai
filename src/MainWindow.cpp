@@ -1363,6 +1363,12 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                         claudeSession->setTaskDescription(taskPrompt);
                     }
 
+                    // Set resume session ID if user picked a previous conversation
+                    QString resumeId = wizard.resumeSessionId();
+                    if (!resumeId.isEmpty()) {
+                        claudeSession->setResumeSessionId(resumeId);
+                    }
+
                     // Set SSH remote session fields if applicable
                     if (wizard.isRemoteSession()) {
                         claudeSession->setIsRemote(true);
