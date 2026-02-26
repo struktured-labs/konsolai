@@ -127,6 +127,12 @@ void BudgetController::onResourceUsageChanged(const ResourceUsage &usage)
             qDebug() << "BudgetController: RSS gate triggered -" << usage.rssBytes << ">=" << rssThreshold;
             Q_EMIT resourceGateTriggered(QStringLiteral("RSS %1 bytes exceeds threshold %2 bytes").arg(usage.rssBytes).arg(rssThreshold));
         }
+    } else if (m_gate.gateTriggered && usage.cpuPercent < m_gate.cpuThresholdPercent) {
+        // RSS dropped below threshold and CPU is also OK — clear the gate
+        m_gate.gateTriggered = false;
+        m_yoloPausedByGate = false;
+        qDebug() << "BudgetController: Resource gate cleared (RSS recovered)";
+        Q_EMIT resourceGateCleared();
     }
 }
 

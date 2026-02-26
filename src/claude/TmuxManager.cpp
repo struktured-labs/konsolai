@@ -10,6 +10,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QTimer>
 
 namespace Konsolai
 {
@@ -321,6 +322,16 @@ void TmuxManager::executeCommandAsync(const QStringList &args, std::function<voi
         }
         process->deleteLater();
     });
+
+    // Kill the process after 10s to prevent indefinite hangs
+    QTimer::singleShot(10000, process, [process, callback]() {
+        if (process->state() != QProcess::NotRunning) {
+            qWarning() << "TmuxManager: Async command timed out, killing process";
+            process->kill();
+            // finished() signal will fire after kill, delivering ok=false to callback
+        }
+    });
+
     process->start(QStringLiteral("tmux"), args);
 }
 
