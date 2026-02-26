@@ -675,9 +675,12 @@ public:
     QString shellCommand() const;
 
     /**
-     * Build SSH command for remote sessions
+     * Build SSH argument list for remote sessions.
+     * Returns a QStringList where each element is a separate argv entry
+     * for the ssh process. The remote command is a single final element
+     * so the REMOTE shell (not local) interprets shell metacharacters.
      */
-    QString buildRemoteSshCommand() const;
+    QStringList buildRemoteSshArgs() const;
 
     /**
      * Override run() to build the tmux command just before starting.

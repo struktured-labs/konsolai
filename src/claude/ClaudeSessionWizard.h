@@ -94,6 +94,7 @@ private:
     QStringList getWorktrees(const QString &repoRoot);
     void updatePreview();
     void updateSshVisibility();
+    void updateRemoteProjectRoot();
     void loadSshConfigHosts();
     void checkForConversations(const QString &projectPath);
 

@@ -172,6 +172,24 @@ public:
     void setNotificationYoloEnabled(bool enabled);
 
     /**
+     * Last-used SSH host (for wizard pre-fill)
+     */
+    QString lastSshHost() const;
+    void setLastSshHost(const QString &host);
+
+    /**
+     * Last-used SSH username (for wizard pre-fill)
+     */
+    QString lastSshUsername() const;
+    void setLastSshUsername(const QString &username);
+
+    /**
+     * Last-used SSH port (for wizard pre-fill)
+     */
+    int lastSshPort() const;
+    void setLastSshPort(int port);
+
+    /**
      * Save settings to disk
      */
     void save();

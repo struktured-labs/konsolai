@@ -266,6 +266,14 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
 
 void ClaudeSession::run()
 {
+    // Guard against double invocation (known Konsole issue — Session::run() FIXME comment).
+    // Session::run() has its own isRunning() guard, but ClaudeSession::run() does
+    // expensive work (hook handler, resource tracking) before reaching it.
+    if (isRunning()) {
+        qDebug() << "ClaudeSession::run() - already running, skipping";
+        return;
+    }
+
     qDebug() << "ClaudeSession::run() called" << (m_isRemote ? "(remote SSH session)" : "(local session)");
 
     // For remote sessions, skip local prerequisite checks
@@ -379,7 +387,7 @@ void ClaudeSession::run()
             m_hookHandler->setMode(ClaudeHookHandler::TCP);
             if (m_hookHandler->start()) {
                 qDebug() << "ClaudeSession::run() - Hook handler started in TCP mode on port:" << m_hookHandler->tcpPort();
-                // Note: Remote hooks config is injected via SSH in buildRemoteSshCommand()
+                // Note: Remote hooks config is injected via SSH in buildRemoteSshArgs()
             } else {
                 qWarning() << "ClaudeSession::run() - Failed to start TCP hook handler for remote session";
             }
@@ -464,17 +472,28 @@ void ClaudeSession::run()
         }
     }
 
-    // Build the tmux command now that we have the correct working directory
-    QString tmuxCommand = shellCommand();
-
-    qDebug() << "ClaudeSession::run() - tmux command:" << tmuxCommand;
-    qDebug() << "  Working dir:" << m_workingDir;
-    qDebug() << "  Session name:" << m_sessionName;
-
     // Note: Session::run() strips the first argument (historical reasons),
-    // so we need to include the program name as the first argument
-    setProgram(QStringLiteral("sh"));
-    setArguments({QStringLiteral("sh"), QStringLiteral("-c"), tmuxCommand});
+    // so we need to include the program name as the first argument.
+    if (m_isRemote) {
+        // Remote sessions: call ssh directly with argv list.
+        // This avoids a local shell interpreting shell metacharacters (>, <<, &&)
+        // that are meant for the REMOTE shell.
+        QStringList sshArgs = buildRemoteSshArgs();
+        qDebug() << "ClaudeSession::run() - ssh args:" << sshArgs;
+        qDebug() << "  Working dir:" << m_workingDir;
+        qDebug() << "  Session name:" << m_sessionName;
+        setProgram(QStringLiteral("ssh"));
+        sshArgs.prepend(QStringLiteral("ssh"));
+        setArguments(sshArgs);
+    } else {
+        // Local sessions: use sh -c with the tmux command string
+        QString tmuxCommand = shellCommand();
+        qDebug() << "ClaudeSession::run() - tmux command:" << tmuxCommand;
+        qDebug() << "  Working dir:" << m_workingDir;
+        qDebug() << "  Session name:" << m_sessionName;
+        setProgram(QStringLiteral("sh"));
+        setArguments({QStringLiteral("sh"), QStringLiteral("-c"), tmuxCommand});
+    }
 
     // Call parent run()
     Session::run();
@@ -907,11 +926,7 @@ SessionObserver *ClaudeSession::sessionObserver()
 
 QString ClaudeSession::shellCommand() const
 {
-    // Remote SSH session: wrap everything in ssh -t
-    if (m_isRemote) {
-        return buildRemoteSshCommand();
-    }
-
+    // Remote sessions use buildRemoteSshArgs() directly in run()
     if (m_isReattach) {
         // Attach to existing session
         return m_tmuxManager->buildAttachCommand(m_sessionName);
@@ -933,11 +948,15 @@ QString ClaudeSession::shellCommand() const
     );
 }
 
-QString ClaudeSession::buildRemoteSshCommand() const
+QStringList ClaudeSession::buildRemoteSshArgs() const
 {
-    // Build: ssh -t -R PORT:localhost:PORT [options] host "setup && tmux new-session -A -s name -c /path -- claude [args]"
-    QStringList sshArgs;
-    sshArgs << QStringLiteral("-t"); // Force TTY allocation
+    // Build argv list for ssh: [-t] [-R port:localhost:port] [-p port] user@host <remote-cmd>
+    // The remote command is a SINGLE element in the QStringList. When Pty execs ssh,
+    // each element is a separate argv entry. SSH receives the remote command and passes
+    // it to the remote shell via "exec $SHELL -c <cmd>". The REMOTE shell interprets
+    // >, <<, && — exactly as intended.
+    QStringList args;
+    args << QStringLiteral("-t"); // Force TTY allocation
 
     // Add SSH reverse tunnel for hook events (TCP port tunneled back to local Konsolai)
     quint16 tunnelPort = 0;
@@ -945,13 +964,13 @@ QString ClaudeSession::buildRemoteSshCommand() const
         tunnelPort = m_hookHandler->tcpPort();
         if (tunnelPort > 0) {
             // -R remotePort:localhost:localPort - tunnel remote port back to local
-            sshArgs << QStringLiteral("-R") << QStringLiteral("%1:localhost:%1").arg(tunnelPort);
+            args << QStringLiteral("-R") << QStringLiteral("%1:localhost:%1").arg(tunnelPort);
         }
     }
 
     // Add port if non-default
     if (m_sshPort != 22 && m_sshPort > 0) {
-        sshArgs << QStringLiteral("-p") << QString::number(m_sshPort);
+        args << QStringLiteral("-p") << QString::number(m_sshPort);
     }
 
     // Build target: user@host or just host
@@ -961,7 +980,7 @@ QString ClaudeSession::buildRemoteSshCommand() const
     } else {
         target = m_sshHost;
     }
-    sshArgs << target;
+    args << target;
 
     // Use the working directory on the remote
     QString remoteWorkDir = m_workingDir;
@@ -979,8 +998,18 @@ QString ClaudeSession::buildRemoteSshCommand() const
         claudeCmd += QStringLiteral(" ") + claudeArgs.join(QStringLiteral(" "));
     }
 
-    // Build the remote command
-    // If we have a tunnel port, inject the hook script and config before starting tmux
+    // Build the remote command as a single string.
+    // SSH passes this to the remote shell, so shell metacharacters (>, <<, &&)
+    // are interpreted on the REMOTE host — exactly as intended.
+    //
+    // SSH non-interactive sessions don't source .bashrc/.profile, so tools
+    // installed in ~/.local/bin, ~/.nvm, etc. won't be in PATH. We source
+    // the login profile first to get the user's full PATH.
+    QString profileSetup = QStringLiteral(
+        "[ -f ~/.profile ] && . ~/.profile 2>/dev/null; "
+        "[ -f ~/.bash_profile ] && . ~/.bash_profile 2>/dev/null; "
+        "[ -f ~/.bashrc ] && . ~/.bashrc 2>/dev/null; ");
+
     QString remoteCmd;
     if (tunnelPort > 0 && m_hookHandler) {
         // Generate the hook script and config
@@ -988,17 +1017,7 @@ QString ClaudeSession::buildRemoteSshCommand() const
         QString scriptPath = QStringLiteral("/tmp/konsolai-hook-%1.sh").arg(m_sessionId);
         QString hooksConfig = m_hookHandler->generateRemoteHooksConfig(tunnelPort, scriptPath);
 
-        // Create setup commands:
-        // 1. Write hook script to temp file
-        // 2. Make it executable
-        // 3. Ensure .claude directory exists
-        // 4. Write/merge hooks config to settings.local.json
-        // 5. Run tmux with claude
-
-        // Escape single quotes in the script and config for shell embedding
-        QString escapedScript = hookScript;
-        escapedScript.replace(QStringLiteral("'"), QStringLiteral("'\\''"));
-
+        // Escape single quotes in the config for shell embedding
         QString escapedConfig = hooksConfig;
         escapedConfig.replace(QStringLiteral("'"), QStringLiteral("'\\''"));
 
@@ -1008,6 +1027,7 @@ QString ClaudeSession::buildRemoteSshCommand() const
         remoteCmd = QStringLiteral(
                         "cat > '%1' << 'KONSOLAI_HOOK_EOF'\n%2\nKONSOLAI_HOOK_EOF\n"
                         "chmod +x '%1' && "
+                        "%7"
                         "mkdir -p '%3/.claude' && "
                         "python3 -c \""
                         "import json,sys,os; "
@@ -1021,18 +1041,17 @@ QString ClaudeSession::buildRemoteSshCommand() const
                         "f=open(p,'w'); json.dump(e,f,indent=2); f.close()"
                         "\" '%4' && "
                         "tmux new-session -A -s %5 -c %3 -- %6 \\; set-option -p allow-passthrough off")
-                        .arg(scriptPath, hookScript, remoteWorkDir, escapedConfig, m_sessionName, claudeCmd);
+                        .arg(scriptPath, hookScript, remoteWorkDir, escapedConfig, m_sessionName, claudeCmd, profileSetup);
     } else {
         // No tunnel - just run tmux directly
-        remoteCmd =
-            QStringLiteral("tmux new-session -A -s %1 -c %2 -- %3 \\; set-option -p allow-passthrough off").arg(m_sessionName, remoteWorkDir, claudeCmd);
+        remoteCmd = QStringLiteral("%4tmux new-session -A -s %1 -c %2 -- %3 \\; set-option -p allow-passthrough off")
+                        .arg(m_sessionName, remoteWorkDir, claudeCmd, profileSetup);
     }
 
-    // Quote the entire remote command
-    sshArgs << remoteCmd;
+    // Remote command as a single argv element — SSH sends it to the remote shell
+    args << remoteCmd;
 
-    // Build full ssh command
-    return QStringLiteral("ssh ") + sshArgs.join(QStringLiteral(" "));
+    return args;
 }
 
 void ClaudeSession::detach()

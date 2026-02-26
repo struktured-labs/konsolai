@@ -41,3 +41,10 @@ Konsolai has a three-level yolo system. Each level must work independently and i
 - Zombie sockets: socket files without listeners — hook handler must exit 0 on connection failure
 - Pattern drift: Claude Code CLI updates may change the permission/idle UI text — keep detection patterns up to date
 - ANSI codes: terminal capture includes escape sequences — use `contains()` not exact match
+
+## Debugging
+- **Always debug for the user** — don't ask them to share logs or output. Find it yourself.
+- **Logs**: Check `journalctl --user --since "10 minutes ago" | grep konsolai` for runtime logs.
+- **Remote issues**: SSH to the remote host directly to verify environment (PATH, tool availability, tmux sessions).
+- **Installed binary verification**: Use `strings` on the installed `.so` to confirm your changes are deployed (e.g., `strings /usr/lib/x86_64-linux-gnu/libkonsoleprivate.so | grep <unique_string>`).
+- **Installation**: User runs `./install.sh` to deploy after build. Always remind them to install after a successful build.

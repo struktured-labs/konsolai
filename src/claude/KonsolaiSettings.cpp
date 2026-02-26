@@ -358,6 +358,42 @@ void KonsolaiSettings::setNotificationYoloEnabled(bool enabled)
     Q_EMIT settingsChanged();
 }
 
+QString KonsolaiSettings::lastSshHost() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    return group.readEntry("LastHost", QString());
+}
+
+void KonsolaiSettings::setLastSshHost(const QString &host)
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    group.writeEntry("LastHost", host);
+}
+
+QString KonsolaiSettings::lastSshUsername() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    return group.readEntry("LastUsername", QString());
+}
+
+void KonsolaiSettings::setLastSshUsername(const QString &username)
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    group.writeEntry("LastUsername", username);
+}
+
+int KonsolaiSettings::lastSshPort() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    return group.readEntry("LastPort", 22);
+}
+
+void KonsolaiSettings::setLastSshPort(int port)
+{
+    KConfigGroup group(m_config, QStringLiteral("SSH"));
+    group.writeEntry("LastPort", port);
+}
+
 void KonsolaiSettings::save()
 {
     m_config->sync();

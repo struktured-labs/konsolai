@@ -281,10 +281,22 @@ void ClaudeSessionWizard::setupUi()
     m_sshGroup = new QGroupBox(i18n("SSH Connection"), this);
     auto *sshLayout = new QGridLayout(m_sshGroup);
 
+    // Pre-fill from last-used SSH settings
+    QString lastHost, lastUser;
+    int lastPort = 22;
+    if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
+        lastHost = settings->lastSshHost();
+        lastUser = settings->lastSshUsername();
+        lastPort = settings->lastSshPort();
+    }
+
     // Host
     sshLayout->addWidget(new QLabel(i18n("Host:"), this), 0, 0);
     m_sshHostEdit = new QLineEdit(this);
     m_sshHostEdit->setPlaceholderText(i18n("hostname or IP"));
+    if (!lastHost.isEmpty()) {
+        m_sshHostEdit->setText(lastHost);
+    }
     connect(m_sshHostEdit, &QLineEdit::textChanged, this, [this]() {
         updatePreview();
     });
@@ -294,12 +306,22 @@ void ClaudeSessionWizard::setupUi()
     sshLayout->addWidget(new QLabel(i18n("Username:"), this), 1, 0);
     m_sshUsernameEdit = new QLineEdit(this);
     m_sshUsernameEdit->setPlaceholderText(QString::fromLocal8Bit(qgetenv("USER")));
+    if (!lastUser.isEmpty()) {
+        m_sshUsernameEdit->setText(lastUser);
+    }
+    connect(m_sshUsernameEdit, &QLineEdit::textChanged, this, [this]() {
+        updateRemoteProjectRoot();
+        updatePreview();
+    });
     sshLayout->addWidget(m_sshUsernameEdit, 1, 1);
 
     auto *portLayout = new QHBoxLayout();
     portLayout->addWidget(new QLabel(i18n("Port:"), this));
     m_sshPortEdit = new QLineEdit(this);
     m_sshPortEdit->setPlaceholderText(QStringLiteral("22"));
+    if (lastPort != 22 && lastPort > 0) {
+        m_sshPortEdit->setText(QString::number(lastPort));
+    }
     m_sshPortEdit->setMaximumWidth(60);
     portLayout->addWidget(m_sshPortEdit);
     sshLayout->addLayout(portLayout, 1, 2);
@@ -662,6 +684,32 @@ void ClaudeSessionWizard::onCreatePressed()
         return;
     }
 
+    // For remote sessions, skip all local filesystem checks — remote dirs
+    // are created via SSH in buildRemoteSshArgs (mkdir -p)
+    if (isRemoteSession()) {
+        // Just validate SSH connection fields
+        if (sshHost().isEmpty()) {
+            QMessageBox::warning(this, i18n("Missing SSH Host"), i18n("Enter an SSH host or select a config entry."));
+            m_sshHostEdit->setFocus();
+            return;
+        }
+
+        // Save settings (model + SSH fields for next time)
+        if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
+            settings->setDefaultModel(m_modelCombo->currentText());
+            settings->setLastSshHost(sshHost());
+            settings->setLastSshUsername(sshUsername());
+            settings->setLastSshPort(sshPort());
+            settings->save();
+        }
+
+        m_selectedDirectory = dir;
+        accept();
+        return;
+    }
+
+    // --- Local session validation below ---
+
     // Check if directory already exists
     if (QDir(dir).exists() && !m_useExistingDir) {
         auto result = QMessageBox::question(this,
@@ -963,16 +1011,45 @@ void ClaudeSessionWizard::updateSshVisibility()
     bool remote = isRemoteSession();
     m_sshGroup->setVisible(remote);
 
-    // Update path label
+    // Update path label and defaults
     if (remote) {
         m_pathLabel->setText(i18n("Remote path:"));
-        m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
         m_browseRootButton->setEnabled(false); // Can't browse remote filesystem
+        m_browseFolderButton->setEnabled(false);
+
+        // Hide git group for remote sessions (git ops are local-only)
+        m_gitGroup->setVisible(false);
+
+        // Set default remote project root using SSH username
+        updateRemoteProjectRoot();
     } else {
         m_pathLabel->setText(i18n("Workspace root:"));
         m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
         m_browseRootButton->setEnabled(true);
+        m_browseFolderButton->setEnabled(true);
+        m_gitGroup->setVisible(true);
+
+        // Restore local project root from settings
+        if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
+            m_projectRootEdit->setText(settings->projectRoot());
+        }
     }
+
+    // Adjust dialog size for SSH group visibility
+    adjustSize();
+}
+
+void ClaudeSessionWizard::updateRemoteProjectRoot()
+{
+    if (!isRemoteSession()) {
+        return;
+    }
+
+    QString user = m_sshUsernameEdit->text();
+    if (user.isEmpty()) {
+        user = QString::fromLocal8Bit(qgetenv("USER"));
+    }
+    m_projectRootEdit->setText(QStringLiteral("/home/%1/projects").arg(user));
 }
 
 void ClaudeSessionWizard::onTestConnectionClicked()
