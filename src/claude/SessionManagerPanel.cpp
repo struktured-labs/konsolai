@@ -4,6 +4,7 @@
 */
 
 #include "SessionManagerPanel.h"
+#include "ClaudeConversationPicker.h"
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
 #include "KonsolaiSettings.h"
@@ -932,7 +933,34 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
     // Check if this is a discovered session (parent is m_discoveredCategory)
     if (item->parent() == m_discoveredCategory) {
         QString workDir = item->data(0, Qt::UserRole + 1).toString();
-        if (!workDir.isEmpty()) {
+        if (workDir.isEmpty()) {
+            return;
+        }
+        // Check if this is a remote discovered item
+        QString remoteHost = item->data(0, Qt::UserRole + 2).toString();
+        bool isRemoteItem = !remoteHost.isEmpty();
+        QString remoteUser = isRemoteItem ? item->data(0, Qt::UserRole + 3).toString() : QString();
+        int remotePort = isRemoteItem ? item->data(0, Qt::UserRole + 4).toInt() : 22;
+        if (remotePort <= 0) {
+            remotePort = 22;
+        }
+
+        // Check for existing conversations — offer resume before creating new
+        if (!isRemoteItem) {
+            auto conversations = ClaudeSessionRegistry::readClaudeConversations(workDir);
+            if (!conversations.isEmpty()) {
+                QString id = ClaudeConversationPicker::pick(conversations, this);
+                if (!id.isEmpty()) {
+                    Q_EMIT resumeConversationRequested(workDir, id, QString(), QString(), 22);
+                    return;
+                }
+                // User chose "Start Fresh" — fall through to create new
+            }
+        }
+
+        if (isRemoteItem) {
+            Q_EMIT remoteSessionRequested(remoteHost, remoteUser, remotePort, workDir);
+        } else {
             Q_EMIT unarchiveRequested(sessionId, workDir);
         }
         return;
@@ -1192,10 +1220,41 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             return;
         }
 
+        QString remoteHost = item->data(0, Qt::UserRole + 2).toString();
+        bool isRemoteItem = !remoteHost.isEmpty();
+
         QMenu menu(this);
-        QAction *openAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("Open Session Here"));
-        connect(openAction, &QAction::triggered, this, [this, sessionId, workDir]() {
-            Q_EMIT unarchiveRequested(sessionId, workDir);
+
+        // Resume Conversation action (for items with conversations)
+        if (!isRemoteItem) {
+            auto conversations = ClaudeSessionRegistry::readClaudeConversations(workDir);
+            if (!conversations.isEmpty()) {
+                QAction *resumeAction = menu.addAction(
+                    QIcon::fromTheme(QStringLiteral("media-playback-start")),
+                    i18n("Resume Conversation (%1)...", conversations.size()));
+                connect(resumeAction, &QAction::triggered, this, [this, workDir, conversations]() {
+                    QString id = ClaudeConversationPicker::pick(conversations, this);
+                    if (!id.isEmpty()) {
+                        Q_EMIT resumeConversationRequested(workDir, id, QString(), QString(), 22);
+                    }
+                });
+                menu.addSeparator();
+            }
+        }
+
+        QAction *openAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("Open New Session Here"));
+        connect(openAction, &QAction::triggered, this, [this, sessionId, workDir, isRemoteItem, item]() {
+            if (isRemoteItem) {
+                QString host = item->data(0, Qt::UserRole + 2).toString();
+                QString user = item->data(0, Qt::UserRole + 3).toString();
+                int port = item->data(0, Qt::UserRole + 4).toInt();
+                if (port <= 0) {
+                    port = 22;
+                }
+                Q_EMIT remoteSessionRequested(host, user, port, workDir);
+            } else {
+                Q_EMIT unarchiveRequested(sessionId, workDir);
+            }
         });
 
         menu.addSeparator();
@@ -1628,6 +1687,13 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             item->setData(0, Qt::UserRole, state.sessionId);
             item->setData(0, Qt::UserRole + 1, state.workingDirectory);
             item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-cloud")));
+
+            // Show conversation count for local discovered items
+            auto conversations = ClaudeSessionRegistry::readClaudeConversations(state.workingDirectory);
+            if (!conversations.isEmpty()) {
+                item->setText(1, QStringLiteral("%1 conv").arg(conversations.size()));
+            }
+
             item->setToolTip(0, QStringLiteral("%1\n%2\nLast modified: %3").arg(state.profileName, state.workingDirectory, state.lastAccessed.toString()));
         }
     }
