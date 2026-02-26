@@ -1355,28 +1355,52 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     }
                 }
 
-                Session *session = createSession(profile, workDir);
-                // Pass task description and SSH config from wizard to the Claude session
-                if (auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session)) {
-                    QString taskPrompt = wizard.taskPrompt();
-                    if (!taskPrompt.isEmpty()) {
-                        claudeSession->setTaskDescription(taskPrompt);
-                    }
+                // Construct ClaudeSession manually so we can set all properties
+                // (task, resume ID, SSH fields) BEFORE run(). Using createSession()
+                // would call run() before we can set resumeSessionId.
+                auto *claudeSession = new Konsolai::ClaudeSession(profile->name(), workDir, this);
 
-                    // Set resume session ID if user picked a previous conversation
-                    QString resumeId = wizard.resumeSessionId();
-                    if (!resumeId.isEmpty()) {
-                        claudeSession->setResumeSessionId(resumeId);
-                    }
+                // Set task description
+                QString taskPrompt = wizard.taskPrompt();
+                if (!taskPrompt.isEmpty()) {
+                    claudeSession->setTaskDescription(taskPrompt);
+                }
 
-                    // Set SSH remote session fields if applicable
-                    if (wizard.isRemoteSession()) {
-                        claudeSession->setIsRemote(true);
-                        claudeSession->setSshHost(wizard.sshHost());
-                        claudeSession->setSshUsername(wizard.sshUsername());
-                        claudeSession->setSshPort(wizard.sshPort());
-                        qDebug() << "MainWindow: Created remote SSH session to" << wizard.sshHost();
-                    }
+                // Set resume session ID if user picked a previous conversation
+                QString resumeId = wizard.resumeSessionId();
+                if (!resumeId.isEmpty()) {
+                    claudeSession->setResumeSessionId(resumeId);
+                }
+
+                // Remote SSH setup
+                if (wizard.isRemoteSession()) {
+                    claudeSession->setIsRemote(true);
+                    claudeSession->setSshHost(wizard.sshHost());
+                    claudeSession->setSshUsername(wizard.sshUsername());
+                    claudeSession->setSshPort(wizard.sshPort());
+                }
+
+                SessionManager::instance()->setSessionProfile(claudeSession, profile);
+                claudeSession->setInitialWorkingDirectory(workDir);
+
+                // Create view before run() so terminal size is correct
+                auto *view = _viewManager->createView(claudeSession);
+                _viewManager->activeContainer()->addView(view);
+
+                if (!claudeSession->isRunning()) {
+                    claudeSession->run();
+                }
+
+                _sessionPanel->registerSession(claudeSession);
+                auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+                if (registry) {
+                    registry->registerSession(claudeSession);
+                }
+                _claudeMenu->setActiveSession(claudeSession);
+                _claudeStatusWidget->setSession(claudeSession);
+
+                if (wizard.isRemoteSession()) {
+                    qDebug() << "MainWindow: Created remote SSH session to" << wizard.sshHost();
                 }
                 qDebug() << "Session created via wizard";
                 return;
