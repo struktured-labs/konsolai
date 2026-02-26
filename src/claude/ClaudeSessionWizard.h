@@ -29,6 +29,8 @@ class QDoubleSpinBox;
 namespace Konsolai
 {
 
+struct ClaudeConversation;
+
 /**
  * Single-screen dialog for creating new Claude sessions.
  *
@@ -97,6 +99,7 @@ private:
     void updateRemoteProjectRoot();
     void loadSshConfigHosts();
     void checkForConversations(const QString &projectPath);
+    void showConversationPicker(const QList<ClaudeConversation> &conversations);
 
     // Git mode enum
     enum GitMode {

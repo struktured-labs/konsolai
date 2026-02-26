@@ -27,6 +27,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPointer>
 #include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
@@ -1182,13 +1183,56 @@ void ClaudeSessionWizard::onResumeClicked()
         return;
     }
 
+    if (isRemoteSession()) {
+        // Remote: async conversation discovery via SSH
+        QString host = sshHost();
+        if (host.isEmpty()) {
+            return;
+        }
+        QString target;
+        QString user = sshUsername();
+        if (!user.isEmpty()) {
+            target = QStringLiteral("%1@%2").arg(user, host);
+        } else {
+            target = host;
+        }
+
+        m_resumeLabel->setText(i18n("Loading remote sessions..."));
+        m_resumeButton->setEnabled(false);
+
+        auto *registry = ClaudeSessionRegistry::instance();
+        if (!registry) {
+            return;
+        }
+
+        QPointer<ClaudeSessionWizard> guard(this);
+        registry->readRemoteConversationsAsync(target, sshPort(), dir,
+            [guard](const QList<ClaudeConversation> &conversations) {
+                if (!guard) {
+                    return;
+                }
+                guard->m_resumeButton->setEnabled(true);
+                if (conversations.isEmpty()) {
+                    guard->m_resumeLabel->setText(i18n("No previous sessions on remote"));
+                    return;
+                }
+                guard->showConversationPicker(conversations);
+            });
+        return;
+    }
+
+    // Local: synchronous
     auto conversations = ClaudeSessionRegistry::readClaudeConversations(dir);
     if (conversations.isEmpty()) {
         m_resumeButton->setEnabled(false);
         m_resumeLabel->setText(i18n("No previous sessions"));
         return;
     }
+    showConversationPicker(conversations);
+}
 
+void ClaudeSessionWizard::showConversationPicker(const QList<ClaudeConversation> &conversations)
+{
     QString id = ClaudeConversationPicker::pick(conversations, this);
     if (!id.isEmpty()) {
         m_resumeSessionId = id;

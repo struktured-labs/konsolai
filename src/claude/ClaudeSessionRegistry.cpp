@@ -360,10 +360,7 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
         return conversations;
     }
 
-    // Convert project path to hashed directory name: replace '/' with '-'
-    // e.g. /home/user/projects/foo → -home-user-projects-foo
-    QString hashedName = projectPath;
-    hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
+    QString hashedName = hashedProjectPath(projectPath);
 
     QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
     QString indexPath = projectDir + QStringLiteral("/sessions-index.json");
@@ -485,6 +482,146 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
     });
 
     return conversations;
+}
+
+QString ClaudeSessionRegistry::hashedProjectPath(const QString &projectPath)
+{
+    QString hashed = projectPath;
+    hashed.replace(QLatin1Char('/'), QLatin1Char('-'));
+    return hashed;
+}
+
+void ClaudeSessionRegistry::readRemoteConversationsAsync(
+    const QString &sshTarget, int sshPort,
+    const QString &projectPath,
+    std::function<void(const QList<ClaudeConversation> &)> callback)
+{
+    if (sshTarget.isEmpty() || projectPath.isEmpty()) {
+        if (callback) {
+            callback({});
+        }
+        return;
+    }
+
+    QString hashedName = hashedProjectPath(projectPath);
+
+    // Read sessions-index.json on the remote host
+    QString remoteCmd = QStringLiteral("cat ~/.claude/projects/%1/sessions-index.json 2>/dev/null").arg(hashedName);
+
+    QStringList args;
+    args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes")
+         << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=5");
+    if (sshPort != 22 && sshPort > 0) {
+        args << QStringLiteral("-p") << QString::number(sshPort);
+    }
+    args << sshTarget << remoteCmd;
+
+    auto *process = new QProcess(this);
+    QPointer<ClaudeSessionRegistry> guard(this);
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [process, callback, guard](int exitCode, QProcess::ExitStatus) {
+        QList<ClaudeConversation> conversations;
+        if (exitCode == 0 && guard) {
+            QByteArray data = process->readAllStandardOutput();
+            QJsonParseError error;
+            QJsonDocument doc = QJsonDocument::fromJson(data, &error);
+            if (error.error == QJsonParseError::NoError) {
+                QJsonArray entries;
+                if (doc.isArray()) {
+                    entries = doc.array();
+                } else if (doc.isObject()) {
+                    entries = doc.object().value(QStringLiteral("entries")).toArray();
+                }
+                for (const QJsonValue &value : entries) {
+                    if (!value.isObject()) {
+                        continue;
+                    }
+                    QJsonObject obj = value.toObject();
+                    ClaudeConversation conv;
+                    conv.sessionId = obj.value(QStringLiteral("sessionId")).toString();
+                    conv.summary = obj.value(QStringLiteral("summary")).toString();
+                    conv.firstPrompt = obj.value(QStringLiteral("firstPrompt")).toString();
+                    conv.messageCount = obj.value(QStringLiteral("messageCount")).toInt();
+                    conv.created = QDateTime::fromString(
+                        obj.value(QStringLiteral("created")).toString(), Qt::ISODate);
+                    conv.modified = QDateTime::fromString(
+                        obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
+                    if (!conv.sessionId.isEmpty()) {
+                        conversations.append(conv);
+                    }
+                }
+                std::sort(conversations.begin(), conversations.end(),
+                    [](const ClaudeConversation &a, const ClaudeConversation &b) {
+                        return a.modified > b.modified;
+                    });
+            }
+        }
+        if (callback) {
+            callback(conversations);
+        }
+        process->deleteLater();
+    });
+
+    process->start(QStringLiteral("ssh"), args);
+}
+
+void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
+    const QString &sshTarget, int sshPort, bool konsolaiOnly,
+    std::function<void(const QList<TmuxManager::SessionInfo> &)> callback)
+{
+    if (sshTarget.isEmpty()) {
+        if (callback) {
+            callback({});
+        }
+        return;
+    }
+
+    QStringList args;
+    args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes")
+         << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=5");
+    if (sshPort != 22 && sshPort > 0) {
+        args << QStringLiteral("-p") << QString::number(sshPort);
+    }
+    args << sshTarget
+         << QStringLiteral("tmux list-sessions -F '#{session_name}:#{session_id}:#{session_attached}:#{session_windows}:#{session_created}' 2>/dev/null");
+
+    auto *process = new QProcess(this);
+    QPointer<ClaudeSessionRegistry> guard(this);
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [process, callback, konsolaiOnly, guard](int exitCode, QProcess::ExitStatus) {
+        QList<TmuxManager::SessionInfo> sessions;
+        if (guard && (exitCode == 0 || exitCode == 1)) {
+            // exitCode 1 can mean "no sessions" which is valid
+            QString output = QString::fromUtf8(process->readAllStandardOutput());
+            const auto lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+            for (const QString &line : lines) {
+                QStringList parts = line.split(QLatin1Char(':'));
+                if (parts.size() < 3) {
+                    continue;
+                }
+
+                TmuxManager::SessionInfo info;
+                info.name = parts[0].trimmed();
+                info.id = parts.size() > 1 ? parts[1].trimmed() : QString();
+                info.attached = parts.size() > 2 && parts[2].trimmed() != QStringLiteral("0");
+                info.windows = parts.size() > 3 ? parts[3].trimmed().toInt() : 1;
+                info.created = parts.size() > 4 ? parts[4].trimmed() : QString();
+
+                if (konsolaiOnly && !info.name.startsWith(QStringLiteral("konsolai-"))) {
+                    continue;
+                }
+                sessions.append(info);
+            }
+        }
+        if (callback) {
+            callback(sessions);
+        }
+        process->deleteLater();
+    });
+
+    process->start(QStringLiteral("ssh"), args);
 }
 
 QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString &searchRoot) const

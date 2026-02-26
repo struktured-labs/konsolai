@@ -164,6 +164,66 @@ public:
     static QList<ClaudeConversation> readClaudeConversations(const QString &projectPath);
 
     /**
+     * Convert a project path to the hashed directory name used by Claude CLI.
+     * e.g., "/home/user/projects/foo" → "-home-user-projects-foo"
+     */
+    static QString hashedProjectPath(const QString &projectPath);
+
+    /**
+     * Read Claude CLI conversation history for a project on a remote SSH host.
+     * Async: runs ssh to read sessions-index.json on the remote.
+     *
+     * @param sshTarget SSH target ("user@host" or ssh config name)
+     * @param sshPort SSH port
+     * @param projectPath Absolute path on the remote host
+     * @param callback Called with the conversation list
+     */
+    void readRemoteConversationsAsync(const QString &sshTarget, int sshPort,
+                                       const QString &projectPath,
+                                       std::function<void(const QList<ClaudeConversation> &)> callback);
+
+    /**
+     * Discover tmux sessions on a remote SSH host asynchronously.
+     *
+     * @param sshTarget SSH target ("user@host" or ssh config name)
+     * @param sshPort SSH port
+     * @param konsolaiOnly If true, only return konsolai-* prefixed sessions
+     * @param callback Called with list of session info
+     */
+    void discoverRemoteTmuxSessionsAsync(const QString &sshTarget, int sshPort,
+                                          bool konsolaiOnly,
+                                          std::function<void(const QList<TmuxManager::SessionInfo> &)> callback);
+
+    /**
+     * Discover Claude sessions on a remote SSH host asynchronously.
+     *
+     * Runs: ssh -o BatchMode=yes -o ConnectTimeout=5 <sshTarget> "find <remotePath> -maxdepth 2 -name .claude -type d 2>/dev/null"
+     * Parses output: strips /.claude suffix from each line to get project paths.
+     * Creates ClaudeSessionState entries with isRemote=true.
+     *
+     * @param sshTarget SSH target string (e.g., "user@host" or "user@host:port")
+     * @param remotePath Remote directory to scan (e.g., "~/projects")
+     * @param callback Called with the list of discovered remote session states
+     */
+    void discoverRemoteSessionsAsync(const QString &sshTarget, const QString &remotePath,
+                                      std::function<void(const QList<ClaudeSessionState> &)> callback);
+
+    /**
+     * Parse SSH find output into discovered session states.
+     * Visible for testing.
+     *
+     * @param sshOutput Output from ssh find command (newline-separated paths ending in /.claude)
+     * @param sshHost The SSH host
+     * @param sshUsername The SSH username
+     * @param sshPort The SSH port
+     * @return List of discovered session states
+     */
+    static QList<ClaudeSessionState> parseRemoteDiscoveryOutput(const QString &sshOutput,
+                                                                 const QString &sshHost,
+                                                                 const QString &sshUsername,
+                                                                 int sshPort);
+
+    /**
      * Get path to sessions state file
      */
     static QString sessionStateFilePath();
