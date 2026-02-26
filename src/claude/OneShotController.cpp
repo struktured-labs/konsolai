@@ -47,21 +47,23 @@ void OneShotController::attachToSession(ClaudeSession *session)
     // Configure budget if limits are set
     if (m_config.timeLimitMinutes > 0 || m_config.costCeilingUSD > 0.0 || m_config.tokenCeiling > 0) {
         BudgetController *bc = session->budgetController();
-        SessionBudget budget;
-        budget.timeLimitMinutes = m_config.timeLimitMinutes;
-        budget.costCeilingUSD = m_config.costCeilingUSD;
-        budget.tokenCeiling = m_config.tokenCeiling;
-        budget.startedAt = QDateTime::currentDateTime();
-        bc->setBudget(budget);
+        if (bc) {
+            SessionBudget budget;
+            budget.timeLimitMinutes = m_config.timeLimitMinutes;
+            budget.costCeilingUSD = m_config.costCeilingUSD;
+            budget.tokenCeiling = m_config.tokenCeiling;
+            budget.startedAt = QDateTime::currentDateTime();
+            bc->setBudget(budget);
 
-        // Forward budget status updates
-        connect(bc, &BudgetController::budgetWarning, this, [this](const QString &, double) {
-            Q_EMIT budgetStatusChanged(formatBudgetStatus());
-        });
-        connect(bc, &BudgetController::budgetExceeded, this, [this](const QString &type) {
-            m_result.errors.append(QStringLiteral("Budget exceeded: %1").arg(type));
-            Q_EMIT budgetStatusChanged(formatBudgetStatus());
-        });
+            // Forward budget status updates
+            connect(bc, &BudgetController::budgetWarning, this, [this](const QString &, double) {
+                Q_EMIT budgetStatusChanged(formatBudgetStatus());
+            });
+            connect(bc, &BudgetController::budgetExceeded, this, [this](const QString &type) {
+                m_result.errors.append(QStringLiteral("Budget exceeded: %1").arg(type));
+                Q_EMIT budgetStatusChanged(formatBudgetStatus());
+            });
+        }
     }
 
     // Set yolo levels on the session

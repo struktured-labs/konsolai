@@ -183,8 +183,10 @@ QString ClaudeHookHandler::connectionString() const
 
 void ClaudeHookHandler::stop()
 {
-    // Stop Unix socket server
+    // Stop Unix socket server — disconnect signal first to prevent
+    // onNewConnection from firing between close() and delete
     if (m_server) {
+        disconnect(m_server, nullptr, this, nullptr);
         m_server->close();
         delete m_server;
         m_server = nullptr;
@@ -502,6 +504,7 @@ bool ClaudeHookClient::sendEvent(const QString &socketPath,
 {
     m_socket->connectToServer(socketPath);
     if (!m_socket->waitForConnected(timeoutMs)) {
+        m_socket->disconnectFromServer();
         return false;
     }
 
