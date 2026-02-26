@@ -1378,6 +1378,12 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                     claudeSession->setSshHost(wizard.sshHost());
                     claudeSession->setSshUsername(wizard.sshUsername());
                     claudeSession->setSshPort(wizard.sshPort());
+
+                    // Attach to existing remote tmux session if user picked one
+                    QString remoteTmux = wizard.selectedTmuxSession();
+                    if (!remoteTmux.isEmpty()) {
+                        claudeSession->setExistingRemoteTmuxSession(remoteTmux);
+                    }
                 }
 
                 SessionManager::instance()->setSessionProfile(claudeSession, profile);

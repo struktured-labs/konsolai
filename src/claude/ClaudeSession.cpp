@@ -1011,7 +1011,12 @@ QStringList ClaudeSession::buildRemoteSshArgs() const
         "[ -f ~/.bashrc ] && . ~/.bashrc 2>/dev/null; ");
 
     QString remoteCmd;
-    if (tunnelPort > 0 && m_hookHandler) {
+
+    // Attach to an existing remote tmux session (no new session, no hooks setup)
+    if (!m_existingRemoteTmuxSession.isEmpty()) {
+        remoteCmd = QStringLiteral("%1tmux attach-session -t %2")
+                        .arg(profileSetup, m_existingRemoteTmuxSession);
+    } else if (tunnelPort > 0 && m_hookHandler) {
         // Generate the hook script and config
         QString hookScript = m_hookHandler->generateRemoteHookScript(tunnelPort);
         QString scriptPath = QStringLiteral("/tmp/konsolai-hook-%1.sh").arg(m_sessionId);

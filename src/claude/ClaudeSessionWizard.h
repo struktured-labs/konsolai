@@ -65,6 +65,12 @@ public:
     QString taskPrompt() const;
     QString resumeSessionId() const;
 
+    /**
+     * If set, user chose to attach to an existing remote tmux session
+     * instead of creating a new one.
+     */
+    QString selectedTmuxSession() const;
+
     // SSH remote session support
     bool isRemoteSession() const;
     QString sshHost() const;
@@ -86,6 +92,7 @@ private Q_SLOTS:
     void onLocationChanged();
     void onTestConnectionClicked();
     void onResumeClicked();
+    void onDiscoverRemoteTmuxClicked();
 
 private:
     void setupUi();
@@ -125,6 +132,8 @@ private:
     QComboBox *m_sshConfigCombo = nullptr;
     QPushButton *m_testConnectionButton = nullptr;
     QLabel *m_connectionStatusLabel = nullptr;
+    QPushButton *m_discoverRemoteTmuxButton = nullptr;
+    QLabel *m_remoteTmuxLabel = nullptr;
 
     // Local/shared widgets
     QLabel *m_pathLabel = nullptr;
@@ -164,6 +173,7 @@ private:
     QString m_repoRoot;
     QString m_taskPrompt;
     QString m_resumeSessionId;
+    QString m_selectedTmuxSession;
     bool m_isGitRepo = false;
     bool m_useExistingDir = false;
 };

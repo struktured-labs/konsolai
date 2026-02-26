@@ -8,6 +8,7 @@
 #include "ClaudeConversationPicker.h"
 #include "ClaudeSessionRegistry.h"
 #include "KonsolaiSettings.h"
+#include "TmuxManager.h"
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -21,6 +22,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileSystemModel>
+#include <QInputDialog>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -180,6 +182,11 @@ QString ClaudeSessionWizard::taskPrompt() const
 QString ClaudeSessionWizard::resumeSessionId() const
 {
     return m_resumeSessionId;
+}
+
+QString ClaudeSessionWizard::selectedTmuxSession() const
+{
+    return m_selectedTmuxSession;
 }
 
 bool ClaudeSessionWizard::isRemoteSession() const
@@ -353,6 +360,17 @@ void ClaudeSessionWizard::setupUi()
     m_connectionStatusLabel = new QLabel(this);
     m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: gray;"));
     sshLayout->addWidget(m_connectionStatusLabel, 3, 1, 1, 2);
+
+    // Discover remote tmux sessions button
+    m_discoverRemoteTmuxButton = new QPushButton(i18n("Discover Sessions..."), this);
+    m_discoverRemoteTmuxButton->setToolTip(i18n("Find existing tmux sessions on the remote host"));
+    connect(m_discoverRemoteTmuxButton, &QPushButton::clicked,
+            this, &ClaudeSessionWizard::onDiscoverRemoteTmuxClicked);
+    sshLayout->addWidget(m_discoverRemoteTmuxButton, 4, 0);
+
+    m_remoteTmuxLabel = new QLabel(this);
+    m_remoteTmuxLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    sshLayout->addWidget(m_remoteTmuxLabel, 4, 1, 1, 2);
 
     m_sshGroup->setVisible(false); // Hidden by default (Local selected)
     mainLayout->addWidget(m_sshGroup);
@@ -1229,6 +1247,78 @@ void ClaudeSessionWizard::onResumeClicked()
         return;
     }
     showConversationPicker(conversations);
+}
+
+void ClaudeSessionWizard::onDiscoverRemoteTmuxClicked()
+{
+    QString host = sshHost();
+    if (host.isEmpty()) {
+        m_remoteTmuxLabel->setText(i18n("Enter a host first"));
+        m_remoteTmuxLabel->setStyleSheet(QStringLiteral("color: orange;"));
+        return;
+    }
+
+    m_remoteTmuxLabel->setText(i18n("Discovering..."));
+    m_remoteTmuxLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    m_discoverRemoteTmuxButton->setEnabled(false);
+
+    QString target;
+    QString user = sshUsername();
+    if (!user.isEmpty()) {
+        target = QStringLiteral("%1@%2").arg(user, host);
+    } else {
+        target = host;
+    }
+
+    auto *registry = ClaudeSessionRegistry::instance();
+    if (!registry) {
+        m_discoverRemoteTmuxButton->setEnabled(true);
+        return;
+    }
+
+    QPointer<ClaudeSessionWizard> guard(this);
+
+    // Discover ALL tmux sessions (not just konsolai ones)
+    registry->discoverRemoteTmuxSessionsAsync(target, sshPort(), false,
+        [guard](const QList<TmuxManager::SessionInfo> &sessions) {
+            if (!guard) {
+                return;
+            }
+            guard->m_discoverRemoteTmuxButton->setEnabled(true);
+            if (sessions.isEmpty()) {
+                guard->m_remoteTmuxLabel->setText(i18n("No tmux sessions found"));
+                return;
+            }
+
+            guard->m_remoteTmuxLabel->setText(
+                i18n("%1 session(s) found", sessions.size()));
+
+            // Build display items
+            QStringList items;
+            for (const auto &s : sessions) {
+                QString status = s.attached ? i18n("attached") : i18n("detached");
+                items << QStringLiteral("%1 (%2, %3 windows)")
+                    .arg(s.name, status, QString::number(s.windows));
+            }
+
+            bool ok = false;
+            QString selected = QInputDialog::getItem(guard,
+                i18n("Attach to Remote Session"),
+                i18n("Select a tmux session to attach:"),
+                items, 0, false, &ok);
+
+            if (ok && !selected.isEmpty()) {
+                int idx = items.indexOf(selected);
+                if (idx >= 0 && idx < sessions.size()) {
+                    guard->m_selectedTmuxSession = sessions[idx].name;
+                    guard->m_remoteTmuxLabel->setText(
+                        i18n("Attaching to: %1", sessions[idx].name));
+                    guard->m_remoteTmuxLabel->setStyleSheet(
+                        QStringLiteral("color: green;"));
+                    guard->accept();
+                }
+            }
+        });
 }
 
 void ClaudeSessionWizard::showConversationPicker(const QList<ClaudeConversation> &conversations)

@@ -399,6 +399,19 @@ public:
     }
 
     /**
+     * Name of an existing tmux session on the remote host to attach to.
+     * When set, buildRemoteSshArgs() uses "tmux attach" instead of "tmux new-session".
+     */
+    QString existingRemoteTmuxSession() const
+    {
+        return m_existingRemoteTmuxSession;
+    }
+    void setExistingRemoteTmuxSession(const QString &sessionName)
+    {
+        m_existingRemoteTmuxSession = sessionName;
+    }
+
+    /**
      * Get the Claude model being used
      */
     ClaudeProcess::Model claudeModel() const { return m_claudeModel; }
@@ -908,6 +921,7 @@ private:
     QString m_sshHost;
     QString m_sshUsername;
     int m_sshPort = 22;
+    QString m_existingRemoteTmuxSession; // attach to existing remote tmux session
 
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;
