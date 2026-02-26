@@ -979,6 +979,7 @@ private:
     // Fallback timer: if double yolo fires but Claude stays idle, triple yolo follows
     QTimer *m_suggestionFallbackTimer = nullptr;
     void scheduleSuggestionFallback();
+    void onSuggestionFallbackTimeout();
 
     // Idle polling for double/triple yolo when hooks aren't delivering state
     QTimer *m_idlePollTimer = nullptr;

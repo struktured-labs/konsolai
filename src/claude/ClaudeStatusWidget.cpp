@@ -146,6 +146,10 @@ void ClaudeStatusWidget::setMonthlyUsage(double spent, double budget)
 
 void ClaudeStatusWidget::updateDisplay()
 {
+    // Snapshot the QPointer once — if the session is destroyed mid-update,
+    // all subsequent accesses through this local will be safe (null).
+    ClaudeSession *session = m_session.data();
+
     QString stateStr = stateText(m_currentState);
     QString icon = stateIcon(m_currentState);
 
@@ -158,43 +162,43 @@ void ClaudeStatusWidget::updateDisplay()
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
 
     // Model name
-    if (m_session) {
-        QString model = ClaudeProcess::shortModelName(m_session->claudeModel());
+    if (session) {
+        QString model = ClaudeProcess::shortModelName(session->claudeModel());
         if (!model.isEmpty()) {
             statusText += QStringLiteral(" (%1)").arg(model);
         }
     }
 
     // Yolo bolts + approval count
-    if (m_session && m_session->totalApprovalCount() > 0) {
+    if (session && session->totalApprovalCount() > 0) {
         QString bolts;
-        if (m_session->yoloMode()) {
+        if (session->yoloMode()) {
             bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
         }
-        if (m_session->doubleYoloMode()) {
+        if (session->doubleYoloMode()) {
             bolts += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
         }
-        if (m_session->tripleYoloMode()) {
+        if (session->tripleYoloMode()) {
             bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
         }
         if (bolts.isEmpty()) {
-            statusText += QStringLiteral(" │ %1").arg(QString::number(m_session->totalApprovalCount()));
+            statusText += QStringLiteral(" │ %1").arg(QString::number(session->totalApprovalCount()));
         } else {
-            statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(m_session->totalApprovalCount()));
+            statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(session->totalApprovalCount()));
         }
     }
 
     // Token usage + cost
-    if (m_session && m_session->tokenUsage().totalTokens() > 0) {
-        const auto &usage = m_session->tokenUsage();
+    if (session && session->tokenUsage().totalTokens() > 0) {
+        const auto &usage = session->tokenUsage();
         statusText += QStringLiteral(" │ %1 ($%2)").arg(usage.formatCompact(), QString::number(usage.estimatedCostUSD(), 'f', 2));
     }
 
     // Session budget percent
-    if (m_session) {
-        auto *bc = m_session->budgetController();
+    if (session) {
+        auto *bc = session->budgetController();
         if (bc && bc->budget().hasAnyLimit()) {
-            double pct = bc->budget().usedPercent(m_session->tokenUsage().estimatedCostUSD(), m_session->tokenUsage().totalTokens());
+            double pct = bc->budget().usedPercent(session->tokenUsage().estimatedCostUSD(), session->tokenUsage().totalTokens());
             if (pct >= 0.0) {
                 QString pctStr = QStringLiteral("%1%").arg(pct, 0, 'f', 0);
                 if (pct >= 100.0) {
@@ -239,8 +243,8 @@ void ClaudeStatusWidget::updateDisplay()
     }
 
     // Resource usage
-    if (m_session && (m_session->resourceUsage().rssBytes > 0 || m_session->resourceUsage().cpuPercent > 0.0)) {
-        statusText += QStringLiteral(" │ %1").arg(m_session->resourceUsage().formatCompact());
+    if (session && (session->resourceUsage().rssBytes > 0 || session->resourceUsage().cpuPercent > 0.0)) {
+        statusText += QStringLiteral(" │ %1").arg(session->resourceUsage().formatCompact());
     }
     m_stateLabel->setText(statusText);
 

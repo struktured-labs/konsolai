@@ -536,9 +536,13 @@ void ClaudeSession::connectSignals()
             qDebug() << "ClaudeSession: Auto-approving permission always (yolo mode)";
             m_lastApprovalTime.start();
             // Use a short delay to ensure the prompt is ready
-            QTimer::singleShot(100, this, [this, action]() {
-                approvePermissionAlways();
-                logApproval(action, QStringLiteral("auto-approved"), 1);
+            QPointer<ClaudeSession> guard(this);
+            QTimer::singleShot(100, this, [guard, action]() {
+                if (!guard || !guard->m_yoloMode) {
+                    return;
+                }
+                guard->approvePermissionAlways();
+                guard->logApproval(action, QStringLiteral("auto-approved"), 1);
             });
         }
     });
@@ -589,8 +593,11 @@ void ClaudeSession::connectSignals()
         // This prevents both hook-based AND polling-based yolo from firing
         // for the same idle event (double-fire).
         m_hookDeliveredIdle = true;
-        QTimer::singleShot(10000, this, [this]() {
-            m_hookDeliveredIdle = false;
+        QPointer<ClaudeSession> idleGuard(this);
+        QTimer::singleShot(10000, this, [idleGuard]() {
+            if (idleGuard) {
+                idleGuard->m_hookDeliveredIdle = false;
+            }
         });
 
         if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
@@ -617,9 +624,13 @@ void ClaudeSession::connectSignals()
         } else if (m_tripleYoloMode) {
             // Triple yolo fires directly (trySuggestionsFirst is off, or double yolo is off)
             qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
-            QTimer::singleShot(500, this, [this]() {
-                sendPrompt(m_autoContinuePrompt);
-                logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+            QPointer<ClaudeSession> guard(this);
+            QTimer::singleShot(500, this, [guard]() {
+                if (!guard || !guard->m_tripleYoloMode) {
+                    return;
+                }
+                guard->sendPrompt(guard->m_autoContinuePrompt);
+                guard->logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
             });
         }
     });
@@ -1748,23 +1759,26 @@ void ClaudeSession::scheduleSuggestionFallback()
     if (!m_suggestionFallbackTimer) {
         m_suggestionFallbackTimer = new QTimer(this);
         m_suggestionFallbackTimer->setSingleShot(true);
-        connect(m_suggestionFallbackTimer, &QTimer::timeout, this, [this]() {
-            // Only fire if Claude is still idle (suggestion wasn't accepted)
-            if (m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
-                if (m_budgetController && m_budgetController->shouldBlockYolo()) {
-                    qDebug() << "ClaudeSession: Budget gate blocking suggestion fallback";
-                    return;
-                }
-                qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
-                sendPrompt(m_autoContinuePrompt);
-                logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
-            }
-        });
+        connect(m_suggestionFallbackTimer, &QTimer::timeout, this, &ClaudeSession::onSuggestionFallbackTimeout);
     }
 
     // 2s after double yolo fires, check if Claude is still idle
     qDebug() << "ClaudeSession: Scheduling suggestion fallback in 2000ms";
     m_suggestionFallbackTimer->start(2000);
+}
+
+void ClaudeSession::onSuggestionFallbackTimeout()
+{
+    // Only fire if Claude is still idle (suggestion wasn't accepted)
+    if (m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
+        if (m_budgetController && m_budgetController->shouldBlockYolo()) {
+            qDebug() << "ClaudeSession: Budget gate blocking suggestion fallback";
+            return;
+        }
+        qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
+        sendPrompt(m_autoContinuePrompt);
+        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+    }
 }
 
 void ClaudeSession::setDoubleYoloMode(bool enabled)

@@ -1022,7 +1022,7 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             if (!m_activeSessions.contains(parentSessionId)) {
                 return;
             }
-            ClaudeSession *session = m_activeSessions[parentSessionId];
+            QPointer<ClaudeSession> session = m_activeSessions[parentSessionId];
             if (!session) {
                 return;
             }
@@ -1044,11 +1044,15 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 menu.addSeparator();
                 QAction *killAction = menu.addAction(QIcon::fromTheme(QStringLiteral("process-stop")), i18n("Kill (SIGTERM)"));
                 connect(killAction, &QAction::triggered, this, [session, subprocessId]() {
-                    session->killSubprocess(subprocessId, 15); // SIGTERM
+                    if (session) {
+                        session->killSubprocess(subprocessId, 15); // SIGTERM
+                    }
                 });
                 QAction *forceKillAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Force Kill (SIGKILL)"));
                 connect(forceKillAction, &QAction::triggered, this, [session, subprocessId]() {
-                    session->killSubprocess(subprocessId, 9); // SIGKILL
+                    if (session) {
+                        session->killSubprocess(subprocessId, 9); // SIGKILL
+                    }
                 });
             }
 
@@ -1373,18 +1377,16 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     } else {
         // Active or detached session
         bool isActive = m_activeSessions.contains(sessionId);
+        QPointer<ClaudeSession> activeSession = isActive ? m_activeSessions[sessionId] : nullptr;
 
-        if (isActive) {
-            QPointer<ClaudeSession> activeSession = m_activeSessions[sessionId];
-            if (activeSession) {
-                QAction *focusAction = menu.addAction(QIcon::fromTheme(QStringLiteral("go-jump")), i18n("Focus Tab"));
-                connect(focusAction, &QAction::triggered, this, [this, activeSession]() {
-                    if (activeSession) {
-                        Q_EMIT focusSessionRequested(activeSession);
-                    }
-                });
-            }
-        } else {
+        if (isActive && activeSession) {
+            QAction *focusAction = menu.addAction(QIcon::fromTheme(QStringLiteral("go-jump")), i18n("Focus Tab"));
+            connect(focusAction, &QAction::triggered, this, [this, activeSession]() {
+                if (activeSession) {
+                    Q_EMIT focusSessionRequested(activeSession);
+                }
+            });
+        } else if (!isActive) {
             QAction *attachAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach"));
             connect(attachAction, &QAction::triggered, this, [this, meta]() {
                 Q_EMIT attachRequested(meta.sessionName);
@@ -1412,45 +1414,40 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         });
 
         // Show approval log for active sessions with approvals
-        if (isActive && m_activeSessions.contains(sessionId)) {
-            ClaudeSession *activeSession = m_activeSessions[sessionId];
-            if (activeSession && activeSession->totalApprovalCount() > 0) {
-                QAction *logAction =
-                    menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-details")), i18n("View Approval Log (%1)", activeSession->totalApprovalCount()));
-                connect(logAction, &QAction::triggered, this, [this, activeSession]() {
+        if (isActive && activeSession && activeSession->totalApprovalCount() > 0) {
+            QAction *logAction =
+                menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-details")), i18n("View Approval Log (%1)", activeSession->totalApprovalCount()));
+            connect(logAction, &QAction::triggered, this, [this, activeSession]() {
+                if (activeSession) {
                     showApprovalLog(activeSession);
-                });
-            }
+                }
+            });
         }
 
         // Toggle completed agents visibility for sessions with subagents
-        if (isActive && m_activeSessions.contains(sessionId)) {
-            ClaudeSession *activeSession = m_activeSessions[sessionId];
-            if (activeSession && !activeSession->subagents().isEmpty()) {
-                bool hiding = m_hideCompletedAgents.contains(sessionId);
-                QAction *toggleAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-visible")), i18n("Show Completed Agents"));
-                toggleAction->setCheckable(true);
-                toggleAction->setChecked(!hiding);
-                connect(toggleAction, &QAction::triggered, this, [this, sessionId](bool checked) {
-                    if (checked) {
-                        m_hideCompletedAgents.remove(sessionId);
-                    } else {
-                        m_hideCompletedAgents.insert(sessionId);
-                    }
-                    scheduleTreeUpdate();
-                });
-            }
+        if (isActive && activeSession && !activeSession->subagents().isEmpty()) {
+            bool hiding = m_hideCompletedAgents.contains(sessionId);
+            QAction *toggleAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-visible")), i18n("Show Completed Agents"));
+            toggleAction->setCheckable(true);
+            toggleAction->setChecked(!hiding);
+            connect(toggleAction, &QAction::triggered, this, [this, sessionId](bool checked) {
+                if (checked) {
+                    m_hideCompletedAgents.remove(sessionId);
+                } else {
+                    m_hideCompletedAgents.insert(sessionId);
+                }
+                scheduleTreeUpdate();
+            });
         }
 
         // Restart option for active sessions
-        if (isActive && m_activeSessions.contains(sessionId)) {
-            ClaudeSession *activeSession = m_activeSessions[sessionId];
-            if (activeSession) {
-                QAction *restartAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart Claude"));
-                connect(restartAction, &QAction::triggered, this, [activeSession]() {
+        if (isActive && activeSession) {
+            QAction *restartAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart Claude"));
+            connect(restartAction, &QAction::triggered, this, [activeSession]() {
+                if (activeSession) {
                     activeSession->restart();
-                });
-            }
+                }
+            });
         }
 
         menu.addSeparator();
@@ -2264,8 +2261,15 @@ void SessionManagerPanel::loadMetadata()
         return;
     }
 
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        qWarning() << "SessionManagerPanel::loadMetadata: JSON parse error at offset" << parseError.offset << ":" << parseError.errorString() << "in"
+                   << filePath;
+        return;
+    }
     if (!doc.isArray()) {
+        qWarning() << "SessionManagerPanel::loadMetadata: Expected JSON array in" << filePath;
         return;
     }
 
@@ -2478,7 +2482,14 @@ void SessionManagerPanel::saveMetadata()
 
     QFile file(filePath);
     if (file.open(QIODevice::WriteOnly)) {
-        file.write(QJsonDocument(array).toJson());
+        QByteArray json = QJsonDocument(array).toJson();
+        qint64 written = file.write(json);
+        if (written != json.size()) {
+            qWarning() << "SessionManagerPanel::saveMetadata: Incomplete write —" << written << "of" << json.size() << "bytes to" << filePath;
+        }
+        file.close();
+    } else {
+        qWarning() << "SessionManagerPanel::saveMetadata: Failed to open" << filePath << "for writing:" << file.errorString();
     }
 
     Q_EMIT usageAggregateChanged();
@@ -2624,18 +2635,20 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
     splitter->setStretchFactor(1, 2);
     layout->addWidget(splitter);
 
-    // Show tool input/output when an entry is selected
-    QObject::connect(tree, &QTreeWidget::currentItemChanged, &dialog, [&log, detailEdit](QTreeWidgetItem *current, QTreeWidgetItem *) {
+    // Show tool input/output when an entry is selected.
+    // Capture log by value — it's a const ref to caller's data that may go out of scope.
+    const auto logCopy = log;
+    QObject::connect(tree, &QTreeWidget::currentItemChanged, &dialog, [logCopy, detailEdit](QTreeWidgetItem *current, QTreeWidgetItem *) {
         if (!current) {
             detailEdit->clear();
             return;
         }
         int idx = current->data(0, Qt::UserRole + 1).toInt();
-        if (idx < 0 || idx >= log.size()) {
+        if (idx < 0 || idx >= logCopy.size()) {
             detailEdit->clear();
             return;
         }
-        const auto &entry = log[idx];
+        const auto &entry = logCopy[idx];
         QString detail;
         if (!entry.toolInput.isEmpty()) {
             detail += QStringLiteral("--- Input ---\n") + entry.toolInput;
