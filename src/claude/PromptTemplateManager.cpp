@@ -153,9 +153,10 @@ bool PromptTemplateManager::saveUserTemplate(const PromptTemplate &tmpl)
     }
 
     const QJsonDocument doc(toJson(tmpl));
-    file.write(doc.toJson(QJsonDocument::Indented));
+    const QByteArray json = doc.toJson(QJsonDocument::Indented);
+    qint64 written = file.write(json);
     file.close();
-    return true;
+    return written == json.size();
 }
 
 PromptTemplate PromptTemplateManager::fromJson(const QJsonObject &obj)
