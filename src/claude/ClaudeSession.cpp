@@ -1346,17 +1346,18 @@ void ClaudeSession::pollForPermissionPrompt()
             return;
         }
 
-        // Extract last 5 lines from the full capture
-        const auto allLines = output.split(QLatin1Char('\n'));
+        // Extract last 5 lines from the full capture without splitting entire string.
+        // Walk backwards from end to find the 5th-from-last newline.
         const int bottomCount = 5;
-        const int startIdx = qMax(0, allLines.size() - bottomCount);
-        QString bottomLines;
-        for (int i = startIdx; i < allLines.size(); ++i) {
-            if (!bottomLines.isEmpty()) {
-                bottomLines += QLatin1Char('\n');
+        int pos = output.size();
+        for (int i = 0; i < bottomCount && pos > 0; ++i) {
+            pos = output.lastIndexOf(QLatin1Char('\n'), pos - 1);
+            if (pos < 0) {
+                pos = 0;
+                break;
             }
-            bottomLines += allLines[i];
         }
+        const QString bottomLines = (pos > 0) ? output.mid(pos + 1) : output;
 
         if (detectPermissionPrompt(bottomLines)) {
             if (!m_permissionPromptDetected) {
@@ -1497,17 +1498,17 @@ void ClaudeSession::pollForIdlePrompt()
             return;
         }
 
-        // Extract last 3 lines from the full capture
-        const auto allLines = output.split(QLatin1Char('\n'));
+        // Extract last 3 lines from the full capture without splitting entire string.
         const int bottomCount = 3;
-        const int startIdx = qMax(0, allLines.size() - bottomCount);
-        QString bottomLines;
-        for (int i = startIdx; i < allLines.size(); ++i) {
-            if (!bottomLines.isEmpty()) {
-                bottomLines += QLatin1Char('\n');
+        int pos = output.size();
+        for (int i = 0; i < bottomCount && pos > 0; ++i) {
+            pos = output.lastIndexOf(QLatin1Char('\n'), pos - 1);
+            if (pos < 0) {
+                pos = 0;
+                break;
             }
-            bottomLines += allLines[i];
         }
+        const QString bottomLines = (pos > 0) ? output.mid(pos + 1) : output;
 
         if (detectIdlePrompt(bottomLines)) {
             if (!m_idlePromptDetected) {
@@ -1558,10 +1559,13 @@ bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
     // Claude Code's Ink UI shows a prompt like ">" or "❯" on the last line
     // when idle and waiting for user input.  We look for this WITHOUT any
     // permission prompt or selection UI present.
-    const auto lines = terminalOutput.split(QLatin1Char('\n'));
+    //
+    // Single-pass: scan lines using QStringView to avoid allocations.
+    const auto lines = QStringView(terminalOutput).split(QLatin1Char('\n'));
 
-    // Skip if this looks like a permission prompt (reuse same keywords as detectPermissionPrompt)
-    for (const QString &line : lines) {
+    QStringView lastNonEmpty;
+    for (const auto &line : lines) {
+        // Skip if this looks like a permission prompt
         if (line.contains(QStringLiteral("❯"))
             && (line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive) || line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive))) {
             return false;
@@ -1569,21 +1573,18 @@ bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
         if (line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive) || line.contains(QStringLiteral("Deny"), Qt::CaseInsensitive)) {
             return false;
         }
+        // Track last non-empty line as we go (avoids second pass)
+        auto trimmed = line.trimmed();
+        if (!trimmed.isEmpty()) {
+            lastNonEmpty = trimmed;
+        }
     }
 
     // Check last non-empty line for the input prompt indicator
-    for (int i = lines.size() - 1; i >= 0; --i) {
-        QString trimmed = lines[i].trimmed();
-        if (trimmed.isEmpty()) {
-            continue;
-        }
-        // Claude Code shows ">" as the input prompt when idle.
-        // It may also show "❯" in some contexts.
-        // The line should be short (just the prompt character, maybe with project name).
-        if (trimmed == QStringLiteral(">") || trimmed.endsWith(QStringLiteral(">")) || trimmed.startsWith(QStringLiteral(">"))) {
+    if (!lastNonEmpty.isEmpty()) {
+        if (lastNonEmpty == QStringLiteral(">") || lastNonEmpty.endsWith(QLatin1Char('>')) || lastNonEmpty.startsWith(QLatin1Char('>'))) {
             return true;
         }
-        break; // Only check the last non-empty line
     }
 
     return false;
@@ -2272,11 +2273,13 @@ void ClaudeSession::cleanupRemoteHooks()
 
     // Fire-and-forget: don't block the destructor.
     // Kill after 10s to prevent zombie processes if SSH hangs.
-    QProcess *process = new QProcess();
+    auto *process = new QProcess();
     QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), process, &QProcess::deleteLater);
-    QTimer::singleShot(10000, process, [process]() {
-        if (process->state() != QProcess::NotRunning) {
-            process->kill();
+    QPointer<QProcess> safeProcess(process);
+    QTimer::singleShot(10000, process, [safeProcess]() {
+        if (safeProcess && safeProcess->state() != QProcess::NotRunning) {
+            safeProcess->kill();
+            safeProcess->deleteLater();
         }
     });
     process->start(QStringLiteral("ssh"), sshArgs);

@@ -285,6 +285,9 @@ private:
     // Cached live session names from last async tmux query
     QSet<QString> m_cachedLiveNames;
 
+    // Cache conversation summaries to avoid disk I/O during tree rebuilds
+    QHash<QString, QString> m_conversationSummaryCache; // workDir → summary
+
     // Per-session toggle: sessions in this set hide completed (NotRunning) agents
     QSet<QString> m_hideCompletedAgents;
 

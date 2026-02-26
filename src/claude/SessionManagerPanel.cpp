@@ -1490,8 +1490,8 @@ void SessionManagerPanel::scheduleTreeUpdate()
         m_updateDebounce->setSingleShot(true);
         connect(m_updateDebounce, &QTimer::timeout, this, &SessionManagerPanel::updateTreeWidget);
     }
-    // Restart the 250ms window on each call — only the last one fires.
-    m_updateDebounce->start(250);
+    // Restart the 500ms window on each call — only the last one fires.
+    m_updateDebounce->start(500);
 }
 
 void SessionManagerPanel::scheduleMetadataSave()
@@ -1685,12 +1685,16 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // Fallback: look up Claude CLI's auto-generated summary for this project
+    // Fallback: look up Claude CLI's auto-generated summary for this project (cached)
     if (description.isEmpty() && !meta.workingDirectory.isEmpty() && m_registry) {
-        auto conversations = m_registry->readClaudeConversations(meta.workingDirectory);
-        if (!conversations.isEmpty()) {
-            // Use most recent conversation's summary
-            description = conversations.first().summary;
+        auto cacheIt = m_conversationSummaryCache.constFind(meta.workingDirectory);
+        if (cacheIt != m_conversationSummaryCache.constEnd()) {
+            description = cacheIt.value();
+        } else {
+            auto conversations = m_registry->readClaudeConversations(meta.workingDirectory);
+            QString summary = conversations.isEmpty() ? QString() : conversations.first().summary;
+            m_conversationSummaryCache.insert(meta.workingDirectory, summary);
+            description = summary;
         }
     }
 
