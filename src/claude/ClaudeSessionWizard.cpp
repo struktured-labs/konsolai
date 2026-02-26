@@ -1072,7 +1072,8 @@ void ClaudeSessionWizard::loadSshConfigHosts()
             // Skip wildcard entries
             if (!hosts.contains(QLatin1Char('*')) && !hosts.contains(QLatin1Char('?'))) {
                 // May have multiple hosts on one line
-                const QStringList hostList = hosts.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+                static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+                const QStringList hostList = hosts.split(whitespace, Qt::SkipEmptyParts);
                 for (const QString &h : hostList) {
                     if (!h.contains(QLatin1Char('*')) && !h.contains(QLatin1Char('?'))) {
                         m_sshConfigCombo->addItem(h);

@@ -232,7 +232,7 @@ void ClaudeSessionRegistry::refreshOrphanedSessions(const QList<TmuxManager::Ses
             state.sessionName = info.name;
 
             // Try to parse session name: konsolai-{profile}-{id}
-            QRegularExpression pattern(QStringLiteral("^konsolai-(.+)-([a-f0-9]{8})$"));
+            static const QRegularExpression pattern(QStringLiteral("^konsolai-(.+)-([a-f0-9]{8})$"));
             QRegularExpressionMatch match = pattern.match(info.name);
             if (match.hasMatch()) {
                 state.profileName = match.captured(1);
