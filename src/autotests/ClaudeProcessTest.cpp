@@ -305,24 +305,24 @@ void ClaudeProcessTest::testMalformedJsonEvent()
 {
     ClaudeProcess process;
 
-    // Malformed JSON should not crash — QJsonDocument::fromJson returns null doc
+    // Malformed JSON should return early without changing state
     process.handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("this is not json"));
-    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
 
     process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{{{broken"));
-    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
 }
 
 void ClaudeProcessTest::testEmptyEventData()
 {
     ClaudeProcess process;
 
-    // Empty string should not crash
+    // Empty string should return early without changing state
     process.handleHookEvent(QStringLiteral("PreToolUse"), QString());
-    QCOMPARE(process.state(), ClaudeProcess::State::Working);
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
 
     process.handleHookEvent(QStringLiteral("Stop"), QString());
-    QCOMPARE(process.state(), ClaudeProcess::State::Idle);
+    QCOMPARE(process.state(), ClaudeProcess::State::NotRunning);
 }
 
 void ClaudeProcessTest::testIsRunningAllStates()

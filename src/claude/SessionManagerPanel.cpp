@@ -363,16 +363,18 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     });
 
     // Connect to working directory changes (after run() gets real path from tmux)
-    connect(session, &ClaudeSession::workingDirectoryChanged, this, [this, session, sessionId](const QString &newPath) {
-        if (m_metadata.contains(sessionId) && !newPath.isEmpty()) {
-            m_metadata[sessionId].workingDirectory = newPath;
-            // Re-run hook setup now that we have a valid working directory
-            // (hooks require workDir and skip if empty at registerSession time)
-            ensureHooksConfigured(session);
-            saveMetadata();
-            updateTreeWidget();
-            qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;
+    QPointer<ClaudeSession> safeSession(session);
+    connect(session, &ClaudeSession::workingDirectoryChanged, this, [this, safeSession, sessionId](const QString &newPath) {
+        if (!safeSession || !m_metadata.contains(sessionId) || newPath.isEmpty()) {
+            return;
         }
+        m_metadata[sessionId].workingDirectory = newPath;
+        // Re-run hook setup now that we have a valid working directory
+        // (hooks require workDir and skip if empty at registerSession time)
+        ensureHooksConfigured(safeSession);
+        saveMetadata();
+        updateTreeWidget();
+        qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;
     });
 
     // Connect to approval count changes to update display (debounced)
@@ -1373,11 +1375,13 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         bool isActive = m_activeSessions.contains(sessionId);
 
         if (isActive) {
-            ClaudeSession *activeSession = m_activeSessions[sessionId];
+            QPointer<ClaudeSession> activeSession = m_activeSessions[sessionId];
             if (activeSession) {
                 QAction *focusAction = menu.addAction(QIcon::fromTheme(QStringLiteral("go-jump")), i18n("Focus Tab"));
                 connect(focusAction, &QAction::triggered, this, [this, activeSession]() {
-                    Q_EMIT focusSessionRequested(activeSession);
+                    if (activeSession) {
+                        Q_EMIT focusSessionRequested(activeSession);
+                    }
                 });
             }
         } else {

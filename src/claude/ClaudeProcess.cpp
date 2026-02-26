@@ -119,9 +119,10 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
 {
     QJsonDocument doc = QJsonDocument::fromJson(eventData.toUtf8());
     if (doc.isNull() || !doc.isObject()) {
-        qWarning() << "ClaudeProcess::handleHookEvent: Invalid JSON for event" << eventType;
+        qWarning() << "ClaudeProcess::handleHookEvent: Invalid JSON for event" << eventType << "data:" << eventData.left(200);
+        return;
     }
-    QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject();
+    QJsonObject obj = doc.object();
 
     if (eventType == QStringLiteral("Stop")) {
         // Claude finished responding

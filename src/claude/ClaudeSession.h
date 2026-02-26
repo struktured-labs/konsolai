@@ -17,6 +17,7 @@
 #include "config-konsole.h"
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMap>
@@ -964,6 +965,7 @@ private:
     QTimer *m_permissionPollTimer = nullptr;
     bool m_permissionPromptDetected = false;
     bool m_permissionPollInFlight = false; // true while async capturePane is running
+    QElapsedTimer m_lastApprovalTime; // shared cooldown: prevents hook+polling double-approve
     void startPermissionPolling();
     void stopPermissionPolling();
     void pollForPermissionPrompt();
@@ -981,7 +983,8 @@ private:
     // Idle polling for double/triple yolo when hooks aren't delivering state
     QTimer *m_idlePollTimer = nullptr;
     bool m_idlePromptDetected = false;
-    bool m_idlePollInFlight = false; // true while async capturePane is running
+    bool m_idlePollInFlight = false; // true while async capturePane is running (legacy, kept for compat)
+    bool m_anyCaptureInFlight = false; // shared flag: suppresses overlapping tmux captures from both pollers
     bool m_hookDeliveredIdle = false; // true when hook-based idle triggered yolo (suppresses polling)
     void startIdlePolling();
     void stopIdlePolling();

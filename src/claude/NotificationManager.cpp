@@ -157,6 +157,15 @@ void NotificationManager::showDesktopNotification(NotificationType type, const Q
     notification->sendEvent();
 }
 
+void NotificationManager::ensureSoundEffect()
+{
+    if (m_soundEffect) {
+        return;
+    }
+    m_soundEffect = new QSoundEffect(this);
+    m_soundEffect->setVolume(m_audioVolume);
+}
+
 void NotificationManager::playSound(NotificationType type)
 {
     // Skip sounds for Info type (no sound file)
@@ -184,26 +193,16 @@ void NotificationManager::playSound(NotificationType type)
 
     qDebug() << "NotificationManager::playSound: Playing" << path << "volume:" << m_audioVolume;
 
-    auto *sound = new QSoundEffect(this);
-    sound->setSource(QUrl::fromLocalFile(path));
-    sound->setVolume(m_audioVolume);
+    ensureSoundEffect();
+    m_soundEffect->setVolume(m_audioVolume);
 
-    connect(sound, &QSoundEffect::statusChanged, sound, [sound, path]() {
-        qDebug() << "NotificationManager: QSoundEffect status:" << sound->status() << "for" << path;
-        if (sound->status() == QSoundEffect::Error) {
-            qWarning() << "NotificationManager: QSoundEffect error for" << path;
-            sound->deleteLater();
-        }
-    });
+    // Only change source if a different sound is needed
+    if (m_loadedSoundPath != path) {
+        m_soundEffect->setSource(QUrl::fromLocalFile(path));
+        m_loadedSoundPath = path;
+    }
 
-    connect(sound, &QSoundEffect::playingChanged, sound, [sound, path]() {
-        qDebug() << "NotificationManager: QSoundEffect playing:" << sound->isPlaying() << "for" << path;
-        if (!sound->isPlaying()) {
-            sound->deleteLater();
-        }
-    });
-
-    sound->play();
+    m_soundEffect->play();
 }
 
 void NotificationManager::enableChannel(Channel channel, bool enable)

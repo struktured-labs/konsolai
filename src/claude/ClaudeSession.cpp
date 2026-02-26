@@ -528,7 +528,13 @@ void ClaudeSession::connectSignals()
                 qDebug() << "ClaudeSession: Budget gate blocking yolo approval";
                 return;
             }
+            // Check shared approval cooldown to prevent double-approve with polling
+            if (m_lastApprovalTime.isValid() && m_lastApprovalTime.elapsed() < 2000) {
+                qDebug() << "ClaudeSession: Skipping hook-based approval — cooldown active (" << m_lastApprovalTime.elapsed() << "ms ago)";
+                return;
+            }
             qDebug() << "ClaudeSession: Auto-approving permission always (yolo mode)";
+            m_lastApprovalTime.start();
             // Use a short delay to ensure the prompt is ready
             QTimer::singleShot(100, this, [this, action]() {
                 approvePermissionAlways();
@@ -1318,8 +1324,8 @@ void ClaudeSession::pollForPermissionPrompt()
     // caused a deadlock when hooks were stale: SubagentStop never arrived,
     // hasActiveTeam() stayed true, and all yolo paths were blocked.
 
-    // Skip if an async capture is already in flight
-    if (m_permissionPollInFlight) {
+    // Skip if any async capture is already in flight (shared with idle poller)
+    if (m_permissionPollInFlight || m_anyCaptureInFlight) {
         return;
     }
 
@@ -1328,12 +1334,14 @@ void ClaudeSession::pollForPermissionPrompt()
     // NOTE: We must NOT pass -S/-E with negative values — tmux treats those
     // as scrollback history lines, not bottom-of-screen lines.
     m_permissionPollInFlight = true;
+    m_anyCaptureInFlight = true;
     QPointer<ClaudeSession> guard(this);
     m_tmuxManager->capturePaneAsync(m_sessionName, [this, guard](bool ok, const QString &output) {
         if (!guard) {
             return;
         }
         m_permissionPollInFlight = false;
+        m_anyCaptureInFlight = false;
         if (!ok || !m_yoloMode) {
             return;
         }
@@ -1352,20 +1360,26 @@ void ClaudeSession::pollForPermissionPrompt()
 
         if (detectPermissionPrompt(bottomLines)) {
             if (!m_permissionPromptDetected) {
-                m_permissionPromptDetected = true;
-                qDebug() << "ClaudeSession: Permission prompt detected - auto-approving (yolo mode)";
+                // Check shared approval cooldown to prevent double-approve with hook path
+                if (m_lastApprovalTime.isValid() && m_lastApprovalTime.elapsed() < 2000) {
+                    qDebug() << "ClaudeSession: Skipping poll-based approval — cooldown active (" << m_lastApprovalTime.elapsed() << "ms ago)";
+                } else {
+                    m_permissionPromptDetected = true;
+                    m_lastApprovalTime.start();
+                    qDebug() << "ClaudeSession: Permission prompt detected - auto-approving (yolo mode)";
 
-                // Send approval with small delay to ensure prompt is ready
-                QTimer::singleShot(50, this, [this]() {
-                    approvePermissionAlways();
-                    logApproval(QStringLiteral("permission"), QStringLiteral("auto-approved"), 1);
+                    // Send approval with small delay to ensure prompt is ready
+                    QTimer::singleShot(50, this, [this]() {
+                        approvePermissionAlways();
+                        logApproval(QStringLiteral("permission"), QStringLiteral("auto-approved"), 1);
 
-                    // Reset detection flag after a longer cooldown to avoid
-                    // rapid-fire false positives from stale terminal content.
-                    QTimer::singleShot(2000, this, [this]() {
-                        m_permissionPromptDetected = false;
+                        // Reset detection flag after a longer cooldown to avoid
+                        // rapid-fire false positives from stale terminal content.
+                        QTimer::singleShot(2000, this, [this]() {
+                            m_permissionPromptDetected = false;
+                        });
                     });
-                });
+                }
             }
         } else {
             m_permissionPromptDetected = false;
@@ -1442,8 +1456,8 @@ void ClaudeSession::pollForIdlePrompt()
         return;
     }
 
-    // Skip if an async capture is already in flight
-    if (m_idlePollInFlight) {
+    // Skip if any async capture is already in flight (shared with permission poller)
+    if (m_idlePollInFlight || m_anyCaptureInFlight) {
         return;
     }
 
@@ -1468,12 +1482,14 @@ void ClaudeSession::pollForIdlePrompt()
     // NOTE: We must NOT pass -S/-E with negative values — tmux treats those
     // as scrollback history lines, not bottom-of-screen lines.
     m_idlePollInFlight = true;
+    m_anyCaptureInFlight = true;
     QPointer<ClaudeSession> guard(this);
     m_tmuxManager->capturePaneAsync(m_sessionName, [this, guard](bool ok, const QString &output) {
         if (!guard) {
             return;
         }
         m_idlePollInFlight = false;
+        m_anyCaptureInFlight = false;
         if (!ok) {
             return;
         }
@@ -2314,7 +2330,7 @@ void ClaudeSession::removeHooksFromProjectSettings()
     if (registry) {
         const auto active = registry->activeSessions();
         for (auto *session : active) {
-            if (session != this && session->sessionId() == m_sessionId) {
+            if (session && session != this && session->sessionId() == m_sessionId) {
                 qDebug() << "ClaudeSession: Skipping hook cleanup — replacement session active for ID:" << m_sessionId;
                 return;
             }

@@ -14,6 +14,8 @@
 #include <QString>
 #include <QUrl>
 
+class QSoundEffect;
+
 #if HAVE_KSTATUSNOTIFIERITEM
 class KStatusNotifierItem;
 #endif
@@ -176,10 +178,13 @@ Q_SIGNALS:
 
 private:
     void initSystemTray();
+    void ensureSoundEffect();
 
 #if HAVE_KSTATUSNOTIFIERITEM
     KStatusNotifierItem *m_systemTray = nullptr;
 #endif
+    ::QSoundEffect *m_soundEffect = nullptr;
+    QString m_loadedSoundPath; // track which sound is loaded to avoid re-loading
     Channels m_enabledChannels = Channel::All;
     qreal m_audioVolume = 0.7;
     bool m_yoloNotificationsEnabled = false;
