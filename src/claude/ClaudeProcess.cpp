@@ -177,6 +177,8 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         QString responseStr;
         if (responseVal.isObject()) {
             responseStr = QString::fromUtf8(QJsonDocument(responseVal.toObject()).toJson(QJsonDocument::Indented));
+        } else if (responseVal.isArray()) {
+            responseStr = QString::fromUtf8(QJsonDocument(responseVal.toArray()).toJson(QJsonDocument::Indented));
         } else if (responseVal.isString()) {
             responseStr = responseVal.toString();
         }
@@ -190,6 +192,8 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
         QString toolInput;
         if (inputVal.isObject()) {
             toolInput = QString::fromUtf8(QJsonDocument(inputVal.toObject()).toJson(QJsonDocument::Indented));
+        } else if (inputVal.isArray()) {
+            toolInput = QString::fromUtf8(QJsonDocument(inputVal.toArray()).toJson(QJsonDocument::Indented));
         } else if (inputVal.isString()) {
             toolInput = inputVal.toString();
         }
