@@ -740,7 +740,7 @@ void ClaudeSessionRegistry::discoverAllRemoteConversationsAsync(
         "    i = 0\n"
         "    while i < len(segs):\n"
         "        ok = False\n"
-        "        for j in range(i+1, len(segs)+1):\n"
+        "        for j in range(len(segs), i, -1):\n"
         "            c = os.path.join(p, '-'.join(segs[i:j]))\n"
         "            if os.path.isdir(c):\n"
         "                p = c; i = j; ok = True; break\n"

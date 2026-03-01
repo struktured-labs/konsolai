@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -42,6 +43,12 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
         }
     }
 
+    // Search filter
+    auto *filterEdit = new QLineEdit(this);
+    filterEdit->setPlaceholderText(QStringLiteral("Filter conversations..."));
+    filterEdit->setClearButtonEnabled(true);
+    layout->addWidget(filterEdit);
+
     // Tree widget with conversation list
     m_tree = new QTreeWidget(this);
     if (hasProjectPaths) {
@@ -52,6 +59,7 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
     m_tree->setRootIsDecorated(false);
     m_tree->setAlternatingRowColors(true);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tree->setSortingEnabled(true);
 
     // Column indices shift when project column is present
     const int colProject = hasProjectPaths ? 1 : -1;
@@ -78,7 +86,9 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
 
         item->setText(0, displayText);
         if (hasProjectPaths) {
-            // Show last directory component for readability
+            // Show the project directory basename from the hashed dir name.
+            // Use projectDir (the raw hash) to extract the project name portion
+            // since rpath() can produce wrong results for ambiguous paths.
             QString projectLabel = QDir(conv.projectPath).dirName();
             if (projectLabel.isEmpty() || projectLabel == QStringLiteral(".")) {
                 projectLabel = conv.projectPath;
@@ -87,10 +97,16 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
             item->setToolTip(colProject, conv.projectPath);
         }
         item->setText(colMessages, QString::number(conv.messageCount));
+        item->setTextAlignment(colMessages, Qt::AlignRight | Qt::AlignVCenter);
+        // Store raw message count for correct numeric sorting
+        item->setData(colMessages, Qt::UserRole + 10, conv.messageCount);
         item->setText(colModified, conv.modified.toString(QStringLiteral("yyyy-MM-dd hh:mm")));
         item->setData(0, Qt::UserRole, conv.sessionId);
         item->setData(0, Qt::UserRole + 1, conv.projectPath);
     }
+
+    // Default sort by last modified descending (most recent first)
+    m_tree->sortByColumn(colModified, Qt::DescendingOrder);
 
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -106,6 +122,33 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
     }
 
     layout->addWidget(m_tree);
+
+    // Filter: hide items that don't match the search text
+    connect(filterEdit, &QLineEdit::textChanged, this, [this, colProject](const QString &text) {
+        QString filter = text.trimmed();
+        for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+            auto *item = m_tree->topLevelItem(i);
+            if (filter.isEmpty()) {
+                item->setHidden(false);
+                continue;
+            }
+            // Search across summary, project name, and project path
+            bool matches = item->text(0).contains(filter, Qt::CaseInsensitive);
+            if (!matches && colProject > 0) {
+                matches = item->text(colProject).contains(filter, Qt::CaseInsensitive)
+                       || item->toolTip(colProject).contains(filter, Qt::CaseInsensitive);
+            }
+            item->setHidden(!matches);
+        }
+        // Select first visible item
+        for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+            auto *item = m_tree->topLevelItem(i);
+            if (!item->isHidden()) {
+                m_tree->setCurrentItem(item);
+                break;
+            }
+        }
+    });
 
     // Buttons
     auto *buttonBox = new QDialogButtonBox(this);
