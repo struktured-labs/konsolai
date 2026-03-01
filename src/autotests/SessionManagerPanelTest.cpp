@@ -1140,6 +1140,147 @@ void SessionManagerPanelTest::testRegisterRemoteSessionRoundTrip()
     QCOMPARE(all[0].workingDirectory, QStringLiteral("/home/struktured/projects/fluxit"));
 }
 
+// ============================================================
+// Bulk operations
+// ============================================================
+
+void SessionManagerPanelTest::testBulkArchiveMultipleSessions()
+{
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("bulk01"), QStringLiteral("konsolai-bulk01")));
+    sessions.append(makeSession(QStringLiteral("bulk02"), QStringLiteral("konsolai-bulk02")));
+    sessions.append(makeSession(QStringLiteral("bulk03"), QStringLiteral("konsolai-bulk03")));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QCOMPARE(panel.allSessions().size(), 3);
+    QCOMPARE(panel.archivedSessions().size(), 0);
+
+    // Archive all three
+    panel.archiveSession(QStringLiteral("bulk01"));
+    panel.archiveSession(QStringLiteral("bulk02"));
+    panel.archiveSession(QStringLiteral("bulk03"));
+
+    QCOMPARE(panel.archivedSessions().size(), 3);
+
+    // Verify each is archived
+    for (const auto &meta : panel.allSessions()) {
+        QVERIFY(meta.isArchived);
+    }
+}
+
+void SessionManagerPanelTest::testBulkDismissMultipleSessions()
+{
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("bdis01"), QStringLiteral("konsolai-bdis01"), false, true));
+    sessions.append(makeSession(QStringLiteral("bdis02"), QStringLiteral("konsolai-bdis02"), false, true));
+    sessions.append(makeSession(QStringLiteral("bdis03"), QStringLiteral("konsolai-bdis03"), false, true));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QCOMPARE(panel.archivedSessions().size(), 3);
+
+    // Dismiss all three
+    panel.dismissSession(QStringLiteral("bdis01"));
+    panel.dismissSession(QStringLiteral("bdis02"));
+    panel.dismissSession(QStringLiteral("bdis03"));
+
+    // All still exist with isDismissed flag
+    // (archivedSessions() still includes them since isArchived remains true)
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 3);
+    int dismissedCount = 0;
+    for (const auto &meta : all) {
+        if (meta.isDismissed) {
+            dismissedCount++;
+        }
+    }
+    QCOMPARE(dismissedCount, 3);
+}
+
+void SessionManagerPanelTest::testBulkDismissOlderThan()
+{
+    QJsonArray sessions;
+
+    // Old session (2 months ago)
+    QJsonObject oldSession = makeSession(QStringLiteral("age01"), QStringLiteral("konsolai-age01"), false, true);
+    oldSession[QStringLiteral("lastAccessed")] = QDateTime::currentDateTime().addDays(-60).toString(Qt::ISODate);
+    sessions.append(oldSession);
+
+    // Recent session (yesterday)
+    QJsonObject recentSession = makeSession(QStringLiteral("age02"), QStringLiteral("konsolai-age02"), false, true);
+    recentSession[QStringLiteral("lastAccessed")] = QDateTime::currentDateTime().addDays(-1).toString(Qt::ISODate);
+    sessions.append(recentSession);
+
+    // Medium-age session (2 weeks ago)
+    QJsonObject mediumSession = makeSession(QStringLiteral("age03"), QStringLiteral("konsolai-age03"), false, true);
+    mediumSession[QStringLiteral("lastAccessed")] = QDateTime::currentDateTime().addDays(-14).toString(Qt::ISODate);
+    sessions.append(mediumSession);
+
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QCOMPARE(panel.archivedSessions().size(), 3);
+
+    // Dismiss sessions older than 1 month — should only get age01
+    QDateTime cutoff30 = QDateTime::currentDateTime().addDays(-30);
+    int dismissedCount = 0;
+    for (const auto &meta : panel.allSessions()) {
+        if (meta.isArchived && !meta.isDismissed && meta.lastAccessed.isValid() && meta.lastAccessed < cutoff30) {
+            panel.dismissSession(meta.sessionId);
+            dismissedCount++;
+        }
+    }
+    QCOMPARE(dismissedCount, 1);
+
+    // Count non-dismissed archived sessions
+    auto countActive = [&panel]() {
+        int count = 0;
+        for (const auto &m : panel.allSessions()) {
+            if (m.isArchived && !m.isDismissed) count++;
+        }
+        return count;
+    };
+    QCOMPARE(countActive(), 2);
+
+    // Dismiss sessions older than 1 week — should get age03 (14 days old)
+    QDateTime cutoff7 = QDateTime::currentDateTime().addDays(-7);
+    for (const auto &meta : panel.allSessions()) {
+        if (meta.isArchived && !meta.isDismissed && meta.lastAccessed.isValid() && meta.lastAccessed < cutoff7) {
+            panel.dismissSession(meta.sessionId);
+        }
+    }
+    QCOMPARE(countActive(), 1);
+
+    // Remaining non-dismissed should be the recent session
+    for (const auto &meta : panel.allSessions()) {
+        if (meta.isArchived && !meta.isDismissed) {
+            QCOMPARE(meta.sessionId, QStringLiteral("age02"));
+        }
+    }
+}
+
+void SessionManagerPanelTest::testBulkCloseMultipleSessions()
+{
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("bcls01"), QStringLiteral("konsolai-bcls01")));
+    sessions.append(makeSession(QStringLiteral("bcls02"), QStringLiteral("konsolai-bcls02")));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+
+    // Close both — should NOT mark as archived
+    panel.closeSession(QStringLiteral("bcls01"));
+    panel.closeSession(QStringLiteral("bcls02"));
+
+    // Sessions should still exist, not be archived
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 2);
+    for (const auto &meta : all) {
+        QVERIFY(!meta.isArchived);
+    }
+}
+
 QTEST_MAIN(SessionManagerPanelTest)
 
 #include "moc_SessionManagerPanelTest.cpp"

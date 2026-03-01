@@ -1056,7 +1056,171 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 void SessionManagerPanel::onContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_discoveredCategory) {
+    if (!item) {
+        return;
+    }
+
+    // Category header context menus — bulk actions
+    if (item == m_pinnedCategory || item == m_activeCategory || item == m_detachedCategory
+        || item == m_closedCategory || item == m_archivedCategory || item == m_dismissedCategory
+        || item == m_discoveredCategory) {
+        if (item->childCount() == 0) {
+            return; // No children, no actions
+        }
+        QMenu menu(this);
+
+        // Collect child session IDs for this category
+        auto collectChildIds = [](QTreeWidgetItem *category) {
+            QStringList ids;
+            for (int i = 0; i < category->childCount(); ++i) {
+                QString id = category->child(i)->data(0, Qt::UserRole).toString();
+                if (!id.isEmpty()) {
+                    ids << id;
+                }
+            }
+            return ids;
+        };
+
+        // Identify which category this is, so lambdas use stable member pointers
+        QTreeWidgetItem *categoryPtr = item; // item == one of our m_*Category members (never deleted)
+
+        if (categoryPtr == m_detachedCategory) {
+            QAction *attachAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach All (%1)", categoryPtr->childCount()));
+            connect(attachAll, &QAction::triggered, this, [this, collectChildIds]() {
+                QStringList ids = collectChildIds(m_detachedCategory);
+                if (ids.isEmpty()) return;
+                int ret = QMessageBox::question(this, i18n("Attach All"),
+                    i18n("Attach all %1 detached sessions?", ids.size()),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                for (const auto &id : std::as_const(ids)) {
+                    auto *meta = findMetadata(id);
+                    if (!meta) continue;
+                    if (meta->isRemote) {
+                        Q_EMIT remoteAttachRequested(meta->sshHost, meta->sshUsername, meta->sshPort, meta->workingDirectory, meta->sessionName);
+                    } else {
+                        Q_EMIT attachRequested(meta->sessionName);
+                    }
+                }
+            });
+            menu.addSeparator();
+        }
+
+        if (categoryPtr == m_detachedCategory || categoryPtr == m_closedCategory || categoryPtr == m_pinnedCategory) {
+            QAction *archiveAll = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-insert")), i18n("Archive All (%1)", categoryPtr->childCount()));
+            // Capture the member pointer directly — category headers are never deleted during tree rebuilds
+            QTreeWidgetItem **categoryMember = (categoryPtr == m_detachedCategory) ? &m_detachedCategory
+                                             : (categoryPtr == m_closedCategory)   ? &m_closedCategory
+                                                                                   : &m_pinnedCategory;
+            connect(archiveAll, &QAction::triggered, this, [this, categoryMember, collectChildIds]() {
+                QStringList ids = collectChildIds(*categoryMember);
+                if (ids.isEmpty()) return;
+                int ret = QMessageBox::question(this, i18n("Archive All"),
+                    i18n("Archive all %1 sessions in this category?", ids.size()),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                for (const auto &id : std::as_const(ids)) {
+                    archiveSession(id);
+                }
+            });
+        }
+
+        if (categoryPtr == m_detachedCategory) {
+            menu.addSeparator();
+            QAction *closeAll = menu.addAction(QIcon::fromTheme(QStringLiteral("window-close")), i18n("Close All (%1)", categoryPtr->childCount()));
+            connect(closeAll, &QAction::triggered, this, [this, collectChildIds]() {
+                QStringList ids = collectChildIds(m_detachedCategory);
+                if (ids.isEmpty()) return;
+                int ret = QMessageBox::question(this, i18n("Close All"),
+                    i18n("Close all %1 detached sessions? This kills their tmux backends.", ids.size()),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                for (const auto &id : std::as_const(ids)) {
+                    closeSession(id);
+                }
+            });
+        }
+
+        if (categoryPtr == m_archivedCategory) {
+            QAction *dismissAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Dismiss All (%1)", categoryPtr->childCount()));
+            connect(dismissAll, &QAction::triggered, this, [this, collectChildIds]() {
+                QStringList ids = collectChildIds(m_archivedCategory);
+                if (ids.isEmpty()) return;
+                int ret = QMessageBox::question(this, i18n("Dismiss All"),
+                    i18n("Dismiss all %1 archived sessions? They can be restored later.", ids.size()),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                for (const auto &id : std::as_const(ids)) {
+                    dismissSession(id);
+                }
+            });
+
+            menu.addSeparator();
+
+            // Age-based dismiss options
+            auto dismissOlderThan = [this, collectChildIds](int days, const QString &label) {
+                QStringList ids = collectChildIds(m_archivedCategory);
+                QDateTime cutoff = QDateTime::currentDateTime().addDays(-days);
+                QStringList old;
+                for (const auto &id : std::as_const(ids)) {
+                    auto *meta = findMetadata(id);
+                    if (meta && meta->lastAccessed.isValid() && meta->lastAccessed < cutoff) {
+                        old << id;
+                    }
+                }
+                if (old.isEmpty()) {
+                    QMessageBox::information(this, i18n("Nothing to Dismiss"),
+                        i18n("No archived sessions older than %1.", label));
+                    return;
+                }
+                int ret = QMessageBox::question(this, i18n("Dismiss Old Sessions"),
+                    i18n("Dismiss %1 archived sessions older than %2?", old.size(), label),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                for (const auto &id : std::as_const(old)) {
+                    dismissSession(id);
+                }
+            };
+
+            QAction *dismiss1w = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Dismiss > 1 Week Old"));
+            connect(dismiss1w, &QAction::triggered, this, [dismissOlderThan]() {
+                dismissOlderThan(7, i18n("1 week"));
+            });
+
+            QAction *dismiss1m = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Dismiss > 1 Month Old"));
+            connect(dismiss1m, &QAction::triggered, this, [dismissOlderThan]() {
+                dismissOlderThan(30, i18n("1 month"));
+            });
+        }
+
+        if (categoryPtr == m_dismissedCategory) {
+            QAction *purgeAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete-remove")), i18n("Purge All (%1)", categoryPtr->childCount()));
+            connect(purgeAll, &QAction::triggered, this, [this]() {
+                int count = m_dismissedCategory->childCount();
+                int ret = QMessageBox::question(this, i18n("Purge All Dismissed"),
+                    i18n("Permanently delete metadata for all %1 dismissed sessions? This cannot be undone.", count),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                purgeDismissed();
+            });
+
+            QAction *restoreAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore All (%1)", categoryPtr->childCount()));
+            connect(restoreAll, &QAction::triggered, this, [this, collectChildIds]() {
+                QStringList ids = collectChildIds(m_dismissedCategory);
+                if (ids.isEmpty()) return;
+                int ret = QMessageBox::question(this, i18n("Restore All"),
+                    i18n("Restore all %1 dismissed sessions back to Archived?", ids.size()),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (ret != QMessageBox::Yes) return;
+                for (const auto &id : std::as_const(ids)) {
+                    restoreSession(id);
+                }
+            });
+        }
+
+        if (!menu.isEmpty()) {
+            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        }
         return;
     }
 
@@ -2182,10 +2346,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder")));
     }
 
-    // Add status indicator (green for local, blue for remote)
+    // Add status indicator (green for local, cyan for remote)
     if (isActive) {
         if (meta.isRemote) {
-            item->setForeground(0, QBrush(Qt::darkBlue));
+            item->setForeground(0, QBrush(Qt::cyan));
         } else {
             item->setForeground(0, QBrush(Qt::darkGreen));
         }

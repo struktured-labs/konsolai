@@ -87,6 +87,12 @@ private Q_SLOTS:
     void testUnarchiveEmitsRemoteFields();
     void testUnarchiveLocalSessionEmitsNoRemoteFields();
     void testRegisterRemoteSessionRoundTrip();
+
+    // Bulk operations
+    void testBulkArchiveMultipleSessions();
+    void testBulkDismissMultipleSessions();
+    void testBulkDismissOlderThan();
+    void testBulkCloseMultipleSessions();
 };
 
 }
