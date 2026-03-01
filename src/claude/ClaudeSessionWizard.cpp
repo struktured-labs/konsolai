@@ -22,7 +22,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileSystemModel>
-#include <QInputDialog>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -362,8 +361,8 @@ void ClaudeSessionWizard::setupUi()
     sshLayout->addWidget(m_connectionStatusLabel, 3, 1, 1, 2);
 
     // Discover remote tmux sessions button
-    m_discoverRemoteTmuxButton = new QPushButton(i18n("Discover Sessions..."), this);
-    m_discoverRemoteTmuxButton->setToolTip(i18n("Find existing tmux sessions on the remote host"));
+    m_discoverRemoteTmuxButton = new QPushButton(i18n("Browse Conversations..."), this);
+    m_discoverRemoteTmuxButton->setToolTip(i18n("Find all Claude conversations on the remote host"));
     connect(m_discoverRemoteTmuxButton, &QPushButton::clicked,
             this, &ClaudeSessionWizard::onDiscoverRemoteTmuxClicked);
     sshLayout->addWidget(m_discoverRemoteTmuxButton, 4, 0);
@@ -1106,6 +1105,7 @@ void ClaudeSessionWizard::onTestConnectionClicked()
     args << QStringLiteral("echo ok && which tmux 2>/dev/null && which claude 2>/dev/null");
 
     auto *process = new QProcess(this);
+    ClaudeSessionRegistry::ensureSshAuthSock(process);
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process](int exitCode, QProcess::ExitStatus) {
         process->deleteLater();
         m_testConnectionButton->setEnabled(true);
@@ -1258,7 +1258,7 @@ void ClaudeSessionWizard::onDiscoverRemoteTmuxClicked()
         return;
     }
 
-    m_remoteTmuxLabel->setText(i18n("Discovering..."));
+    m_remoteTmuxLabel->setText(i18n("Scanning all projects..."));
     m_remoteTmuxLabel->setStyleSheet(QStringLiteral("color: gray;"));
     m_discoverRemoteTmuxButton->setEnabled(false);
 
@@ -1278,46 +1278,70 @@ void ClaudeSessionWizard::onDiscoverRemoteTmuxClicked()
 
     QPointer<ClaudeSessionWizard> guard(this);
 
-    // Discover ALL tmux sessions (not just konsolai ones)
-    registry->discoverRemoteTmuxSessionsAsync(target, sshPort(), false,
-        [guard](const QList<TmuxManager::SessionInfo> &sessions) {
+    // Discover ALL Claude conversations across all projects on the remote
+    registry->discoverAllRemoteConversationsAsync(target, sshPort(),
+        [guard](const QList<ClaudeConversation> &conversations) {
             if (!guard) {
                 return;
             }
             guard->m_discoverRemoteTmuxButton->setEnabled(true);
-            if (sessions.isEmpty()) {
-                guard->m_remoteTmuxLabel->setText(i18n("No tmux sessions found"));
+            if (conversations.isEmpty()) {
+                guard->m_remoteTmuxLabel->setText(i18n("No conversations found"));
                 return;
             }
 
             guard->m_remoteTmuxLabel->setText(
-                i18n("%1 session(s) found", sessions.size()));
+                i18n("%1 conversation(s) found", conversations.size()));
 
-            // Build display items
-            QStringList items;
-            for (const auto &s : sessions) {
-                QString status = s.attached ? i18n("attached") : i18n("detached");
-                items << QStringLiteral("%1 (%2, %3 windows)")
-                    .arg(s.name, status, QString::number(s.windows));
+            // Show conversation picker with project paths
+            ClaudeConversationPicker picker(conversations, guard);
+            picker.setWindowTitle(QStringLiteral("Resume Remote Conversation"));
+            if (picker.exec() != QDialog::Accepted) {
+                return;
             }
 
-            bool ok = false;
-            QString selected = QInputDialog::getItem(guard,
-                i18n("Attach to Remote Session"),
-                i18n("Select a tmux session to attach:"),
-                items, 0, false, &ok);
+            QString id = picker.selectedSessionId();
+            QString projectPath = picker.selectedProjectPath();
+            if (id.isEmpty()) {
+                // User chose "Start Fresh"
+                guard->m_remoteTmuxLabel->clear();
+                return;
+            }
 
-            if (ok && !selected.isEmpty()) {
-                int idx = items.indexOf(selected);
-                if (idx >= 0 && idx < sessions.size()) {
-                    guard->m_selectedTmuxSession = sessions[idx].name;
+            // Set working directory from the selected conversation.
+            // Update folder name BEFORE setting resume ID because setText()
+            // triggers onFolderNameChanged() → checkForConversations() which
+            // clears m_resumeSessionId.
+            if (projectPath.startsWith(QLatin1Char('/'))) {
+                guard->m_selectedDirectory = projectPath;
+                guard->m_useExistingDir = true;
+            }
+
+            QString dirName = QDir(projectPath).dirName();
+            if (!dirName.isEmpty() && dirName != QStringLiteral(".")) {
+                guard->m_folderNameEdit->setText(dirName);
+            }
+
+            // Set resume ID AFTER folder name change (which clears it via signal)
+            guard->m_resumeSessionId = id;
+
+            // Find the summary for display
+            for (const auto &conv : conversations) {
+                if (conv.sessionId == id) {
+                    QString summary = conv.summary.isEmpty() ? conv.firstPrompt : conv.summary;
+                    summary = summary.simplified();
+                    if (summary.length() > 60) {
+                        summary = summary.left(57) + QStringLiteral("...");
+                    }
                     guard->m_remoteTmuxLabel->setText(
-                        i18n("Attaching to: %1", sessions[idx].name));
+                        i18n("Resuming: %1", summary));
                     guard->m_remoteTmuxLabel->setStyleSheet(
                         QStringLiteral("color: green;"));
-                    guard->accept();
+                    break;
                 }
             }
+
+            guard->accept();
         });
 }
 

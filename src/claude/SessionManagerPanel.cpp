@@ -10,6 +10,8 @@
 #include "KonsolaiSettings.h"
 #include "TmuxManager.h"
 
+#include <limits>
+
 #include <KLocalizedString>
 #include <QAction>
 #include <QApplication>
@@ -455,7 +457,7 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
         return;
     }
 
-    // Save yolo mode settings, approval state, and subagent/subprocess snapshots
+    // Save yolo mode settings, approval state, resume ID, and subagent/subprocess snapshots
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].yoloMode = session->yoloMode();
         m_metadata[sessionId].doubleYoloMode = session->doubleYoloMode();
@@ -464,6 +466,12 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
         m_metadata[sessionId].doubleYoloApprovalCount = session->doubleYoloApprovalCount();
         m_metadata[sessionId].tripleYoloApprovalCount = session->tripleYoloApprovalCount();
         m_metadata[sessionId].approvalLog = session->approvalLog();
+        if (!session->resumeSessionId().isEmpty()) {
+            m_metadata[sessionId].lastResumeSessionId = session->resumeSessionId();
+        }
+        if (!session->taskDescription().isEmpty()) {
+            m_metadata[sessionId].description = session->taskDescription();
+        }
         m_metadata[sessionId].subagents = session->subagents().values().toVector();
         m_metadata[sessionId].subprocesses = session->subprocesses().values().toVector();
         m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
@@ -793,6 +801,21 @@ void SessionManagerPanel::markExpired(const QString &sessionName)
     } else {
         qDebug() << "SessionManagerPanel: Could not find session to mark expired:" << sessionName;
     }
+}
+
+QString SessionManagerPanel::sessionIdForName(const QString &sessionName) const
+{
+    // Try direct sessionId lookup first (caller may pass sessionId)
+    if (m_metadata.contains(sessionName)) {
+        return sessionName;
+    }
+    // Linear search by sessionName
+    for (auto it = m_metadata.constBegin(); it != m_metadata.constEnd(); ++it) {
+        if (it->sessionName == sessionName) {
+            return it->sessionId;
+        }
+    }
+    return {};
 }
 
 void SessionManagerPanel::dismissSession(const QString &sessionId)
@@ -1434,8 +1457,9 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             }
         }
     } else {
-        // Active or detached session
+        // Active, detached, or closed session
         bool isActive = m_activeSessions.contains(sessionId);
+        bool isClosed = (item->parent() == m_closedCategory);
         QPointer<ClaudeSession> activeSession = isActive ? m_activeSessions[sessionId] : nullptr;
 
         if (isActive && activeSession) {
@@ -1444,6 +1468,12 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 if (activeSession) {
                     Q_EMIT focusSessionRequested(activeSession);
                 }
+            });
+        } else if (isClosed) {
+            // Closed session — tmux is dead, offer restart (fresh tmux, optionally resume conversation)
+            QAction *restartAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart Session"));
+            connect(restartAction, &QAction::triggered, this, [this, sessionId]() {
+                unarchiveSession(sessionId);
             });
         } else if (!isActive) {
             QAction *attachAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach"));
@@ -1607,6 +1637,9 @@ void SessionManagerPanel::updateTreeWidget()
 
 void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames)
 {
+    // Invalidate conversation cache so summaries refresh from disk
+    m_conversationCache.clear();
+
     // Clear existing items (except categories)
     while (m_pinnedCategory->childCount() > 0) {
         delete m_pinnedCategory->takeChild(0);
@@ -1736,11 +1769,11 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     }
 
     // Add task description for disambiguation
-    // Priority: user-set taskDescription > Claude CLI summary > session ID hash
+    // Priority: active taskDescription > persisted description > Claude CLI conversation > nothing
     bool isActive = m_activeSessions.contains(meta.sessionId);
     QString description;
 
-    // First try user-set task description (from active session)
+    // 1. Live session task description
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session && !session->taskDescription().isEmpty()) {
@@ -1748,28 +1781,63 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // Fallback: look up Claude CLI's auto-generated summary for this project (cached)
+    // 2. Persisted description from previous run
+    if (description.isEmpty() && !meta.description.isEmpty()) {
+        description = meta.description;
+    }
+
+    // 3. Claude CLI conversation data (only available for local sessions)
     if (description.isEmpty() && !meta.workingDirectory.isEmpty() && m_registry) {
-        auto cacheIt = m_conversationSummaryCache.constFind(meta.workingDirectory);
-        if (cacheIt != m_conversationSummaryCache.constEnd()) {
-            description = cacheIt.value();
-        } else {
-            auto conversations = m_registry->readClaudeConversations(meta.workingDirectory);
-            QString summary = conversations.isEmpty() ? QString() : conversations.first().summary;
-            m_conversationSummaryCache.insert(meta.workingDirectory, summary);
-            description = summary;
+        // Populate cache on first access per working directory
+        if (!m_conversationCache.contains(meta.workingDirectory)) {
+            m_conversationCache.insert(meta.workingDirectory, m_registry->readClaudeConversations(meta.workingDirectory));
+        }
+        const auto &conversations = m_conversationCache[meta.workingDirectory];
+
+        // 1. Direct match by conversation UUID
+        if (!meta.lastResumeSessionId.isEmpty()) {
+            for (const auto &conv : conversations) {
+                if (conv.sessionId == meta.lastResumeSessionId) {
+                    description = conv.summary.isEmpty() ? conv.firstPrompt : conv.summary;
+                    break;
+                }
+            }
+        }
+        // 2. Match by closest creation timestamp
+        if (description.isEmpty() && meta.createdAt.isValid() && !conversations.isEmpty()) {
+            qint64 bestDelta = std::numeric_limits<qint64>::max();
+            const ClaudeConversation *bestMatch = nullptr;
+            for (const auto &conv : conversations) {
+                if (!conv.created.isValid()) {
+                    continue;
+                }
+                qint64 delta = qAbs(meta.createdAt.secsTo(conv.created));
+                if (delta < bestDelta) {
+                    bestDelta = delta;
+                    bestMatch = &conv;
+                }
+            }
+            if (bestMatch) {
+                description = bestMatch->summary.isEmpty() ? bestMatch->firstPrompt : bestMatch->summary;
+            }
+        }
+        // 3. Last resort: most recent conversation
+        if (description.isEmpty() && !conversations.isEmpty()) {
+            const auto &first = conversations.first();
+            description = first.summary.isEmpty() ? first.firstPrompt : first.summary;
         }
     }
 
     // Apply description or fall back to session ID
     if (!description.isEmpty()) {
+        // Collapse newlines and trim for single-line display
+        description = description.simplified();
         if (description.length() > 35) {
             description = description.left(32) + QStringLiteral("...");
         }
         displayName += QStringLiteral(" (%1)").arg(description);
-    } else if (!meta.sessionId.isEmpty()) {
-        displayName += QStringLiteral(" (%1)").arg(meta.sessionId.left(8));
     }
+    // No hash fallback — directory name alone is clearer than a random hex string
 
     // Add team badge when subagents exist (active or completed/persisted)
     if (isActive) {
@@ -1828,24 +1896,35 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {
-            // Build rich text with per-bolt colors
+            // Build rich text: gold bolt [yolo count]  blue bolt [double count]  purple bolt [triple count]
             QString boltsHtml;
-            if (session->yoloMode()) {
-                boltsHtml += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
-            }
-            if (session->doubleYoloMode()) {
-                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
-            }
-            if (session->tripleYoloMode()) {
-                boltsHtml += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
-            }
+            int yoloCount = session->yoloApprovalCount();
+            int doubleCount = session->doubleYoloApprovalCount();
+            int tripleCount = session->tripleYoloApprovalCount();
 
-            // Add approval count
-            int count = session->totalApprovalCount();
-            if (count > 0 && !boltsHtml.isEmpty()) {
-                boltsHtml += QStringLiteral(" [%1]").arg(count);
-            } else if (count > 0) {
-                boltsHtml = QStringLiteral("[%1]").arg(count);
+            if (session->yoloMode() || yoloCount > 0) {
+                boltsHtml += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
+                if (yoloCount > 0) {
+                    boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
+                }
+            }
+            if (session->doubleYoloMode() || doubleCount > 0) {
+                if (!boltsHtml.isEmpty()) {
+                    boltsHtml += QStringLiteral(" ");
+                }
+                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Blue
+                if (doubleCount > 0) {
+                    boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
+                }
+            }
+            if (session->tripleYoloMode() || tripleCount > 0) {
+                if (!boltsHtml.isEmpty()) {
+                    boltsHtml += QStringLiteral(" ");
+                }
+                boltsHtml += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
+                if (tripleCount > 0) {
+                    boltsHtml += QStringLiteral("<span style='color:#AB47BC'>[%1]</span>").arg(tripleCount);
+                }
             }
 
             // Add velocity + budget ETA when budget controller is active
@@ -2386,6 +2465,10 @@ void SessionManagerPanel::loadMetadata()
             meta.approvalLog.append(entry);
         }
 
+        // Resume session ID and description
+        meta.lastResumeSessionId = obj[QStringLiteral("lastResumeSessionId")].toString();
+        meta.description = obj[QStringLiteral("description")].toString();
+
         // Budget settings
         meta.budgetTimeLimitMinutes = obj[QStringLiteral("budgetTimeLimitMinutes")].toInt();
         meta.budgetCostCeilingUSD = obj[QStringLiteral("budgetCostCeilingUSD")].toDouble();
@@ -2504,6 +2587,14 @@ void SessionManagerPanel::saveMetadata()
                 }
                 obj[QStringLiteral("approvalLog")] = logArray;
             }
+        }
+
+        // Resume session ID and description (only save if non-empty)
+        if (!meta.lastResumeSessionId.isEmpty()) {
+            obj[QStringLiteral("lastResumeSessionId")] = meta.lastResumeSessionId;
+        }
+        if (!meta.description.isEmpty()) {
+            obj[QStringLiteral("description")] = meta.description;
         }
 
         // Budget settings (only save if any limit is set)
@@ -2652,6 +2743,7 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
     tree->setHeaderLabels({i18n("Time"), i18n("Tool"), i18n("Action"), i18n("Level"), i18n("Tokens"), i18n("Cost")});
     tree->setRootIsDecorated(false);
     tree->setAlternatingRowColors(true);
+    tree->setSortingEnabled(true);
 
     // Show most recent first
     for (int i = log.size() - 1; i >= 0; --i) {
@@ -2679,10 +2771,18 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
             item->setText(5, QStringLiteral("$%1").arg(entry.estimatedCostUSD, 0, 'f', 4));
             item->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
             item->setTextAlignment(5, Qt::AlignRight | Qt::AlignVCenter);
+            // Store raw values for correct numeric sorting
+            item->setData(4, Qt::UserRole, static_cast<qulonglong>(entry.totalTokens));
+            item->setData(5, Qt::UserRole, entry.estimatedCostUSD);
         }
         // Store original log index for detail lookup
         item->setData(0, Qt::UserRole + 1, i);
+        // Store yolo level for numeric sorting
+        item->setData(3, Qt::UserRole, entry.yoloLevel);
     }
+
+    // Default sort by time descending (most recent first)
+    tree->sortByColumn(0, Qt::DescendingOrder);
 
     tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -2716,12 +2816,30 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
         }
         const auto &entry = logCopy[idx];
         QString detail;
-        if (!entry.toolInput.isEmpty()) {
+
+        // For double yolo (suggestion acceptance) and triple yolo (auto-continue),
+        // show the prompt that was sent
+        if (entry.yoloLevel == 2) {
+            detail += QStringLiteral("--- Action ---\nAccepted inline suggestion (Tab + Enter)\n");
+        } else if (entry.yoloLevel == 3) {
+            detail += QStringLiteral("--- Auto-Continue Prompt ---\n");
+            if (!entry.toolInput.isEmpty()) {
+                detail += entry.toolInput;
+            } else {
+                detail += QStringLiteral("(prompt not recorded)");
+            }
+            detail += QStringLiteral("\n");
+        }
+
+        if (!entry.toolInput.isEmpty() && entry.yoloLevel != 3) {
+            if (!detail.isEmpty()) {
+                detail += QStringLiteral("\n");
+            }
             detail += QStringLiteral("--- Input ---\n") + entry.toolInput;
         }
         if (!entry.toolOutput.isEmpty()) {
             if (!detail.isEmpty()) {
-                detail += QStringLiteral("\n\n");
+                detail += QStringLiteral("\n");
             }
             detail += QStringLiteral("--- Output ---\n") + entry.toolOutput;
         }

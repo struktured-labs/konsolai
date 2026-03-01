@@ -264,6 +264,37 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     connectSignals();
 }
 
+void ClaudeSession::setSessionId(const QString &id)
+{
+    if (id.isEmpty() || id == m_sessionId) {
+        return;
+    }
+
+    qDebug() << "ClaudeSession::setSessionId - changing from" << m_sessionId << "to" << id;
+
+    m_sessionId = id;
+    m_sessionName = TmuxManager::buildSessionName(m_profileName, m_sessionId);
+
+    // Recreate hook handler with the new ID (so the socket name matches)
+    if (m_hookHandler) {
+        disconnect(m_hookHandler, nullptr, m_claudeProcess, nullptr);
+        delete m_hookHandler;
+    }
+    m_hookHandler = new ClaudeHookHandler(m_sessionId, this);
+    connect(m_hookHandler, &ClaudeHookHandler::hookEventReceived, m_claudeProcess, &ClaudeProcess::handleHookEvent);
+
+    // Update tab title to reflect the restored session ID
+    QString projectName = QDir(m_workingDir).dirName();
+    if (!projectName.isEmpty()) {
+        QString displayName = buildDisplayName(projectName, m_taskDescription, m_sessionId, m_sshHost);
+        setTitle(Konsole::Session::NameRole, displayName);
+        setTitle(Konsole::Session::DisplayedTitleRole, displayName);
+        setTabTitleFormat(Konsole::Session::LocalTabTitle, displayName);
+        setTabTitleFormat(Konsole::Session::RemoteTabTitle, displayName);
+        tabTitleSetByUser(true);
+    }
+}
+
 void ClaudeSession::run()
 {
     // Guard against double invocation (known Konsole issue — Session::run() FIXME comment).
@@ -312,10 +343,16 @@ void ClaudeSession::run()
         }
     }
 
-    // Use the current initialWorkingDirectory (may have been updated by ViewManager)
-    QString workDir = initialWorkingDirectory();
-    if (!workDir.isEmpty()) {
-        m_workingDir = workDir;
+    // Use the current initialWorkingDirectory (may have been updated by ViewManager).
+    // Skip for remote sessions: Session::setInitialWorkingDirectory() runs validDirectory()
+    // which checks LOCAL filesystem — remote paths like /home/user/projects/foo don't exist
+    // locally, so validDirectory() falls back to QDir::homePath(), clobbering the correct
+    // remote path stored in m_workingDir by the constructor.
+    if (!m_isRemote) {
+        QString workDir = initialWorkingDirectory();
+        if (!workDir.isEmpty()) {
+            m_workingDir = workDir;
+        }
     }
 
     // For reattached sessions, query tmux asynchronously to avoid blocking the main
@@ -649,7 +686,7 @@ void ClaudeSession::connectSignals()
                     return;
                 }
                 guard->sendPrompt(guard->m_autoContinuePrompt);
-                guard->logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+                guard->logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, guard->m_autoContinuePrompt);
             });
         }
     });
@@ -1573,7 +1610,7 @@ void ClaudeSession::pollForIdlePrompt()
                     QTimer::singleShot(500, this, [this]() {
                         if (m_tripleYoloMode) {
                             sendPrompt(m_autoContinuePrompt);
-                            logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+                            logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, m_autoContinuePrompt);
 
                             // Cooldown to avoid rapid-fire on stale output
                             QTimer::singleShot(5000, this, [this]() {
@@ -1801,7 +1838,7 @@ void ClaudeSession::onSuggestionFallbackTimeout()
         }
         qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
         sendPrompt(m_autoContinuePrompt);
-        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, m_autoContinuePrompt);
     }
 }
 
@@ -1897,7 +1934,7 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
                 QTimer::singleShot(500, this, [this]() {
                     if (m_tripleYoloMode) {
                         sendPrompt(m_autoContinuePrompt);
-                        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+                        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, m_autoContinuePrompt);
                     }
                     // Reset after cooldown to allow polling to work for subsequent idle events
                     QTimer::singleShot(5000, this, [this]() {

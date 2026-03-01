@@ -12,11 +12,63 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QPointer>
+#include <QProcessEnvironment>
 #include <QSet>
 #include <QStandardPaths>
 
+#include <unistd.h>
+
 namespace Konsolai
 {
+
+/**
+ * Ensure SSH_AUTH_SOCK is set in the given process environment.
+ * Desktop-launched apps may not inherit the SSH agent socket,
+ * so we probe common locations if the variable is missing.
+ */
+void ClaudeSessionRegistry::ensureSshAuthSock(QProcess *process)
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    if (!env.value(QStringLiteral("SSH_AUTH_SOCK")).isEmpty()) {
+        return; // already set
+    }
+
+    // Common socket locations (in priority order)
+    const uid_t uid = getuid();
+    const QString runtimeDir = QStringLiteral("/run/user/%1").arg(uid);
+    const QStringList candidates = {
+        runtimeDir + QStringLiteral("/openssh_agent"),
+        runtimeDir + QStringLiteral("/ssh-agent"),
+        runtimeDir + QStringLiteral("/gcr/ssh"),
+        runtimeDir + QStringLiteral("/keyring/ssh"),
+    };
+
+    for (const QString &path : candidates) {
+        if (QFile::exists(path)) {
+            env.insert(QStringLiteral("SSH_AUTH_SOCK"), path);
+            process->setProcessEnvironment(env);
+            qDebug() << "ClaudeSessionRegistry: Set SSH_AUTH_SOCK to" << path;
+            return;
+        }
+    }
+
+    // Try /tmp/ssh-*/agent.* as last resort
+    QDir tmpDir(QStringLiteral("/tmp"));
+    const auto sshDirs = tmpDir.entryList({QStringLiteral("ssh-*")}, QDir::Dirs);
+    for (const QString &dirName : sshDirs) {
+        QDir sshDir(tmpDir.filePath(dirName));
+        const auto agents = sshDir.entryList({QStringLiteral("agent.*")}, QDir::Files);
+        if (!agents.isEmpty()) {
+            QString agentPath = sshDir.filePath(agents.first());
+            env.insert(QStringLiteral("SSH_AUTH_SOCK"), agentPath);
+            process->setProcessEnvironment(env);
+            qDebug() << "ClaudeSessionRegistry: Set SSH_AUTH_SOCK to" << agentPath;
+            return;
+        }
+    }
+
+    qWarning() << "ClaudeSessionRegistry: Could not find SSH_AUTH_SOCK - SSH connections may fail";
+}
 
 static ClaudeSessionRegistry *s_registryInstance = nullptr;
 
@@ -422,45 +474,59 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
                 continue;
             }
 
-            // Read first line to check type
-            QByteArray firstLine = jsonlFile.readLine(4096).trimmed();
-            if (firstLine.isEmpty()) {
-                jsonlFile.close();
-                continue;
-            }
-            QJsonParseError lineError;
-            QJsonDocument lineDoc = QJsonDocument::fromJson(firstLine, &lineError);
-            if (lineError.error != QJsonParseError::NoError || !lineDoc.isObject()) {
-                jsonlFile.close();
-                continue;
-            }
-
-            QString lineType = lineDoc.object().value(QStringLiteral("type")).toString();
-            if (lineType != QStringLiteral("user")) {
-                // Not a conversation transcript (e.g., file-history-snapshot)
-                jsonlFile.close();
-                continue;
-            }
-
-            // Extract first user prompt from the first message
+            // Scan first lines for the first meaningful "user" message.
+            // Claude Code prepends file-history-snapshot lines before user messages.
+            // Skip prompts that are just "[Request interrupted by user for tool use]".
             QString firstPrompt;
-            QJsonObject msgObj = lineDoc.object().value(QStringLiteral("message")).toObject();
-            QJsonValue content = msgObj.value(QStringLiteral("content"));
-            if (content.isString()) {
-                firstPrompt = content.toString().left(200);
-            } else if (content.isArray()) {
-                for (const QJsonValue &part : content.toArray()) {
-                    if (part.isObject() && part.toObject().value(QStringLiteral("type")).toString() == QStringLiteral("text")) {
-                        firstPrompt = part.toObject().value(QStringLiteral("text")).toString().left(200);
+            bool foundUser = false;
+            int messageCount = 0;
+            constexpr int kMaxProbeLines = 10;
+
+            for (int lineNum = 0; lineNum < kMaxProbeLines && !jsonlFile.atEnd(); ++lineNum) {
+                QByteArray line = jsonlFile.readLine(8192).trimmed();
+                if (line.isEmpty()) {
+                    continue;
+                }
+                messageCount++;
+
+                QJsonParseError lineError;
+                QJsonDocument lineDoc = QJsonDocument::fromJson(line, &lineError);
+                if (lineError.error != QJsonParseError::NoError || !lineDoc.isObject()) {
+                    continue;
+                }
+
+                QString lineType = lineDoc.object().value(QStringLiteral("type")).toString();
+                if (lineType == QStringLiteral("user")) {
+                    foundUser = true;
+                    QString prompt;
+                    QJsonObject msgObj = lineDoc.object().value(QStringLiteral("message")).toObject();
+                    QJsonValue content = msgObj.value(QStringLiteral("content"));
+                    if (content.isString()) {
+                        prompt = content.toString().left(200);
+                    } else if (content.isArray()) {
+                        for (const QJsonValue &part : content.toArray()) {
+                            if (part.isObject() && part.toObject().value(QStringLiteral("type")).toString() == QStringLiteral("text")) {
+                                prompt = part.toObject().value(QStringLiteral("text")).toString().left(200);
+                                break;
+                            }
+                        }
+                    }
+                    // Skip synthetic/interrupted prompts — keep scanning for a real one
+                    if (!prompt.isEmpty() && !prompt.startsWith(QStringLiteral("[Request interrupted"))) {
+                        firstPrompt = prompt;
                         break;
                     }
                 }
             }
 
-            // Count messages (scan remaining lines)
-            int messageCount = 1;
+            if (!foundUser) {
+                jsonlFile.close();
+                continue;
+            }
+
+            // Count remaining messages
             while (!jsonlFile.atEnd()) {
-                jsonlFile.readLine(); // read full line, just counting
+                jsonlFile.readLine();
                 messageCount++;
             }
             jsonlFile.close();
@@ -505,8 +571,11 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
 
     QString hashedName = hashedProjectPath(projectPath);
 
-    // Read sessions-index.json on the remote host
-    QString remoteCmd = QStringLiteral("cat ~/.claude/projects/%1/sessions-index.json 2>/dev/null").arg(hashedName);
+    // Read conversations from the remote host by scanning .jsonl files
+    // for the first real user prompt. Merges summaries from sessions-index.json
+    // when available (Claude CLI's index often has empty summary/firstPrompt).
+    // The Python script is piped via stdin to avoid shell quoting issues.
+    QString remoteCmd = QStringLiteral("python3 - %1").arg(hashedName);
 
     QStringList args;
     args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes")
@@ -516,13 +585,71 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
     }
     args << sshTarget << remoteCmd;
 
+    // Python script to scan conversations — sent via stdin to avoid quoting
+    static const QByteArray pyScript = QByteArrayLiteral(
+        "import json, os, glob, sys\n"
+        "d = os.path.join(os.path.expanduser('~'), '.claude/projects/' + sys.argv[1])\n"
+        "if not os.path.isdir(d): print('[]'); exit()\n"
+        "idx = {}\n"
+        "ix = os.path.join(d, 'sessions-index.json')\n"
+        "if os.path.exists(ix):\n"
+        "    try:\n"
+        "        with open(ix) as xf: raw = json.load(xf)\n"
+        "        entries = raw if isinstance(raw, list) else raw.get('entries', [])\n"
+        "        for e in entries:\n"
+        "            sid = e.get('sessionId', '')\n"
+        "            if sid: idx[sid] = e\n"
+        "    except: pass\n"
+        "results = []\n"
+        "for f in sorted(glob.glob(os.path.join(d, '*.jsonl'))):\n"
+        "    bn = os.path.splitext(os.path.basename(f))[0]\n"
+        "    if bn.startswith('agent-'): continue\n"
+        "    prompt = ''\n"
+        "    try:\n"
+        "        with open(f) as fh:\n"
+        "            for i, line in enumerate(fh):\n"
+        "                if i >= 10: break\n"
+        "                obj = json.loads(line)\n"
+        "                if obj.get('type') != 'user': continue\n"
+        "                m = obj.get('message', {})\n"
+        "                c = m.get('content', '')\n"
+        "                if isinstance(c, list):\n"
+        "                    c = next((p['text'] for p in c if p.get('type')=='text'), '')\n"
+        "                if c and not c.startswith('[Request interrupted'):\n"
+        "                    prompt = c[:200]; break\n"
+        "    except: continue\n"
+        "    if not prompt: continue\n"
+        "    st = os.stat(f)\n"
+        "    with open(f) as cf: mc = sum(1 for _ in cf)\n"
+        "    from datetime import datetime, timezone\n"
+        "    mod = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+        "    ie = idx.get(bn, {})\n"
+        "    summary = ie.get('summary', '')\n"
+        "    results.append({'sessionId': bn, 'summary': summary, 'firstPrompt': prompt,\n"
+        "                    'messageCount': ie.get('messageCount', mc), 'modified': mod,\n"
+        "                    'created': ie.get('created', mod)})\n"
+        "results.sort(key=lambda x: x['modified'], reverse=True)\n"
+        "print(json.dumps(results))\n"
+    );
+
     auto *process = new QProcess(this);
+    ensureSshAuthSock(process);
     QPointer<ClaudeSessionRegistry> guard(this);
 
+    auto *timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    connect(timeout, &QTimer::timeout, process, [process]() {
+        if (process->state() != QProcess::NotRunning) {
+            qDebug() << "readRemoteConversationsAsync: timeout, killing process";
+            process->kill();
+        }
+    });
+
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [process, callback, guard](int exitCode, QProcess::ExitStatus) {
+            this, [process, callback, guard, timeout](int exitCode, QProcess::ExitStatus) {
+        timeout->stop();
         QList<ClaudeConversation> conversations;
-        if (exitCode == 0 && guard) {
+        if (guard) {
             QByteArray data = process->readAllStandardOutput();
             QJsonParseError error;
             QJsonDocument doc = QJsonDocument::fromJson(data, &error);
@@ -555,6 +682,9 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
                     [](const ClaudeConversation &a, const ClaudeConversation &b) {
                         return a.modified > b.modified;
                     });
+            } else {
+                qDebug() << "readRemoteConversationsAsync: JSON parse error:" << error.errorString()
+                         << "exitCode:" << exitCode << "output:" << data.left(200);
             }
         }
         if (callback) {
@@ -564,6 +694,176 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
     });
 
     process->start(QStringLiteral("ssh"), args);
+    if (process->waitForStarted(5000)) {
+        process->write(pyScript);
+        process->closeWriteChannel();
+        timeout->start(15000);
+    } else {
+        qDebug() << "readRemoteConversationsAsync: SSH process failed to start";
+        if (callback) {
+            callback({});
+        }
+        process->deleteLater();
+    }
+}
+
+void ClaudeSessionRegistry::discoverAllRemoteConversationsAsync(
+    const QString &sshTarget, int sshPort,
+    std::function<void(const QList<ClaudeConversation> &)> callback)
+{
+    if (sshTarget.isEmpty()) {
+        if (callback) {
+            callback({});
+        }
+        return;
+    }
+
+    // Python script scans ALL projects under ~/.claude/projects/
+    // Returns conversations with projectDir (hashed name) and reconstructed projectPath
+    QString remoteCmd = QStringLiteral("python3 -");
+
+    QStringList args;
+    args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes")
+         << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=10");
+    if (sshPort != 22 && sshPort > 0) {
+        args << QStringLiteral("-p") << QString::number(sshPort);
+    }
+    args << sshTarget << remoteCmd;
+
+    static const QByteArray pyScript = QByteArrayLiteral(
+        "import json, os, glob, sys\n"
+        "from datetime import datetime, timezone\n"
+        "def rpath(h):\n"
+        "    if not h.startswith('-'): return h\n"
+        "    segs = h[1:].split('-')\n"
+        "    p = '/'\n"
+        "    i = 0\n"
+        "    while i < len(segs):\n"
+        "        ok = False\n"
+        "        for j in range(i+1, len(segs)+1):\n"
+        "            c = os.path.join(p, '-'.join(segs[i:j]))\n"
+        "            if os.path.isdir(c):\n"
+        "                p = c; i = j; ok = True; break\n"
+        "        if not ok:\n"
+        "            p = os.path.join(p, '-'.join(segs[i:]))\n"
+        "            break\n"
+        "    return p\n"
+        "base = os.path.join(os.path.expanduser('~'), '.claude/projects')\n"
+        "if not os.path.isdir(base): print('[]'); exit()\n"
+        "results = []\n"
+        "for proj in os.listdir(base):\n"
+        "    d = os.path.join(base, proj)\n"
+        "    if not os.path.isdir(d): continue\n"
+        "    orig = rpath(proj)\n"
+        "    idx = {}\n"
+        "    ix = os.path.join(d, 'sessions-index.json')\n"
+        "    if os.path.exists(ix):\n"
+        "        try:\n"
+        "            with open(ix) as xf: raw = json.load(xf)\n"
+        "            entries = raw if isinstance(raw, list) else raw.get('entries', [])\n"
+        "            for e in entries:\n"
+        "                sid = e.get('sessionId', '')\n"
+        "                if sid: idx[sid] = e\n"
+        "        except: pass\n"
+        "    for f in sorted(glob.glob(os.path.join(d, '*.jsonl'))):\n"
+        "        bn = os.path.splitext(os.path.basename(f))[0]\n"
+        "        if bn.startswith('agent-'): continue\n"
+        "        prompt = ''\n"
+        "        try:\n"
+        "            with open(f) as fh:\n"
+        "                for i, line in enumerate(fh):\n"
+        "                    if i >= 10: break\n"
+        "                    obj = json.loads(line)\n"
+        "                    if obj.get('type') != 'user': continue\n"
+        "                    m = obj.get('message', {})\n"
+        "                    c = m.get('content', '')\n"
+        "                    if isinstance(c, list):\n"
+        "                        c = next((p['text'] for p in c if p.get('type')=='text'), '')\n"
+        "                    if c and not c.startswith('[Request interrupted'):\n"
+        "                        prompt = c[:200]; break\n"
+        "        except: continue\n"
+        "        if not prompt: continue\n"
+        "        try:\n"
+        "            st = os.stat(f)\n"
+        "            with open(f) as cf: mc = sum(1 for _ in cf)\n"
+        "        except: continue\n"
+        "        mod = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+        "        ie = idx.get(bn, {})\n"
+        "        summary = ie.get('summary', '')\n"
+        "        results.append({'sessionId': bn, 'summary': summary, 'firstPrompt': prompt,\n"
+        "                        'messageCount': ie.get('messageCount', mc), 'modified': mod,\n"
+        "                        'created': ie.get('created', mod),\n"
+        "                        'projectDir': proj, 'projectPath': orig})\n"
+        "results.sort(key=lambda x: x['modified'], reverse=True)\n"
+        "print(json.dumps(results))\n"
+    );
+
+    auto *process = new QProcess(this);
+    ensureSshAuthSock(process);
+    QPointer<ClaudeSessionRegistry> guard(this);
+
+    // Kill process after 30 seconds to avoid infinite hangs
+    auto *timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    connect(timeout, &QTimer::timeout, process, [process]() {
+        if (process->state() != QProcess::NotRunning) {
+            qDebug() << "discoverAllRemoteConversationsAsync: timeout, killing process";
+            process->kill();
+        }
+    });
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [process, callback, guard, timeout](int exitCode, QProcess::ExitStatus) {
+        timeout->stop();
+        QList<ClaudeConversation> conversations;
+        if (guard) {
+            QByteArray data = process->readAllStandardOutput();
+            QJsonParseError error;
+            QJsonDocument doc = QJsonDocument::fromJson(data, &error);
+            if (error.error == QJsonParseError::NoError && doc.isArray()) {
+                for (const QJsonValue &value : doc.array()) {
+                    if (!value.isObject()) {
+                        continue;
+                    }
+                    QJsonObject obj = value.toObject();
+                    ClaudeConversation conv;
+                    conv.sessionId = obj.value(QStringLiteral("sessionId")).toString();
+                    conv.summary = obj.value(QStringLiteral("summary")).toString();
+                    conv.firstPrompt = obj.value(QStringLiteral("firstPrompt")).toString();
+                    conv.messageCount = obj.value(QStringLiteral("messageCount")).toInt();
+                    conv.created = QDateTime::fromString(
+                        obj.value(QStringLiteral("created")).toString(), Qt::ISODate);
+                    conv.modified = QDateTime::fromString(
+                        obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
+                    conv.projectPath = obj.value(QStringLiteral("projectPath")).toString();
+                    if (!conv.sessionId.isEmpty()) {
+                        conversations.append(conv);
+                    }
+                }
+            } else {
+                qDebug() << "discoverAllRemoteConversationsAsync: JSON parse error:"
+                         << error.errorString() << "exitCode:" << exitCode
+                         << "stderr:" << process->readAllStandardError().left(200);
+            }
+        }
+        if (callback) {
+            callback(conversations);
+        }
+        process->deleteLater();
+    });
+
+    process->start(QStringLiteral("ssh"), args);
+    if (process->waitForStarted(5000)) {
+        process->write(pyScript);
+        process->closeWriteChannel();
+        timeout->start(30000);
+    } else {
+        qDebug() << "discoverAllRemoteConversationsAsync: SSH process failed to start";
+        if (callback) {
+            callback({});
+        }
+        process->deleteLater();
+    }
 }
 
 void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
@@ -584,9 +884,10 @@ void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
         args << QStringLiteral("-p") << QString::number(sshPort);
     }
     args << sshTarget
-         << QStringLiteral("tmux list-sessions -F '#{session_name}:#{session_id}:#{session_attached}:#{session_windows}:#{session_created}' 2>/dev/null");
+         << QStringLiteral("tmux list-sessions -F '#{session_name}:#{session_id}:#{session_attached}:#{session_windows}:#{session_created}:#{pane_current_path}' 2>/dev/null");
 
     auto *process = new QProcess(this);
+    ensureSshAuthSock(process);
     QPointer<ClaudeSessionRegistry> guard(this);
 
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -608,6 +909,11 @@ void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
                 info.attached = parts.size() > 2 && parts[2].trimmed() != QStringLiteral("0");
                 info.windows = parts.size() > 3 ? parts[3].trimmed().toInt() : 1;
                 info.created = parts.size() > 4 ? parts[4].trimmed() : QString();
+                // paneCurrentPath is the last field and may contain colons — rejoin
+                if (parts.size() > 5) {
+                    QStringList pathParts = parts.mid(5);
+                    info.paneCurrentPath = pathParts.join(QLatin1Char(':')).trimmed();
+                }
 
                 if (konsolaiOnly && !info.name.startsWith(QStringLiteral("konsolai-"))) {
                     continue;
@@ -622,6 +928,13 @@ void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
     });
 
     process->start(QStringLiteral("ssh"), args);
+    if (!process->waitForStarted(5000)) {
+        qDebug() << "discoverRemoteTmuxSessionsAsync: SSH process failed to start";
+        if (callback) {
+            callback({});
+        }
+        process->deleteLater();
+    }
 }
 
 QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString &searchRoot) const

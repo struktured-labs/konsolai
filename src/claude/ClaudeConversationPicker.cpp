@@ -7,6 +7,7 @@
 #include "ClaudeSessionRegistry.h"
 
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
@@ -32,12 +33,30 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
     auto *label = new QLabel(QStringLiteral("Select a previous conversation to resume, or start fresh:"), this);
     layout->addWidget(label);
 
+    // Check if any conversations have projectPath set (multi-project mode)
+    bool hasProjectPaths = false;
+    for (const ClaudeConversation &conv : conversations) {
+        if (!conv.projectPath.isEmpty()) {
+            hasProjectPaths = true;
+            break;
+        }
+    }
+
     // Tree widget with conversation list
     m_tree = new QTreeWidget(this);
-    m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Messages"), QStringLiteral("Last Modified")});
+    if (hasProjectPaths) {
+        m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Project"), QStringLiteral("Messages"), QStringLiteral("Last Modified")});
+    } else {
+        m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Messages"), QStringLiteral("Last Modified")});
+    }
     m_tree->setRootIsDecorated(false);
     m_tree->setAlternatingRowColors(true);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    // Column indices shift when project column is present
+    const int colProject = hasProjectPaths ? 1 : -1;
+    const int colMessages = hasProjectPaths ? 2 : 1;
+    const int colModified = hasProjectPaths ? 3 : 2;
 
     for (const ClaudeConversation &conv : conversations) {
         auto *item = new QTreeWidgetItem(m_tree);
@@ -50,21 +69,36 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
         if (displayText.isEmpty()) {
             displayText = QStringLiteral("(no summary)");
         }
+        // Collapse whitespace/newlines
+        displayText = displayText.simplified();
         // Truncate long summaries for display
         if (displayText.length() > 120) {
             displayText = displayText.left(117) + QStringLiteral("...");
         }
 
         item->setText(0, displayText);
-        item->setText(1, QString::number(conv.messageCount));
-        item->setText(2, conv.modified.toString(QStringLiteral("yyyy-MM-dd hh:mm")));
+        if (hasProjectPaths) {
+            // Show last directory component for readability
+            QString projectLabel = QDir(conv.projectPath).dirName();
+            if (projectLabel.isEmpty() || projectLabel == QStringLiteral(".")) {
+                projectLabel = conv.projectPath;
+            }
+            item->setText(colProject, projectLabel);
+            item->setToolTip(colProject, conv.projectPath);
+        }
+        item->setText(colMessages, QString::number(conv.messageCount));
+        item->setText(colModified, conv.modified.toString(QStringLiteral("yyyy-MM-dd hh:mm")));
         item->setData(0, Qt::UserRole, conv.sessionId);
+        item->setData(0, Qt::UserRole + 1, conv.projectPath);
     }
 
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    if (hasProjectPaths) {
+        m_tree->header()->setSectionResizeMode(colProject, QHeaderView::ResizeToContents);
+    }
+    m_tree->header()->setSectionResizeMode(colMessages, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(colModified, QHeaderView::ResizeToContents);
 
     // Select first item by default
     if (m_tree->topLevelItemCount() > 0) {
@@ -85,6 +119,7 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         if (item) {
             m_selectedId = item->data(0, Qt::UserRole).toString();
+            m_selectedProjectPath = item->data(0, Qt::UserRole + 1).toString();
             accept();
         }
     });
@@ -93,16 +128,18 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
         auto *item = m_tree->currentItem();
         if (item) {
             m_selectedId = item->data(0, Qt::UserRole).toString();
+            m_selectedProjectPath = item->data(0, Qt::UserRole + 1).toString();
         }
         accept();
     });
 
     connect(freshButton, &QPushButton::clicked, this, [this]() {
         m_selectedId.clear();
-        accept();
+        m_selectedProjectPath.clear();
+        reject();
     });
 
-    resize(600, 400);
+    resize(hasProjectPaths ? 800 : 600, 400);
 }
 
 QString ClaudeConversationPicker::pick(const QList<ClaudeConversation> &conversations, QWidget *parent)

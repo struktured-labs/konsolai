@@ -44,6 +44,15 @@ public:
     }
 
     /**
+     * Get the project path for the selected conversation (set by all-project discovery).
+     * Empty when conversations are from a single project.
+     */
+    QString selectedProjectPath() const
+    {
+        return m_selectedProjectPath;
+    }
+
+    /**
      * Show the picker and return the chosen conversation UUID.
      *
      * @param conversations List of available conversations
@@ -58,6 +67,7 @@ private:
 
     QTreeWidget *m_tree = nullptr;
     QString m_selectedId;
+    QString m_selectedProjectPath;
 };
 
 } // namespace Konsolai

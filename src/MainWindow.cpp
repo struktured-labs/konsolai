@@ -519,9 +519,24 @@ void MainWindow::setupActions()
 
             if (!exists) {
                 guard->_sessionPanel->markExpired(sessionName);
-                KMessageBox::information(guard,
-                                         i18n("The session '%1' no longer exists. It has been moved to Closed. Double-click to restart.", sessionName),
-                                         i18n("Session Not Found"));
+
+                // Offer to restart with a fresh tmux session instead of just showing an error
+                QString sid = guard->_sessionPanel->sessionIdForName(sessionName);
+                if (!sid.isEmpty()) {
+                    auto answer = QMessageBox::question(guard,
+                                                        i18n("Session Ended"),
+                                                        i18n("The tmux session for '%1' no longer exists.\n\n"
+                                                             "Restart with a fresh session?", sessionName),
+                                                        QMessageBox::Yes | QMessageBox::No,
+                                                        QMessageBox::Yes);
+                    if (answer == QMessageBox::Yes) {
+                        guard->_sessionPanel->unarchiveSession(sid);
+                    }
+                } else {
+                    KMessageBox::information(guard,
+                                             i18n("The session '%1' no longer exists.", sessionName),
+                                             i18n("Session Not Found"));
+                }
                 return;
             }
 
@@ -1048,6 +1063,12 @@ void MainWindow::newTab()
     // Fall back to default profile if no Claude profile exists
     if (!profile) {
         profile = ProfileManager::instance()->defaultProfile();
+    }
+
+    // Claude profiles go through the wizard for directory/resume selection
+    if (profile->property<bool>(Profile::ClaudeEnabled)) {
+        newFromProfile(profile);
+        return;
     }
 
     createSession(profile, activeSessionDir());

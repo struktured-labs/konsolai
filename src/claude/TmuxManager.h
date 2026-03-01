@@ -41,6 +41,7 @@ public:
         bool attached;      // Whether session is currently attached
         int windows;        // Number of windows in session
         QString created;    // Creation timestamp
+        QString paneCurrentPath; // Working directory of the active pane
     };
 
     explicit TmuxManager(QObject *parent = nullptr);

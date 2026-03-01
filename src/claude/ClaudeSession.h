@@ -326,6 +326,13 @@ public:
     QString sessionId() const { return m_sessionId; }
 
     /**
+     * Override the generated session ID BEFORE run() is called.
+     * Rebuilds session name, recreates the hook handler, and updates the tab title.
+     * Used when unarchiving a session to preserve identity across close/reopen cycles.
+     */
+    void setSessionId(const QString &id);
+
+    /**
      * Get the profile name this session was created with
      */
     QString profileName() const { return m_profileName; }

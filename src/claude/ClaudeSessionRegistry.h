@@ -15,6 +15,7 @@
 #include <QHash>
 #include <QList>
 #include <QObject>
+#include <QProcess>
 #include <QString>
 #include <QTimer>
 
@@ -33,6 +34,7 @@ struct KONSOLEPRIVATE_EXPORT ClaudeConversation {
     int messageCount = 0;
     QDateTime created;
     QDateTime modified;
+    QString projectPath; // Original project path (set by all-project discovery)
 };
 
 /**
@@ -170,6 +172,12 @@ public:
     static QString hashedProjectPath(const QString &projectPath);
 
     /**
+     * Ensure SSH_AUTH_SOCK is set in the process environment.
+     * Desktop-launched apps may not inherit the SSH agent socket.
+     */
+    static void ensureSshAuthSock(QProcess *process);
+
+    /**
      * Read Claude CLI conversation history for a project on a remote SSH host.
      * Async: runs ssh to read sessions-index.json on the remote.
      *
@@ -193,6 +201,17 @@ public:
     void discoverRemoteTmuxSessionsAsync(const QString &sshTarget, int sshPort,
                                           bool konsolaiOnly,
                                           std::function<void(const QList<TmuxManager::SessionInfo> &)> callback);
+
+    /**
+     * Discover ALL Claude CLI conversations on a remote host, across all projects.
+     * Scans all .jsonl files under ~/.claude/projects/ and returns conversations with projectPath set.
+     *
+     * @param sshTarget SSH target ("user@host" or ssh config name)
+     * @param sshPort SSH port
+     * @param callback Called with the conversation list (projectPath set per entry)
+     */
+    void discoverAllRemoteConversationsAsync(const QString &sshTarget, int sshPort,
+                                              std::function<void(const QList<ClaudeConversation> &)> callback);
 
     /**
      * Discover Claude sessions on a remote SSH host asynchronously.

@@ -9,6 +9,7 @@
 #include "konsoleprivate_export.h"
 
 #include "ClaudeSession.h"
+#include "ClaudeSessionRegistry.h"
 
 #include <QClipboard>
 #include <QDateTime>
@@ -68,6 +69,12 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     int budgetTimeLimitMinutes = 0;
     double budgetCostCeilingUSD = 0.0;
     quint64 budgetTokenCeiling = 0;
+
+    // Claude conversation UUID for --resume across close/reopen cycles
+    QString lastResumeSessionId;
+
+    // Human-readable description (first prompt or user-set label)
+    QString description;
 
     // Persisted subagent/subprocess snapshots (survive restart)
     QVector<SubagentInfo> subagents;
@@ -177,6 +184,12 @@ public Q_SLOTS:
      * Mark a session as expired (dead tmux backend) and auto-archive it
      */
     void markExpired(const QString &sessionName);
+
+    /**
+     * Find session ID by tmux session name.
+     * Returns empty string if not found.
+     */
+    QString sessionIdForName(const QString &sessionName) const;
 
     /**
      * Dismiss a session (soft delete — hides from normal view, metadata retained)
@@ -297,8 +310,8 @@ private:
     // Cached live session names from last async tmux query
     QSet<QString> m_cachedLiveNames;
 
-    // Cache conversation summaries to avoid disk I/O during tree rebuilds
-    QHash<QString, QString> m_conversationSummaryCache; // workDir → summary
+    // Cache conversations per working directory to avoid disk I/O during tree rebuilds
+    QHash<QString, QList<ClaudeConversation>> m_conversationCache; // workDir → conversations
 
     // Per-session toggle: sessions in this set hide completed (NotRunning) agents
     QSet<QString> m_hideCompletedAgents;
