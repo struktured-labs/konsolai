@@ -133,6 +133,10 @@ bool ClaudeSessionWizard::shouldInitGit() const
 
 QString ClaudeSessionWizard::worktreeBranch() const
 {
+    // Worktrees are local-only — never for remote SSH sessions
+    if (isRemoteSession()) {
+        return QString();
+    }
     if (!m_gitModeCombo || m_gitModeCombo->currentIndex() != GitWorktree) {
         return QString();
     }
