@@ -1028,6 +1028,118 @@ void SessionManagerPanelTest::testMetadataSubagentRoundTrip()
     }
 }
 
+// ============================================================
+// Remote session registration and restoration
+// ============================================================
+
+void SessionManagerPanelTest::testRegisterSessionCapturesRemoteFields()
+{
+    // registerSession() should capture isRemote/sshHost/sshUsername/sshPort
+    // from the ClaudeSession object into metadata
+    SessionManagerPanel panel;
+
+    auto *session = new ClaudeSession(QStringLiteral("Claude"), QStringLiteral("/home/struktured/projects/fluxit"), this);
+    session->setIsRemote(true);
+    session->setSshHost(QStringLiteral("blackmage.io"));
+    session->setSshUsername(QStringLiteral("struktured"));
+    session->setSshPort(22);
+
+    panel.registerSession(session);
+
+    QList<SessionMetadata> all = panel.allSessions();
+    QCOMPARE(all.size(), 1);
+    QVERIFY(all[0].isRemote);
+    QCOMPARE(all[0].sshHost, QStringLiteral("blackmage.io"));
+    QCOMPARE(all[0].sshUsername, QStringLiteral("struktured"));
+    QCOMPARE(all[0].sshPort, 22);
+
+    delete session;
+}
+
+void SessionManagerPanelTest::testUnarchiveEmitsRemoteFields()
+{
+    // unarchiveSession() should emit signal with SSH metadata for remote sessions
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("una11111"), QStringLiteral("konsolai-test-una11111"));
+    s[QStringLiteral("isRemote")] = true;
+    s[QStringLiteral("sshHost")] = QStringLiteral("blackmage.io");
+    s[QStringLiteral("sshUsername")] = QStringLiteral("struktured");
+    s[QStringLiteral("sshPort")] = 2222;
+    s[QStringLiteral("isArchived")] = false;
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QSignalSpy spy(&panel, &SessionManagerPanel::unarchiveRequested);
+
+    panel.unarchiveSession(QStringLiteral("una11111"));
+
+    QCOMPARE(spy.count(), 1);
+    QList<QVariant> args = spy.at(0);
+    QCOMPARE(args.at(0).toString(), QStringLiteral("una11111")); // sessionId
+    QCOMPARE(args.at(1).toString(), QStringLiteral("/home/user/project")); // workingDirectory
+    QCOMPARE(args.at(2).toBool(), true); // isRemote
+    QCOMPARE(args.at(3).toString(), QStringLiteral("blackmage.io")); // sshHost
+    QCOMPARE(args.at(4).toString(), QStringLiteral("struktured")); // sshUsername
+    QCOMPARE(args.at(5).toInt(), 2222); // sshPort
+}
+
+void SessionManagerPanelTest::testUnarchiveLocalSessionEmitsNoRemoteFields()
+{
+    // unarchiveSession() for a local session should emit isRemote=false
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("loc11111"), QStringLiteral("konsolai-test-loc11111")));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel panel;
+    QSignalSpy spy(&panel, &SessionManagerPanel::unarchiveRequested);
+
+    panel.unarchiveSession(QStringLiteral("loc11111"));
+
+    QCOMPARE(spy.count(), 1);
+    QList<QVariant> args = spy.at(0);
+    QCOMPARE(args.at(2).toBool(), false); // isRemote
+    QVERIFY(args.at(3).toString().isEmpty()); // sshHost empty
+}
+
+void SessionManagerPanelTest::testRegisterRemoteSessionRoundTrip()
+{
+    // Register a remote session → save → reload → verify remote fields persisted
+    {
+        SessionManagerPanel panel;
+
+        // Parent to test, not panel, to avoid SSH cleanup on panel destruct
+        auto *session = new ClaudeSession(QStringLiteral("Claude"), QStringLiteral("/home/struktured/projects/fluxit"), this);
+        session->setIsRemote(true);
+        session->setSshHost(QStringLiteral("dev.example.com"));
+        session->setSshUsername(QStringLiteral("deployer"));
+        session->setSshPort(2222);
+
+        panel.registerSession(session);
+
+        // Verify in-memory
+        QList<SessionMetadata> all = panel.allSessions();
+        QCOMPARE(all.size(), 1);
+        QVERIFY(all[0].isRemote);
+        QCOMPARE(all[0].sshHost, QStringLiteral("dev.example.com"));
+
+        // Delete session before panel to avoid SSH cleanup hanging
+        delete session;
+
+        // Panel destructor saves metadata
+    }
+
+    // Reload from disk
+    SessionManagerPanel panel2;
+    QList<SessionMetadata> all = panel2.allSessions();
+    QCOMPARE(all.size(), 1);
+    QVERIFY(all[0].isRemote);
+    QCOMPARE(all[0].sshHost, QStringLiteral("dev.example.com"));
+    QCOMPARE(all[0].sshUsername, QStringLiteral("deployer"));
+    QCOMPARE(all[0].sshPort, 2222);
+    QCOMPARE(all[0].workingDirectory, QStringLiteral("/home/struktured/projects/fluxit"));
+}
+
 QTEST_MAIN(SessionManagerPanelTest)
 
 #include "moc_SessionManagerPanelTest.cpp"

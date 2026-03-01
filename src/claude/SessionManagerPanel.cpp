@@ -75,7 +75,14 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
     setupUi();
     loadMetadata();
     cleanupStaleSockets(); // async — returns immediately
+    refreshRemoteTmuxSessions(); // async SSH query for remote session liveness
     refresh(); // async — returns immediately
+
+    // Periodically refresh remote tmux session liveness (every 60s)
+    m_remoteTmuxTimer = new QTimer(this);
+    m_remoteTmuxTimer->setInterval(60000);
+    connect(m_remoteTmuxTimer, &QTimer::timeout, this, &SessionManagerPanel::refreshRemoteTmuxSessions);
+    m_remoteTmuxTimer->start();
 }
 
 SessionManagerPanel::~SessionManagerPanel()
@@ -339,6 +346,11 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         meta.yoloMode = session->yoloMode();
         meta.doubleYoloMode = session->doubleYoloMode();
         meta.tripleYoloMode = session->tripleYoloMode();
+        // Capture remote SSH fields so session can be restored after restart
+        meta.isRemote = session->isRemote();
+        meta.sshHost = session->sshHost();
+        meta.sshUsername = session->sshUsername();
+        meta.sshPort = session->sshPort();
         m_metadata[sessionId] = meta;
     } else {
         // Session was archived/expired, now unarchived - restore yolo mode from metadata
@@ -791,8 +803,8 @@ void SessionManagerPanel::unarchiveSession(const QString &sessionId)
 
     const auto &meta = m_metadata[sessionId];
 
-    // Emit signal to create new session with same ID
-    Q_EMIT unarchiveRequested(sessionId, meta.workingDirectory);
+    // Emit signal to create new session with same ID (including remote SSH fields)
+    Q_EMIT unarchiveRequested(sessionId, meta.workingDirectory, meta.isRemote, meta.sshHost, meta.sshUsername, meta.sshPort);
 }
 
 void SessionManagerPanel::markExpired(const QString &sessionName)
@@ -1008,7 +1020,7 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         if (isRemoteItem) {
             Q_EMIT remoteSessionRequested(remoteHost, remoteUser, remotePort, workDir);
         } else {
-            Q_EMIT unarchiveRequested(sessionId, workDir);
+            Q_EMIT unarchiveRequested(sessionId, workDir, false, QString(), QString(), 22);
         }
         return;
     }
@@ -1032,8 +1044,12 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         // Closed session — tmux is dead, recreate like unarchive
         unarchiveSession(sessionId);
     } else {
-        // Detached session — reattach
-        Q_EMIT attachRequested(meta.sessionName);
+        // Detached session — reattach (remote or local)
+        if (meta.isRemote) {
+            Q_EMIT remoteAttachRequested(meta.sshHost, meta.sshUsername, meta.sshPort, meta.workingDirectory, meta.sessionName);
+        } else {
+            Q_EMIT attachRequested(meta.sessionName);
+        }
     }
 }
 
@@ -1300,7 +1316,7 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 }
                 Q_EMIT remoteSessionRequested(host, user, port, workDir);
             } else {
-                Q_EMIT unarchiveRequested(sessionId, workDir);
+                Q_EMIT unarchiveRequested(sessionId, workDir, false, QString(), QString(), 22);
             }
         });
 
@@ -1500,10 +1516,18 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 unarchiveSession(sessionId);
             });
         } else if (!isActive) {
-            QAction *attachAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach"));
-            connect(attachAction, &QAction::triggered, this, [this, meta]() {
-                Q_EMIT attachRequested(meta.sessionName);
-            });
+            if (meta.isRemote) {
+                // Remote detached session — reattach via SSH
+                QAction *attachAction = menu.addAction(QIcon::fromTheme(QStringLiteral("network-connect")), i18n("Attach (SSH)"));
+                connect(attachAction, &QAction::triggered, this, [this, meta]() {
+                    Q_EMIT remoteAttachRequested(meta.sshHost, meta.sshUsername, meta.sshPort, meta.workingDirectory, meta.sessionName);
+                });
+            } else {
+                QAction *attachAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach"));
+                connect(attachAction, &QAction::triggered, this, [this, meta]() {
+                    Q_EMIT attachRequested(meta.sessionName);
+                });
+            }
         }
 
         menu.addSeparator();
@@ -1691,6 +1715,68 @@ void SessionManagerPanel::updateTreeWidget()
     });
 }
 
+void SessionManagerPanel::refreshRemoteTmuxSessions()
+{
+    // Clear stale cache — will be repopulated by async SSH responses
+    m_cachedRemoteLiveNames.clear();
+
+    // Collect unique SSH hosts from metadata
+    QMap<QString, QPair<QString, int>> hostCredentials; // host → (username, port)
+    for (const auto &meta : std::as_const(m_metadata)) {
+        if (meta.isRemote && !meta.sshHost.isEmpty()) {
+            if (!hostCredentials.contains(meta.sshHost)) {
+                hostCredentials[meta.sshHost] = {meta.sshUsername, meta.sshPort};
+            }
+        }
+    }
+
+    if (hostCredentials.isEmpty()) {
+        return;
+    }
+
+    // Query each unique host asynchronously
+    for (auto it = hostCredentials.constBegin(); it != hostCredentials.constEnd(); ++it) {
+        const QString host = it.key();
+        const QString user = it.value().first;
+        const int port = it.value().second;
+
+        auto *proc = new QProcess(this);
+        QStringList args = {QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+                            QStringLiteral("-o"), QStringLiteral("ConnectTimeout=5")};
+        if (port != 22) {
+            args << QStringLiteral("-p") << QString::number(port);
+        }
+        QString userHost = user.isEmpty() ? host : QStringLiteral("%1@%2").arg(user, host);
+        args << userHost << QStringLiteral("tmux list-sessions -F '#{session_name}' 2>/dev/null | grep ^konsolai-");
+
+        QPointer<SessionManagerPanel> guard(this);
+        connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [guard, proc](int exitCode, QProcess::ExitStatus) {
+                    proc->deleteLater();
+                    if (!guard) {
+                        return;
+                    }
+                    if (exitCode != 0) {
+                        return; // SSH failed or no sessions — keep existing cache
+                    }
+                    QString output = QString::fromUtf8(proc->readAllStandardOutput());
+                    QSet<QString> remoteNames;
+                    const auto lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+                    for (const auto &line : lines) {
+                        QString name = line.trimmed();
+                        if (!name.isEmpty()) {
+                            remoteNames.insert(name);
+                        }
+                    }
+                    // Merge into cached remote live names (accumulate across hosts)
+                    guard->m_cachedRemoteLiveNames.unite(remoteNames);
+                    guard->scheduleTreeUpdate();
+                });
+
+        proc->start(QStringLiteral("ssh"), args);
+    }
+}
+
 void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames)
 {
     // Invalidate conversation cache so summaries refresh from disk
@@ -1729,7 +1815,8 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     // Priority: Dismissed > Archived > Pinned > Active (has tab) > Detached (tmux alive) > Closed (tmux dead)
     for (const auto &meta : sortedMeta) {
         bool isActive = m_activeSessions.contains(meta.sessionId);
-        bool tmuxAlive = liveNames.contains(meta.sessionName);
+        bool tmuxAlive = liveNames.contains(meta.sessionName)
+            || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
         bool wasClosed = m_explicitlyClosed.contains(meta.sessionId);
 
         // Clear from explicitly-closed set once tmux is actually dead

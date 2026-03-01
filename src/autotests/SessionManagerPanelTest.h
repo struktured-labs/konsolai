@@ -81,6 +81,12 @@ private Q_SLOTS:
     void testMetadataPromptLabelsPersistence();
     void testMetadataSubagentEmptyNotSerialized();
     void testMetadataSubagentRoundTrip();
+
+    // Remote session registration and restoration
+    void testRegisterSessionCapturesRemoteFields();
+    void testUnarchiveEmitsRemoteFields();
+    void testUnarchiveLocalSessionEmitsNoRemoteFields();
+    void testRegisterRemoteSessionRoundTrip();
 };
 
 }

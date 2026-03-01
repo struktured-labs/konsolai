@@ -19,6 +19,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QProcess>
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
@@ -219,6 +220,11 @@ Q_SIGNALS:
     void attachRequested(const QString &sessionName);
 
     /**
+     * Emitted when user wants to reattach to a remote SSH tmux session
+     */
+    void remoteAttachRequested(const QString &sshHost, const QString &sshUsername, int sshPort, const QString &workDir, const QString &tmuxSessionName);
+
+    /**
      * Emitted when user wants to focus/select the tab for an active session
      */
     void focusSessionRequested(ClaudeSession *session);
@@ -231,7 +237,7 @@ Q_SIGNALS:
     /**
      * Emitted when user wants to unarchive and start a session
      */
-    void unarchiveRequested(const QString &sessionId, const QString &workingDirectory);
+    void unarchiveRequested(const QString &sessionId, const QString &workingDirectory, bool isRemote, const QString &sshHost, const QString &sshUsername, int sshPort);
 
     /**
      * Emitted when user wants to open a remote SSH session
@@ -313,6 +319,11 @@ private:
 
     // Cached live session names from last async tmux query
     QSet<QString> m_cachedLiveNames;
+
+    // Cached remote live session names (queried via SSH, refreshed less frequently)
+    QSet<QString> m_cachedRemoteLiveNames;
+    QTimer *m_remoteTmuxTimer = nullptr;
+    void refreshRemoteTmuxSessions();
 
     // Cache conversations per working directory to avoid disk I/O during tree rebuilds
     QHash<QString, QList<ClaudeConversation>> m_conversationCache; // workDir → conversations

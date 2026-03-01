@@ -659,7 +659,8 @@ void MainWindow::setupActions()
     // Set initial values
     updateUsageAggregates();
 
-    connect(_sessionPanel, &Konsolai::SessionManagerPanel::unarchiveRequested, this, [this](const QString &sessionId, const QString &workingDirectory) {
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::unarchiveRequested, this, [this](const QString &sessionId, const QString &workingDirectory, bool isRemote, const QString &sshHost, const QString &sshUsername, int sshPort) {
+        Q_UNUSED(sessionId);
         // Create a new session with the archived session's working directory
         // Get the Claude profile
         Profile::Ptr claudeProfile;
@@ -688,9 +689,20 @@ void MainWindow::setupActions()
         if (!resumeId.isEmpty()) {
             claudeSession->setResumeSessionId(resumeId);
         }
+
+        // Restore remote SSH fields for remote sessions
+        if (isRemote) {
+            claudeSession->setIsRemote(true);
+            claudeSession->setSshHost(sshHost);
+            claudeSession->setSshUsername(sshUsername);
+            claudeSession->setSshPort(sshPort);
+        }
+
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
         // setSessionProfile overrides initialWorkingDirectory with profile default — restore it
-        claudeSession->setInitialWorkingDirectory(workingDirectory);
+        if (!isRemote) {
+            claudeSession->setInitialWorkingDirectory(workingDirectory);
+        }
 
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
@@ -734,6 +746,46 @@ void MainWindow::setupActions()
         claudeSession->setSshPort(sshPort);
         SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
         claudeSession->setInitialWorkingDirectory(workDir);
+
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
+
+        _sessionPanel->registerSession(claudeSession);
+
+        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+        if (registry) {
+            registry->registerSession(claudeSession);
+        }
+    });
+
+    // Reattach to a live remote tmux session from the session panel
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::remoteAttachRequested,
+            this, [this](const QString &sshHost, const QString &sshUsername, int sshPort, const QString &workDir, const QString &tmuxSessionName) {
+        Profile::Ptr claudeProfile;
+        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+        for (const Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+
+        if (!claudeProfile) {
+            qWarning() << "No Claude profile found for remote attach";
+            return;
+        }
+
+        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
+        claudeSession->setIsRemote(true);
+        claudeSession->setSshHost(sshHost);
+        claudeSession->setSshUsername(sshUsername);
+        claudeSession->setSshPort(sshPort);
+        claudeSession->setExistingRemoteTmuxSession(tmuxSessionName);
+        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
         auto *view = _viewManager->createView(claudeSession);
         _viewManager->activeContainer()->addView(view);
