@@ -16,6 +16,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -277,8 +278,11 @@ private:
     void ensureHooksConfigured(ClaudeSession *session);
     SessionMetadata *findMetadata(const QString &sessionId);
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
+    void applyFilter(const QString &text);
 
     QTreeWidget *m_treeWidget = nullptr;
+    QLabel *m_emptyStateLabel = nullptr;
+    QLineEdit *m_filterEdit = nullptr;
     QPushButton *m_newSessionButton = nullptr;
     QPushButton *m_collapseButton = nullptr;
     QTreeWidgetItem *m_pinnedCategory = nullptr;

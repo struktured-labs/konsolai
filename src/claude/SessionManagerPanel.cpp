@@ -117,6 +117,15 @@ void SessionManagerPanel::setupUi()
 
     layout->addLayout(headerLayout);
 
+    // Search/filter bar
+    m_filterEdit = new QLineEdit(this);
+    m_filterEdit->setPlaceholderText(i18n("Filter sessions..."));
+    m_filterEdit->setClearButtonEnabled(true);
+    m_filterEdit->addAction(QIcon::fromTheme(QStringLiteral("edit-find")), QLineEdit::LeadingPosition);
+    m_filterEdit->setContentsMargins(4, 0, 4, 0);
+    connect(m_filterEdit, &QLineEdit::textChanged, this, &SessionManagerPanel::applyFilter);
+    layout->addWidget(m_filterEdit);
+
     // Tree widget for sessions
     m_treeWidget = new QTreeWidget(this);
     m_treeWidget->setColumnCount(2);
@@ -134,6 +143,14 @@ void SessionManagerPanel::setupUi()
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionManagerPanel::onContextMenu);
 
     layout->addWidget(m_treeWidget);
+
+    // Empty state overlay
+    m_emptyStateLabel = new QLabel(m_treeWidget);
+    m_emptyStateLabel->setText(i18n("No Claude sessions yet\nOpen a Claude tab to get started"));
+    m_emptyStateLabel->setAlignment(Qt::AlignCenter);
+    m_emptyStateLabel->setStyleSheet(QStringLiteral("color: #757575; font-style: italic; padding: 40px;"));
+    m_emptyStateLabel->setWordWrap(true);
+    m_emptyStateLabel->setVisible(true);
 
     // Create category items
     m_pinnedCategory = new QTreeWidgetItem(m_treeWidget);
@@ -194,11 +211,13 @@ void SessionManagerPanel::setCollapsed(bool collapsed)
         m_collapseButton->setIcon(QIcon::fromTheme(QStringLiteral("sidebar-expand-left")));
         setMaximumWidth(32);
         m_treeWidget->hide();
+        m_filterEdit->hide();
         m_newSessionButton->hide();
     } else {
         m_collapseButton->setIcon(QIcon::fromTheme(QStringLiteral("sidebar-collapse-left")));
         setMaximumWidth(350);
         m_treeWidget->show();
+        m_filterEdit->show();
         m_newSessionButton->show();
     }
 
@@ -419,6 +438,11 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
             m_metadata[sessionId].tripleYoloMode = enabled;
             saveMetadata();
         }
+        scheduleTreeUpdate();
+    });
+
+    // Connect to state changes (Working/Idle/etc.) to update live activity line
+    connect(session, &ClaudeSession::stateChanged, this, [this]() {
         scheduleTreeUpdate();
     });
 
@@ -1513,6 +1537,38 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         }
 
+        // Yolo mode toggles for active sessions
+        if (isActive && activeSession) {
+            menu.addSeparator();
+
+            QAction *yoloAction = menu.addAction(i18n("Yolo Mode"));
+            yoloAction->setCheckable(true);
+            yoloAction->setChecked(activeSession->yoloMode());
+            connect(yoloAction, &QAction::triggered, this, [activeSession](bool checked) {
+                if (activeSession) {
+                    activeSession->setYoloMode(checked);
+                }
+            });
+
+            QAction *doubleYoloAction = menu.addAction(i18n("Double Yolo"));
+            doubleYoloAction->setCheckable(true);
+            doubleYoloAction->setChecked(activeSession->doubleYoloMode());
+            connect(doubleYoloAction, &QAction::triggered, this, [activeSession](bool checked) {
+                if (activeSession) {
+                    activeSession->setDoubleYoloMode(checked);
+                }
+            });
+
+            QAction *tripleYoloAction = menu.addAction(i18n("Triple Yolo"));
+            tripleYoloAction->setCheckable(true);
+            tripleYoloAction->setChecked(activeSession->tripleYoloMode());
+            connect(tripleYoloAction, &QAction::triggered, this, [activeSession](bool checked) {
+                if (activeSession) {
+                    activeSession->setTripleYoloMode(checked);
+                }
+            });
+        }
+
         // Toggle completed agents visibility for sessions with subagents
         if (isActive && activeSession && !activeSession->subagents().isEmpty()) {
             bool hiding = m_hideCompletedAgents.contains(sessionId);
@@ -1745,13 +1801,59 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         }
     }
 
-    // Update category visibility
-    m_pinnedCategory->setHidden(m_pinnedCategory->childCount() == 0);
-    m_detachedCategory->setHidden(m_detachedCategory->childCount() == 0);
-    m_closedCategory->setHidden(m_closedCategory->childCount() == 0);
-    m_archivedCategory->setHidden(m_archivedCategory->childCount() == 0);
-    m_dismissedCategory->setHidden(m_dismissedCategory->childCount() == 0);
-    m_discoveredCategory->setHidden(m_discoveredCategory->childCount() == 0);
+    // Update category visibility and counts in headers
+    auto updateCategory = [](QTreeWidgetItem *cat, const QString &baseName) {
+        int count = cat->childCount();
+        cat->setHidden(count == 0);
+        if (count > 0) {
+            cat->setText(0, QStringLiteral("%1 (%2)").arg(baseName).arg(count));
+        } else {
+            cat->setText(0, baseName);
+        }
+    };
+    updateCategory(m_pinnedCategory, i18n("Pinned"));
+    updateCategory(m_activeCategory, i18n("Active"));
+    updateCategory(m_detachedCategory, i18n("Detached"));
+    updateCategory(m_closedCategory, i18n("Closed"));
+    updateCategory(m_archivedCategory, i18n("Archived"));
+    updateCategory(m_dismissedCategory, i18n("Dismissed"));
+    updateCategory(m_discoveredCategory, i18n("Discovered"));
+
+    // Show empty state if no sessions at all
+    int totalChildren = m_pinnedCategory->childCount() + m_activeCategory->childCount() + m_detachedCategory->childCount()
+        + m_closedCategory->childCount() + m_archivedCategory->childCount() + m_dismissedCategory->childCount() + m_discoveredCategory->childCount();
+    m_emptyStateLabel->setVisible(totalChildren == 0);
+
+    // Re-apply active filter after tree rebuild
+    if (!m_filterEdit->text().isEmpty()) {
+        applyFilter(m_filterEdit->text());
+    }
+}
+
+void SessionManagerPanel::applyFilter(const QString &text)
+{
+    // Iterate all category items, show/hide children based on filter match
+    const QList<QTreeWidgetItem *> categories = {m_pinnedCategory, m_activeCategory,    m_detachedCategory,  m_closedCategory,
+                                                  m_archivedCategory, m_dismissedCategory, m_discoveredCategory};
+
+    for (auto *cat : categories) {
+        int visibleChildren = 0;
+        for (int i = 0; i < cat->childCount(); ++i) {
+            auto *child = cat->child(i);
+            if (text.isEmpty()) {
+                child->setHidden(false);
+                ++visibleChildren;
+            } else {
+                // Match against display name (col 0), tooltip (working dir), and description
+                bool matches = child->text(0).contains(text, Qt::CaseInsensitive) || child->toolTip(0).contains(text, Qt::CaseInsensitive);
+                child->setHidden(!matches);
+                if (matches) {
+                    ++visibleChildren;
+                }
+            }
+        }
+        cat->setHidden(text.isEmpty() ? cat->childCount() == 0 : visibleChildren == 0);
+    }
 }
 
 void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent)
@@ -1999,6 +2101,37 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             item->setForeground(0, QBrush(Qt::darkBlue));
         } else {
             item->setForeground(0, QBrush(Qt::darkGreen));
+        }
+    }
+
+    // Live activity line for active sessions
+    if (isActive) {
+        ClaudeSession *session = m_activeSessions[meta.sessionId];
+        if (session && session->claudeProcess()) {
+            QString activity;
+            auto procState = session->claudeProcess()->state();
+            if (procState == ClaudeProcess::State::Working) {
+                activity = session->currentTask();
+                if (activity.isEmpty()) {
+                    activity = i18n("Working...");
+                }
+            } else if (procState == ClaudeProcess::State::WaitingInput) {
+                activity = i18n("Waiting for input");
+            } else if (procState == ClaudeProcess::State::Idle) {
+                activity = i18n("Idle");
+            } else if (procState == ClaudeProcess::State::Starting) {
+                activity = i18n("Starting...");
+            }
+            if (!activity.isEmpty()) {
+                auto *activityItem = new QTreeWidgetItem(item);
+                activityItem->setText(0, activity);
+                activityItem->setForeground(0, QBrush(QColor(0x75, 0x75, 0x75)));
+                QFont f = activityItem->font(0);
+                f.setItalic(true);
+                f.setPointSizeF(f.pointSizeF() * 0.9);
+                activityItem->setFont(0, f);
+                activityItem->setFlags(Qt::NoItemFlags); // Not selectable/clickable
+            }
         }
     }
 

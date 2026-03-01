@@ -169,22 +169,34 @@ void ClaudeStatusWidget::updateDisplay()
         }
     }
 
-    // Yolo bolts + approval count
-    if (session && session->totalApprovalCount() > 0) {
+    // Yolo bolts with per-level counts
+    if (session) {
+        int yoloCount = session->yoloApprovalCount();
+        int doubleCount = session->doubleYoloApprovalCount();
+        int tripleCount = session->tripleYoloApprovalCount();
         QString bolts;
-        if (session->yoloMode()) {
-            bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
+        if (session->yoloMode() || yoloCount > 0) {
+            bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>");
+            if (yoloCount > 0) {
+                bolts += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
+            }
         }
-        if (session->doubleYoloMode()) {
-            bolts += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Light blue
+        if (session->doubleYoloMode() || doubleCount > 0) {
+            if (!bolts.isEmpty()) bolts += QStringLiteral(" ");
+            bolts += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>");
+            if (doubleCount > 0) {
+                bolts += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
+            }
         }
-        if (session->tripleYoloMode()) {
-            bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
+        if (session->tripleYoloMode() || tripleCount > 0) {
+            if (!bolts.isEmpty()) bolts += QStringLiteral(" ");
+            bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>");
+            if (tripleCount > 0) {
+                bolts += QStringLiteral("<span style='color:#AB47BC'>[%1]</span>").arg(tripleCount);
+            }
         }
-        if (bolts.isEmpty()) {
-            statusText += QStringLiteral(" │ %1").arg(QString::number(session->totalApprovalCount()));
-        } else {
-            statusText += QStringLiteral(" │ %1%2").arg(bolts, QString::number(session->totalApprovalCount()));
+        if (!bolts.isEmpty()) {
+            statusText += QStringLiteral(" │ ") + bolts;
         }
     }
 
