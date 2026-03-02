@@ -32,6 +32,7 @@ struct KONSOLEPRIVATE_EXPORT ClaudeConversation {
     QString summary;
     QString firstPrompt;
     int messageCount = 0;
+    int filesModifiedCount = 0; // Unique files touched by Write/Edit tool calls
     QDateTime created;
     QDateTime modified;
     QString projectPath; // Original project path (set by all-project discovery)
@@ -164,6 +165,11 @@ public:
      * @return List of conversations, empty if none found
      */
     static QList<ClaudeConversation> readClaudeConversations(const QString &projectPath);
+
+    /**
+     * Count unique files modified (Write/Edit tool_use) in a conversation JSONL file.
+     */
+    static int countFilesModified(const QString &jsonlPath);
 
     /**
      * Convert a project path to the hashed directory name used by Claude CLI.

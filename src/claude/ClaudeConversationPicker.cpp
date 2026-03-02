@@ -18,6 +18,56 @@
 namespace Konsolai
 {
 
+// Custom tree widget item that sorts numerically using UserRole+10 data when available
+class SortableTreeWidgetItem : public QTreeWidgetItem
+{
+public:
+    using QTreeWidgetItem::QTreeWidgetItem;
+
+    bool operator<(const QTreeWidgetItem &other) const override
+    {
+        int col = treeWidget() ? treeWidget()->sortColumn() : 0;
+        QVariant myData = data(col, Qt::UserRole + 10);
+        QVariant otherData = other.data(col, Qt::UserRole + 10);
+        if (myData.isValid() && otherData.isValid()) {
+            return myData.toLongLong() < otherData.toLongLong();
+        }
+        return text(col) < other.text(col);
+    }
+};
+
+static QString relativeTimeString(const QDateTime &dt)
+{
+    if (!dt.isValid()) {
+        return QString();
+    }
+    qint64 secs = dt.secsTo(QDateTime::currentDateTime());
+    if (secs < 0) {
+        secs = 0;
+    }
+    if (secs < 60) {
+        return QStringLiteral("just now");
+    }
+    qint64 mins = secs / 60;
+    if (mins < 60) {
+        return QStringLiteral("%1m ago").arg(mins);
+    }
+    qint64 hours = mins / 60;
+    if (hours < 24) {
+        return QStringLiteral("%1h ago").arg(hours);
+    }
+    qint64 days = hours / 24;
+    if (days < 7) {
+        return QStringLiteral("%1d ago").arg(days);
+    }
+    qint64 weeks = days / 7;
+    if (weeks < 5) {
+        return QStringLiteral("%1w ago").arg(weeks);
+    }
+    // Fall back to date for older conversations
+    return dt.toString(QStringLiteral("yyyy-MM-dd"));
+}
+
 ClaudeConversationPicker::ClaudeConversationPicker(const QList<ClaudeConversation> &conversations, QWidget *parent)
     : QDialog(parent)
 {
@@ -52,9 +102,9 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
     // Tree widget with conversation list
     m_tree = new QTreeWidget(this);
     if (hasProjectPaths) {
-        m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Project"), QStringLiteral("Messages"), QStringLiteral("Last Modified")});
+        m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Project"), QStringLiteral("Msgs"), QStringLiteral("Files"), QStringLiteral("Modified")});
     } else {
-        m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Messages"), QStringLiteral("Last Modified")});
+        m_tree->setHeaderLabels({QStringLiteral("Summary"), QStringLiteral("Msgs"), QStringLiteral("Files"), QStringLiteral("Modified")});
     }
     m_tree->setRootIsDecorated(false);
     m_tree->setAlternatingRowColors(true);
@@ -64,10 +114,11 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
     // Column indices shift when project column is present
     const int colProject = hasProjectPaths ? 1 : -1;
     const int colMessages = hasProjectPaths ? 2 : 1;
-    const int colModified = hasProjectPaths ? 3 : 2;
+    const int colFiles = hasProjectPaths ? 3 : 2;
+    const int colModified = hasProjectPaths ? 4 : 3;
 
     for (const ClaudeConversation &conv : conversations) {
-        auto *item = new QTreeWidgetItem(m_tree);
+        auto *item = new SortableTreeWidgetItem(m_tree);
 
         // Use summary if available, otherwise first prompt, otherwise "(no summary)"
         QString displayText = conv.summary;
@@ -100,7 +151,22 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
         item->setTextAlignment(colMessages, Qt::AlignRight | Qt::AlignVCenter);
         // Store raw message count for correct numeric sorting
         item->setData(colMessages, Qt::UserRole + 10, conv.messageCount);
-        item->setText(colModified, conv.modified.toString(QStringLiteral("yyyy-MM-dd hh:mm")));
+
+        // Files modified column
+        if (conv.filesModifiedCount > 0) {
+            item->setText(colFiles, QString::number(conv.filesModifiedCount));
+        } else {
+            item->setText(colFiles, QStringLiteral("-"));
+        }
+        item->setTextAlignment(colFiles, Qt::AlignRight | Qt::AlignVCenter);
+        item->setData(colFiles, Qt::UserRole + 10, conv.filesModifiedCount);
+
+        // Relative time with absolute tooltip
+        item->setText(colModified, relativeTimeString(conv.modified));
+        item->setToolTip(colModified, conv.modified.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss")));
+        // Store epoch for correct chronological sorting
+        item->setData(colModified, Qt::UserRole + 10, conv.modified.toMSecsSinceEpoch());
+
         item->setData(0, Qt::UserRole, conv.sessionId);
         item->setData(0, Qt::UserRole + 1, conv.projectPath);
     }
@@ -114,6 +180,7 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
         m_tree->header()->setSectionResizeMode(colProject, QHeaderView::ResizeToContents);
     }
     m_tree->header()->setSectionResizeMode(colMessages, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(colFiles, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(colModified, QHeaderView::ResizeToContents);
 
     // Select first item by default
@@ -182,7 +249,7 @@ void ClaudeConversationPicker::setupUi(const QList<ClaudeConversation> &conversa
         reject();
     });
 
-    resize(hasProjectPaths ? 800 : 600, 400);
+    resize(hasProjectPaths ? 850 : 650, 400);
 }
 
 QString ClaudeConversationPicker::pick(const QList<ClaudeConversation> &conversations, QWidget *parent)

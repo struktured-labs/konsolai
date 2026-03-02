@@ -449,6 +449,9 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
                 conv.modified = QDateTime::fromString(obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
 
                 if (!conv.sessionId.isEmpty()) {
+                    // Count files modified from the .jsonl
+                    QString jsonlPath = projectDir + QStringLiteral("/") + conv.sessionId + QStringLiteral(".jsonl");
+                    conv.filesModifiedCount = countFilesModified(jsonlPath);
                     conversations.append(conv);
                     indexedIds.insert(conv.sessionId);
                 }
@@ -535,6 +538,7 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
             conv.sessionId = sessionId;
             conv.firstPrompt = firstPrompt;
             conv.messageCount = messageCount;
+            conv.filesModifiedCount = countFilesModified(fi.absoluteFilePath());
             conv.modified = fi.lastModified();
             conv.created = fi.birthTime().isValid() ? fi.birthTime() : fi.lastModified();
 
@@ -548,6 +552,43 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
     });
 
     return conversations;
+}
+
+int ClaudeSessionRegistry::countFilesModified(const QString &jsonlPath)
+{
+    QFile file(jsonlPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return 0;
+    }
+
+    QSet<QString> files;
+    while (!file.atEnd()) {
+        QByteArray line = file.readLine();
+        // Quick heuristic: skip lines that can't contain Write/Edit tool_use
+        if (!line.contains("tool_use")) {
+            continue;
+        }
+        QJsonDocument doc = QJsonDocument::fromJson(line.trimmed());
+        if (!doc.isObject()) {
+            continue;
+        }
+        QJsonArray content = doc.object()[QStringLiteral("message")].toObject()[QStringLiteral("content")].toArray();
+        for (const auto &block : content) {
+            QJsonObject b = block.toObject();
+            if (b[QStringLiteral("type")].toString() != QStringLiteral("tool_use")) {
+                continue;
+            }
+            QString toolName = b[QStringLiteral("name")].toString();
+            if (toolName == QStringLiteral("Write") || toolName == QStringLiteral("Edit")) {
+                QString fp = b[QStringLiteral("input")].toObject()[QStringLiteral("file_path")].toString();
+                if (!fp.isEmpty()) {
+                    files.insert(fp);
+                }
+            }
+        }
+    }
+    file.close();
+    return files.size();
 }
 
 QString ClaudeSessionRegistry::hashedProjectPath(const QString &projectPath)
