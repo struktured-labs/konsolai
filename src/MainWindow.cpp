@@ -660,7 +660,6 @@ void MainWindow::setupActions()
     updateUsageAggregates();
 
     connect(_sessionPanel, &Konsolai::SessionManagerPanel::unarchiveRequested, this, [this](const QString &sessionId, const QString &workingDirectory, bool isRemote, const QString &sshHost, const QString &sshUsername, int sshPort) {
-        Q_UNUSED(sessionId);
         // Create a new session with the archived session's working directory
         // Get the Claude profile
         Profile::Ptr claudeProfile;
@@ -677,6 +676,10 @@ void MainWindow::setupActions()
             return;
         }
 
+        // Look up persisted metadata for this session (resume ID, etc.)
+        const auto *meta = _sessionPanel->sessionMetadata(sessionId);
+        QString savedResumeId = meta ? meta->lastResumeSessionId : QString();
+
         // Check for existing Claude conversations in this project
         auto conversations = Konsolai::ClaudeSessionRegistry::readClaudeConversations(workingDirectory);
         QString resumeId;
@@ -686,8 +689,15 @@ void MainWindow::setupActions()
 
         // Create new session with the working directory
         auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workingDirectory, this);
+
+        // Preserve the old session ID so metadata, tmux name, and hooks match
+        claudeSession->setSessionId(sessionId);
+
+        // Set resume ID: user pick takes priority, then persisted conversation
         if (!resumeId.isEmpty()) {
             claudeSession->setResumeSessionId(resumeId);
+        } else if (!savedResumeId.isEmpty()) {
+            claudeSession->setResumeSessionId(savedResumeId);
         }
 
         // Restore remote SSH fields for remote sessions
@@ -712,7 +722,7 @@ void MainWindow::setupActions()
             claudeSession->run();
         }
 
-        // Register with panel
+        // Register with panel (will find existing metadata and clear stale flags)
         _sessionPanel->registerSession(claudeSession);
 
         // Register with registry

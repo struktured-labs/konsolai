@@ -353,10 +353,13 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         meta.sshPort = session->sshPort();
         m_metadata[sessionId] = meta;
     } else {
-        // Session was archived/expired, now unarchived - restore yolo mode from metadata
+        // Session was archived/expired/closed, now reopened - clear stale flags
         m_metadata[sessionId].isArchived = false;
         m_metadata[sessionId].isExpired = false;
+        m_metadata[sessionId].isDismissed = false;
+        m_metadata[sessionId].sessionName = session->sessionName();
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
+        m_explicitlyClosed.remove(sessionId);
 
         // Restore per-session yolo mode settings from saved metadata
         session->setYoloMode(m_metadata[sessionId].yoloMode);
@@ -526,6 +529,12 @@ QList<SessionMetadata> SessionManagerPanel::allSessions() const
     return m_metadata.values();
 }
 
+const SessionMetadata *SessionManagerPanel::sessionMetadata(const QString &sessionId) const
+{
+    auto it = m_metadata.constFind(sessionId);
+    return it != m_metadata.constEnd() ? &(*it) : nullptr;
+}
+
 QList<SessionMetadata> SessionManagerPanel::pinnedSessions() const
 {
     QList<SessionMetadata> result;
@@ -680,6 +689,9 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
     if (m_activeSessions.contains(sessionId)) {
         ClaudeSession *session = m_activeSessions[sessionId];
         if (session) {
+            if (!session->resumeSessionId().isEmpty()) {
+                m_metadata[sessionId].lastResumeSessionId = session->resumeSessionId();
+            }
             m_metadata[sessionId].subagents = session->subagents().values().toVector();
             m_metadata[sessionId].subprocesses = session->subprocesses().values().toVector();
             m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
@@ -741,6 +753,9 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
     if (m_activeSessions.contains(sessionId)) {
         ClaudeSession *session = m_activeSessions[sessionId];
         if (session) {
+            if (!session->resumeSessionId().isEmpty()) {
+                m_metadata[sessionId].lastResumeSessionId = session->resumeSessionId();
+            }
             m_metadata[sessionId].subagents = session->subagents().values().toVector();
             m_metadata[sessionId].subprocesses = session->subprocesses().values().toVector();
             m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
@@ -1975,6 +1990,30 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         return a.lastAccessed > b.lastAccessed;
     });
 
+    // Pre-pass: count sessions per (workingDirectory, category) to detect duplicates.
+    // When multiple sessions share the same directory and end up in the same category,
+    // addSessionToTree will append a creation timestamp for disambiguation.
+    QHash<QString, int> dirCategoryCount; // "workDir|categoryName" → count
+    auto categoryKey = [&](const SessionMetadata &m, const QString &cat) {
+        return m.workingDirectory + QStringLiteral("|") + cat;
+    };
+    for (const auto &meta : sortedMeta) {
+        bool isAct = m_activeSessions.contains(meta.sessionId);
+        bool alive = liveNames.contains(meta.sessionName)
+            || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+        bool closed = m_explicitlyClosed.contains(meta.sessionId);
+        if (closed && !alive) closed = false;
+
+        QString cat;
+        if (meta.isDismissed) cat = QStringLiteral("dismissed");
+        else if (meta.isArchived) cat = QStringLiteral("archived");
+        else if (meta.isPinned) cat = QStringLiteral("pinned");
+        else if (isAct) cat = QStringLiteral("active");
+        else if (alive && !closed) cat = QStringLiteral("detached");
+        else cat = QStringLiteral("closed");
+        dirCategoryCount[categoryKey(meta, cat)]++;
+    }
+
     // Add sessions to appropriate categories
     // Priority: Dismissed > Archived > Pinned > Active (has tab) > Detached (tmux alive) > Closed (tmux dead)
     for (const auto &meta : sortedMeta) {
@@ -1989,21 +2028,17 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             wasClosed = false; // already categorized correctly via tmuxAlive=false
         }
 
-        if (meta.isDismissed) {
-            addSessionToTree(meta, m_dismissedCategory);
-        } else if (meta.isArchived) {
-            addSessionToTree(meta, m_archivedCategory);
-        } else if (meta.isPinned) {
-            addSessionToTree(meta, m_pinnedCategory);
-        } else if (isActive) {
-            addSessionToTree(meta, m_activeCategory);
-        } else if (tmuxAlive && !wasClosed) {
-            // Tab closed but tmux still running → Detached
-            addSessionToTree(meta, m_detachedCategory);
-        } else {
-            // tmux session is dead (or explicitly closed) → Closed
-            addSessionToTree(meta, m_closedCategory);
-        }
+        QString cat;
+        QTreeWidgetItem *parent = nullptr;
+        if (meta.isDismissed) { cat = QStringLiteral("dismissed"); parent = m_dismissedCategory; }
+        else if (meta.isArchived) { cat = QStringLiteral("archived"); parent = m_archivedCategory; }
+        else if (meta.isPinned) { cat = QStringLiteral("pinned"); parent = m_pinnedCategory; }
+        else if (isActive) { cat = QStringLiteral("active"); parent = m_activeCategory; }
+        else if (tmuxAlive && !wasClosed) { cat = QStringLiteral("detached"); parent = m_detachedCategory; }
+        else { cat = QStringLiteral("closed"); parent = m_closedCategory; }
+
+        bool hasSiblings = dirCategoryCount.value(categoryKey(meta, cat), 0) > 1;
+        addSessionToTree(meta, parent, hasSiblings);
     }
 
     // Add discovered sessions (from project folder scanning)
@@ -2107,7 +2142,7 @@ void SessionManagerPanel::applyFilter(const QString &text)
     }
 }
 
-void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent)
+void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent, bool hasSiblings)
 {
     auto *item = new QTreeWidgetItem(parent);
 
@@ -2224,6 +2259,11 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         if (workDir.exists(QStringLiteral(".planning")) || workDir.exists(QStringLiteral("ROADMAP.md"))) {
             displayName += QStringLiteral(" [GSD]");
         }
+    }
+
+    // Disambiguate when multiple sessions share the same directory in the same category
+    if (hasSiblings && description.isEmpty() && meta.createdAt.isValid()) {
+        displayName += QStringLiteral(" — %1").arg(meta.createdAt.toString(QStringLiteral("MMM d h:mmap")));
     }
 
     // Add @host suffix for remote sessions
