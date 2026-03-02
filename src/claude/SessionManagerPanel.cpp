@@ -23,6 +23,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFont>
 #include <QHeaderView>
@@ -1805,6 +1806,57 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             editSessionDescription(sessionId);
         });
 
+        // View Session Activity — show parsed conversation transcript
+        if (!meta.workingDirectory.isEmpty()) {
+            // Find the conversation .jsonl for this session
+            QString convId = meta.lastResumeSessionId;
+            if (convId.isEmpty() && isActive && activeSession) {
+                convId = activeSession->resumeSessionId();
+            }
+            // Locate .jsonl files for this project
+            auto conversations = ClaudeSessionRegistry::readClaudeConversations(meta.workingDirectory);
+            QString jsonlPath;
+            if (!convId.isEmpty()) {
+                // Find exact match
+                for (const auto &conv : conversations) {
+                    if (conv.sessionId == convId) {
+                        // Reconstruct path from project hash
+                        QString projectsDir = QDir::homePath() + QStringLiteral("/.claude/projects");
+                        QDirIterator it(projectsDir, QDir::Dirs | QDir::NoDotAndDotDot);
+                        while (it.hasNext()) {
+                            QString dir = it.next();
+                            QString candidate = dir + QStringLiteral("/") + convId + QStringLiteral(".jsonl");
+                            if (QFile::exists(candidate)) {
+                                jsonlPath = candidate;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            // Fallback: most recent conversation for this project
+            if (jsonlPath.isEmpty() && !conversations.isEmpty()) {
+                const auto &latest = conversations.first();
+                QString projectsDir = QDir::homePath() + QStringLiteral("/.claude/projects");
+                QDirIterator it(projectsDir, QDir::Dirs | QDir::NoDotAndDotDot);
+                while (it.hasNext()) {
+                    QString dir = it.next();
+                    QString candidate = dir + QStringLiteral("/") + latest.sessionId + QStringLiteral(".jsonl");
+                    if (QFile::exists(candidate)) {
+                        jsonlPath = candidate;
+                        break;
+                    }
+                }
+            }
+            if (!jsonlPath.isEmpty()) {
+                QAction *activityAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-text")), i18n("View Session Activity"));
+                connect(activityAction, &QAction::triggered, this, [this, jsonlPath, meta]() {
+                    showSessionActivity(jsonlPath, meta.workingDirectory);
+                });
+            }
+        }
+
         // Show approval log for active sessions with approvals
         if (isActive && activeSession && activeSession->totalApprovalCount() > 0) {
             QAction *logAction =
@@ -3464,6 +3516,126 @@ void SessionManagerPanel::showSubagentTranscript(const SubagentInfo &info)
     layout->addWidget(buttons);
 
     dialog.resize(700, 500);
+    dialog.exec();
+}
+
+void SessionManagerPanel::showSessionActivity(const QString &jsonlPath, const QString &workDir)
+{
+    QFile file(jsonlPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, i18n("Read Error"), i18n("Could not open conversation file:\n%1", jsonlPath));
+        return;
+    }
+
+    // Parse JSONL: build structured activity and collect file paths from tool_use
+    QString readable;
+    QSet<QString> filesModified; // unique file paths from Write/Edit tool calls
+    int toolCallCount = 0;
+    int userMessageCount = 0;
+
+    QTextStream stream(&file);
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        QJsonDocument lineDoc = QJsonDocument::fromJson(line.toUtf8());
+        if (!lineDoc.isObject()) {
+            continue;
+        }
+        QJsonObject obj = lineDoc.object();
+        QString type = obj[QStringLiteral("type")].toString();
+
+        if (type == QStringLiteral("assistant")) {
+            QJsonArray content = obj[QStringLiteral("message")].toObject()[QStringLiteral("content")].toArray();
+            for (const auto &block : content) {
+                QJsonObject b = block.toObject();
+                QString blockType = b[QStringLiteral("type")].toString();
+                if (blockType == QStringLiteral("text")) {
+                    readable += QStringLiteral("[Assistant]\n%1\n\n").arg(b[QStringLiteral("text")].toString());
+                } else if (blockType == QStringLiteral("tool_use")) {
+                    toolCallCount++;
+                    QString toolName = b[QStringLiteral("name")].toString();
+                    QJsonObject input = b[QStringLiteral("input")].toObject();
+
+                    // Extract file path from Write/Edit/Read tool calls
+                    QString filePath = input[QStringLiteral("file_path")].toString();
+                    if (!filePath.isEmpty() && (toolName == QStringLiteral("Write") || toolName == QStringLiteral("Edit"))) {
+                        filesModified.insert(filePath);
+                    }
+
+                    readable += QStringLiteral("[Tool: %1]").arg(toolName);
+                    if (!filePath.isEmpty()) {
+                        readable += QStringLiteral("  %1").arg(filePath);
+                    }
+                    readable += QStringLiteral("\n");
+
+                    // Show compact input for non-file tools
+                    if (filePath.isEmpty()) {
+                        QString inputStr = QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact));
+                        if (inputStr.length() > 200) {
+                            inputStr = inputStr.left(197) + QStringLiteral("...");
+                        }
+                        readable += inputStr;
+                    }
+                    readable += QStringLiteral("\n\n");
+                }
+            }
+        } else if (type == QStringLiteral("human") || type == QStringLiteral("user")) {
+            userMessageCount++;
+            QJsonArray content = obj[QStringLiteral("message")].toObject()[QStringLiteral("content")].toArray();
+            for (const auto &block : content) {
+                QJsonObject b = block.toObject();
+                if (b[QStringLiteral("type")].toString() == QStringLiteral("text")) {
+                    readable += QStringLiteral("[User]\n%1\n\n").arg(b[QStringLiteral("text")].toString());
+                }
+            }
+        }
+        // Skip tool_result for activity view — focus on actions, not outputs
+    }
+    file.close();
+
+    // Build summary header
+    QString summary;
+    summary += i18n("Project: %1\n", QDir(workDir).dirName());
+    summary += i18n("Messages: %1 user, Tool calls: %2\n", userMessageCount, toolCallCount);
+    if (!filesModified.isEmpty()) {
+        QStringList sortedFiles = filesModified.values();
+        sortedFiles.sort();
+        summary += i18n("Files modified (%1):\n", sortedFiles.size());
+        for (const auto &f : std::as_const(sortedFiles)) {
+            summary += QStringLiteral("  %1\n").arg(f);
+        }
+    }
+    summary += QStringLiteral("\n") + QString(60, QChar(0x2500)) + QStringLiteral("\n\n");
+
+    QString fullText = summary + readable;
+
+    // Build viewer dialog
+    QDialog dialog(this);
+    dialog.setWindowTitle(i18n("Session Activity \u2014 %1", QDir(workDir).dirName()));
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *toolbar = new QToolBar(&dialog);
+    QAction *openExternalAction = toolbar->addAction(QIcon::fromTheme(QStringLiteral("document-open-folder")), i18n("Open in External Editor"));
+    connect(openExternalAction, &QAction::triggered, &dialog, [jsonlPath]() {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(jsonlPath));
+    });
+    layout->addWidget(toolbar);
+
+    auto *textEdit = new QPlainTextEdit(&dialog);
+    textEdit->setReadOnly(true);
+    QFont monoFont(QStringLiteral("monospace"));
+    monoFont.setStyleHint(QFont::TypeWriter);
+    textEdit->setFont(monoFont);
+    textEdit->setPlainText(fullText);
+    layout->addWidget(textEdit);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    dialog.resize(800, 600);
     dialog.exec();
 }
 
