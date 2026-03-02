@@ -2024,9 +2024,6 @@ void SessionManagerPanel::updateTreeWidget()
 
 void SessionManagerPanel::refreshRemoteTmuxSessions()
 {
-    // Clear stale cache — will be repopulated by async SSH responses
-    m_cachedRemoteLiveNames.clear();
-
     // Collect unique SSH hosts from metadata
     QMap<QString, QPair<QString, int>> hostCredentials; // host → (username, port)
     for (const auto &meta : std::as_const(m_metadata)) {
@@ -2040,6 +2037,12 @@ void SessionManagerPanel::refreshRemoteTmuxSessions()
     if (hostCredentials.isEmpty()) {
         return;
     }
+
+    // Use a shared counter to track when all queries complete,
+    // accumulating into a temporary set to avoid clearing the cache
+    // while queries are still in flight.
+    auto pendingCount = std::make_shared<int>(hostCredentials.size());
+    auto accumulated = std::make_shared<QSet<QString>>();
 
     // Query each unique host asynchronously
     for (auto it = hostCredentials.constBegin(); it != hostCredentials.constEnd(); ++it) {
@@ -2057,27 +2060,30 @@ void SessionManagerPanel::refreshRemoteTmuxSessions()
         args << userHost << QStringLiteral("tmux list-sessions -F '#{session_name}' 2>/dev/null | grep ^konsolai-");
 
         QPointer<SessionManagerPanel> guard(this);
-        connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-                [guard, proc](int exitCode, QProcess::ExitStatus) {
+        connect(proc,
+                QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                this,
+                [guard, proc, pendingCount, accumulated](int exitCode, QProcess::ExitStatus) {
                     proc->deleteLater();
                     if (!guard) {
                         return;
                     }
-                    if (exitCode != 0) {
-                        return; // SSH failed or no sessions — keep existing cache
-                    }
-                    QString output = QString::fromUtf8(proc->readAllStandardOutput());
-                    QSet<QString> remoteNames;
-                    const auto lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-                    for (const auto &line : lines) {
-                        QString name = line.trimmed();
-                        if (!name.isEmpty()) {
-                            remoteNames.insert(name);
+                    if (exitCode == 0) {
+                        QString output = QString::fromUtf8(proc->readAllStandardOutput());
+                        const auto lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+                        for (const auto &line : lines) {
+                            QString name = line.trimmed();
+                            if (!name.isEmpty()) {
+                                accumulated->insert(name);
+                            }
                         }
                     }
-                    // Merge into cached remote live names (accumulate across hosts)
-                    guard->m_cachedRemoteLiveNames.unite(remoteNames);
-                    guard->scheduleTreeUpdate();
+                    // Only update cache and tree when all host queries have completed
+                    --(*pendingCount);
+                    if (*pendingCount <= 0) {
+                        guard->m_cachedRemoteLiveNames = *accumulated;
+                        guard->scheduleTreeUpdate();
+                    }
                 });
 
         proc->start(QStringLiteral("ssh"), args);
@@ -3228,9 +3234,38 @@ void SessionManagerPanel::saveMetadata()
     Q_EMIT usageAggregateChanged();
 }
 
+// Compute incremental cost within a time window from cumulative approval log entries.
+// Each entry's estimatedCostUSD is cumulative for the session, so we need the delta
+// between the last entry in the window and the last entry before the window.
+static double periodCostFromLog(const QVector<ApprovalLogEntry> &log, const QDateTime &windowStart)
+{
+    if (log.isEmpty()) {
+        return 0.0;
+    }
+
+    // Find the last entry in the window and the last entry before the window
+    double lastInWindow = -1.0;
+    double lastBeforeWindow = 0.0;
+    bool hasEntryInWindow = false;
+
+    for (const auto &entry : log) {
+        if (entry.timestamp < windowStart) {
+            lastBeforeWindow = entry.estimatedCostUSD;
+        } else {
+            lastInWindow = entry.estimatedCostUSD;
+            hasEntryInWindow = true;
+        }
+    }
+
+    if (!hasEntryInWindow) {
+        return 0.0;
+    }
+
+    return lastInWindow - lastBeforeWindow;
+}
+
 double SessionManagerPanel::weeklySpentUSD() const
 {
-    // Sum estimatedCostUSD from approval log entries in the current week (Mon-Sun)
     QDateTime now = QDateTime::currentDateTime();
     QDate today = now.date();
     // dayOfWeek: 1=Mon .. 7=Sun
@@ -3239,15 +3274,7 @@ double SessionManagerPanel::weeklySpentUSD() const
 
     double total = 0.0;
     for (const auto &meta : m_metadata) {
-        if (meta.approvalLog.isEmpty()) {
-            continue;
-        }
-        // Use the last entry's cost (cumulative per-session)
-        const auto &last = meta.approvalLog.last();
-        // Only count sessions active this week
-        if (last.timestamp >= windowStart) {
-            total += last.estimatedCostUSD;
-        }
+        total += periodCostFromLog(meta.approvalLog, windowStart);
     }
     return total;
 }
@@ -3260,13 +3287,7 @@ double SessionManagerPanel::monthlySpentUSD() const
 
     double total = 0.0;
     for (const auto &meta : m_metadata) {
-        if (meta.approvalLog.isEmpty()) {
-            continue;
-        }
-        const auto &last = meta.approvalLog.last();
-        if (last.timestamp >= windowStart) {
-            total += last.estimatedCostUSD;
-        }
+        total += periodCostFromLog(meta.approvalLog, windowStart);
     }
     return total;
 }
@@ -3607,11 +3628,15 @@ void SessionManagerPanel::showSessionActivity(const QString &jsonlPath, const QS
             }
         } else if (type == QStringLiteral("human") || type == QStringLiteral("user")) {
             userMessageCount++;
-            QJsonArray content = obj[QStringLiteral("message")].toObject()[QStringLiteral("content")].toArray();
-            for (const auto &block : content) {
-                QJsonObject b = block.toObject();
-                if (b[QStringLiteral("type")].toString() == QStringLiteral("text")) {
-                    readable += QStringLiteral("[User]\n%1\n\n").arg(b[QStringLiteral("text")].toString());
+            QJsonValue content = obj[QStringLiteral("message")].toObject()[QStringLiteral("content")];
+            if (content.isString()) {
+                readable += QStringLiteral("[User]\n%1\n\n").arg(content.toString());
+            } else if (content.isArray()) {
+                for (const auto &block : content.toArray()) {
+                    QJsonObject b = block.toObject();
+                    if (b[QStringLiteral("type")].toString() == QStringLiteral("text")) {
+                        readable += QStringLiteral("[User]\n%1\n\n").arg(b[QStringLiteral("text")].toString());
+                    }
                 }
             }
         }
@@ -3796,17 +3821,10 @@ void SessionManagerPanel::editSessionDescription(const QString &sessionId)
         }
     }
 
-    // Also update the registry directly for inactive sessions
-    if (m_registry) {
-        // Find the session state by sessionId and update it
-        for (const auto &state : m_registry->allSessionStates()) {
-            if (state.sessionId == sessionId) {
-                // Re-register with updated description would work for active sessions
-                // For inactive, we need to update the state directly
-                // This is handled by setTaskDescription -> registerSession for active ones
-                break;
-            }
-        }
+    // Update metadata for inactive sessions so the description persists
+    if (m_metadata.contains(sessionId)) {
+        m_metadata[sessionId].description = newDesc;
+        scheduleMetadataSave();
     }
 
     // Refresh display

@@ -2323,6 +2323,13 @@ void ClaudeSession::cleanupRemoteHooks()
     QString remoteWorkDir = m_workingDir.isEmpty() ? QStringLiteral("~") : m_workingDir;
     QString settingsPath = remoteWorkDir + QStringLiteral("/.claude/settings.local.json");
 
+    // Escape single quotes for shell: replace ' with '\'' (end quote, literal quote, restart quote)
+    auto shellEscape = [](const QString &s) {
+        QString escaped = s;
+        escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+        return escaped;
+    };
+
     // Remove hook script and use python3 to remove hooks key from settings
     QString cleanupCmd = QStringLiteral(
                              "rm -f '%1'; "
@@ -2336,7 +2343,7 @@ void ClaudeSession::cleanupRemoteHooks()
                              "e.pop('hooks',None); "
                              "f=open(p,'w'); json.dump(e,f,indent=2); f.close()"
                              "\" 2>/dev/null || true")
-                             .arg(scriptPath, settingsPath);
+                             .arg(shellEscape(scriptPath), shellEscape(settingsPath));
 
     QStringList sshArgs;
     sshArgs << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=3");
@@ -2354,7 +2361,7 @@ void ClaudeSession::cleanupRemoteHooks()
     QTimer::singleShot(10000, process, [safeProcess]() {
         if (safeProcess && safeProcess->state() != QProcess::NotRunning) {
             safeProcess->kill();
-            safeProcess->deleteLater();
+            // finished() signal will fire after kill, delivering deleteLater via the connection above
         }
     });
     process->start(QStringLiteral("ssh"), sshArgs);
