@@ -2088,6 +2088,7 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 {
     // Invalidate conversation cache so summaries refresh from disk
     m_conversationCache.clear();
+    m_gitBranchCache.clear();
 
     // Clear existing items (except categories)
     while (m_pinnedCategory->childCount() > 0) {
@@ -2389,6 +2390,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
+    // Git branch badge (local sessions only, cached per working directory)
+    if (!meta.workingDirectory.isEmpty() && !meta.isRemote) {
+        if (!m_gitBranchCache.contains(meta.workingDirectory)) {
+            QProcess git;
+            git.setWorkingDirectory(meta.workingDirectory);
+            git.start(QStringLiteral("git"), {QStringLiteral("branch"), QStringLiteral("--show-current")});
+            if (git.waitForFinished(500)) { // 500ms timeout to avoid blocking UI
+                QString branch = QString::fromUtf8(git.readAllStandardOutput()).trimmed();
+                m_gitBranchCache.insert(meta.workingDirectory, branch);
+            } else {
+                m_gitBranchCache.insert(meta.workingDirectory, QString()); // empty = not a git repo or timed out
+            }
+        }
+        const QString &branch = m_gitBranchCache[meta.workingDirectory];
+        if (!branch.isEmpty() && branch != QStringLiteral("main") && branch != QStringLiteral("master")) {
+            displayName += QStringLiteral(" [%1]").arg(branch);
+        }
+    }
+
     // Disambiguate when multiple sessions share the same directory in the same category
     if (hasSiblings && description.isEmpty() && meta.createdAt.isValid()) {
         displayName += QStringLiteral(" — %1").arg(meta.createdAt.toString(QStringLiteral("MMM d h:mmap")));
@@ -2402,7 +2422,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     item->setText(0, displayName);
     item->setData(0, Qt::UserRole, meta.sessionId);
 
-    // Enhanced tooltip for remote sessions
+    // Enhanced tooltip
     QString tooltip;
     if (meta.isRemote) {
         QString userHost = meta.sshUsername.isEmpty() ? meta.sshHost : QStringLiteral("%1@%2").arg(meta.sshUsername, meta.sshHost);
@@ -2410,6 +2430,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             QStringLiteral("%1\nRemote: %2\nPath: %3\nLast accessed: %4").arg(meta.sessionName, userHost, meta.workingDirectory, meta.lastAccessed.toString());
     } else {
         tooltip = QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString());
+    }
+    // Append git branch to tooltip (always, including main/master)
+    if (m_gitBranchCache.contains(meta.workingDirectory) && !m_gitBranchCache[meta.workingDirectory].isEmpty()) {
+        tooltip += QStringLiteral("\nBranch: %1").arg(m_gitBranchCache[meta.workingDirectory]);
     }
     item->setToolTip(0, tooltip);
 

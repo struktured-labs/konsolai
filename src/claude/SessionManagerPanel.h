@@ -335,6 +335,9 @@ private:
     // Cache conversations per working directory to avoid disk I/O during tree rebuilds
     QHash<QString, QList<ClaudeConversation>> m_conversationCache; // workDir → conversations
 
+    // Cache git branch names per working directory (refreshed each tree rebuild)
+    QHash<QString, QString> m_gitBranchCache; // workDir → branch name
+
     // Per-session toggle: sessions in this set hide completed (NotRunning) agents
     QSet<QString> m_hideCompletedAgents;
 
