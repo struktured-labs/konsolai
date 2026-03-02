@@ -33,6 +33,7 @@ class KToggleAction;
 namespace Konsolai
 {
 class ClaudeMenu;
+class ClaudeNotificationWidget;
 class ClaudeStatusWidget;
 class SessionManagerPanel;
 }
@@ -243,6 +244,7 @@ private:
 
     // Claude integration
     Konsolai::ClaudeMenu *_claudeMenu = nullptr;
+    Konsolai::ClaudeNotificationWidget *_notificationWidget = nullptr;
     Konsolai::ClaudeStatusWidget *_claudeStatusWidget = nullptr;
     Konsolai::SessionManagerPanel *_sessionPanel = nullptr;
 

@@ -8,6 +8,7 @@
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
 #include "KonsolaiSettings.h"
+#include "NotificationManager.h"
 #include "TmuxManager.h"
 
 #include <limits>
@@ -15,6 +16,7 @@
 #include <KLocalizedString>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QColor>
 #include <QDesktopServices>
@@ -35,6 +37,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QSet>
+#include <QSlider>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QToolBar>
@@ -117,6 +120,75 @@ void SessionManagerPanel::setupUi()
     // Note: Title "Sessions" is shown in dock widget title bar, no need for duplicate label here
 
     headerLayout->addStretch();
+
+    // Notification settings button
+    auto *notifyButton = new QPushButton(this);
+    notifyButton->setIcon(QIcon::fromTheme(QStringLiteral("preferences-desktop-notification")));
+    notifyButton->setFlat(true);
+    notifyButton->setFixedSize(24, 24);
+    notifyButton->setToolTip(i18n("Notification Settings"));
+    connect(notifyButton, &QPushButton::clicked, this, [this]() {
+        auto *mgr = NotificationManager::instance();
+        if (!mgr) {
+            return;
+        }
+
+        auto *dlg = new QDialog(this);
+        dlg->setWindowTitle(i18n("Notification Settings"));
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        auto *vbox = new QVBoxLayout(dlg);
+
+        auto *audioCheck = new QCheckBox(i18n("Sound alerts"), dlg);
+        audioCheck->setChecked(mgr->isChannelEnabled(NotificationManager::Channel::Audio));
+        vbox->addWidget(audioCheck);
+
+        auto *volLayout = new QHBoxLayout();
+        volLayout->addSpacing(20);
+        auto *volLabel = new QLabel(i18n("Volume:"), dlg);
+        volLayout->addWidget(volLabel);
+        auto *volSlider = new QSlider(Qt::Horizontal, dlg);
+        volSlider->setRange(0, 100);
+        volSlider->setValue(static_cast<int>(mgr->audioVolume() * 100));
+        volSlider->setEnabled(audioCheck->isChecked());
+        volLayout->addWidget(volSlider);
+        vbox->addLayout(volLayout);
+
+        auto *desktopCheck = new QCheckBox(i18n("Desktop notifications"), dlg);
+        desktopCheck->setChecked(mgr->isChannelEnabled(NotificationManager::Channel::Desktop));
+        vbox->addWidget(desktopCheck);
+
+        auto *terminalCheck = new QCheckBox(i18n("In-terminal overlay"), dlg);
+        terminalCheck->setChecked(mgr->isChannelEnabled(NotificationManager::Channel::InTerminal));
+        vbox->addWidget(terminalCheck);
+
+        auto *trayCheck = new QCheckBox(i18n("System tray status"), dlg);
+        trayCheck->setChecked(mgr->isChannelEnabled(NotificationManager::Channel::SystemTray));
+        vbox->addWidget(trayCheck);
+
+        auto *yoloCheck = new QCheckBox(i18n("Yolo approval sounds"), dlg);
+        yoloCheck->setChecked(mgr->yoloNotificationsEnabled());
+        vbox->addWidget(yoloCheck);
+
+        connect(audioCheck, &QCheckBox::toggled, volSlider, &QSlider::setEnabled);
+
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
+        vbox->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, dlg, [=]() {
+            mgr->enableChannel(NotificationManager::Channel::Audio, audioCheck->isChecked());
+            mgr->enableChannel(NotificationManager::Channel::Desktop, desktopCheck->isChecked());
+            mgr->enableChannel(NotificationManager::Channel::InTerminal, terminalCheck->isChecked());
+            mgr->enableChannel(NotificationManager::Channel::SystemTray, trayCheck->isChecked());
+            mgr->setAudioVolume(volSlider->value() / 100.0);
+            mgr->setYoloNotificationsEnabled(yoloCheck->isChecked());
+            mgr->saveSettings();
+            dlg->accept();
+        });
+
+        dlg->resize(300, 250);
+        dlg->show();
+    });
+    headerLayout->addWidget(notifyButton);
 
     m_newSessionButton = new QPushButton(this);
     m_newSessionButton->setIcon(QIcon::fromTheme(QStringLiteral("list-add")));

@@ -58,6 +58,7 @@
 // Claude integration
 #include "claude/ClaudeConversationPicker.h"
 #include "claude/ClaudeMenu.h"
+#include "claude/ClaudeNotificationWidget.h"
 #include "claude/ClaudeProcess.h"
 #include "claude/ClaudeSession.h"
 #include "claude/ClaudeSessionRegistry.h"
@@ -138,6 +139,17 @@ MainWindow::MainWindow()
     connect(_viewManager, &Konsole::ViewManager::activationRequest, this, &Konsole::MainWindow::activationRequest);
 
     setCentralWidget(_viewManager->widget());
+
+    // Create in-terminal notification overlay on the central widget
+    _notificationWidget = new Konsolai::ClaudeNotificationWidget(_viewManager->widget());
+    if (auto *notifyMgr = Konsolai::NotificationManager::instance()) {
+        connect(notifyMgr,
+                &Konsolai::NotificationManager::showInTerminalNotification,
+                _notificationWidget,
+                [this](Konsolai::NotificationManager::NotificationType type, const QString &title, const QString &message, Konsolai::ClaudeSession *) {
+                    _notificationWidget->show(type, title, message);
+                });
+    }
 
     // disable automatically generated accelerators in top-level
     // menu items - to avoid conflicting with Alt+[Letter] shortcuts

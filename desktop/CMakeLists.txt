@@ -15,6 +15,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/data/sounds/permission.wav
     ${CMAKE_SOURCE_DIR}/data/sounds/waiting.wav
     ${CMAKE_SOURCE_DIR}/data/sounds/complete.wav
+    ${CMAKE_SOURCE_DIR}/data/sounds/error.wav
     ${CMAKE_SOURCE_DIR}/data/sounds/yolo.wav
     DESTINATION ${KDE_INSTALL_DATADIR}/sounds/konsolai
 )
