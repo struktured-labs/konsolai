@@ -87,6 +87,10 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
 
 SessionManagerPanel::~SessionManagerPanel()
 {
+    // Block signals during destruction — saveMetadata() emits usageAggregateChanged(),
+    // and connected slots in MainWindow may dereference already-destroyed sibling widgets
+    // (e.g. ClaudeStatusWidget destroyed before SessionManagerPanel in deleteChildren()).
+    blockSignals(true);
     saveMetadata();
 }
 
