@@ -37,6 +37,7 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSet>
 #include <QSlider>
 #include <QSplitter>
@@ -91,11 +92,33 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
 
 SessionManagerPanel::~SessionManagerPanel()
 {
+    // Stop all timers to prevent callbacks during/after destruction
+    if (m_updateDebounce) {
+        m_updateDebounce->stop();
+    }
+    if (m_saveDebounce) {
+        m_saveDebounce->stop();
+    }
+    if (m_durationTimer) {
+        m_durationTimer->stop();
+    }
+    if (m_deferRetryTimer) {
+        m_deferRetryTimer->stop();
+    }
+    if (m_remoteTmuxTimer) {
+        m_remoteTmuxTimer->stop();
+    }
+
     // Block signals during destruction — saveMetadata() emits usageAggregateChanged(),
     // and connected slots in MainWindow may dereference already-destroyed sibling widgets
     // (e.g. ClaudeStatusWidget destroyed before SessionManagerPanel in deleteChildren()).
     blockSignals(true);
     saveMetadata();
+
+    // Null out m_treeWidget before base QWidget destructor runs deleteChildren(),
+    // which can trigger QProcess::finished → scheduleTreeUpdate → isTreeInteractionActive
+    // accessing already-destroyed child widgets.
+    m_treeWidget = nullptr;
 }
 
 void SessionManagerPanel::setupUi()
@@ -225,6 +248,10 @@ void SessionManagerPanel::setupUi()
 
     connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, &SessionManagerPanel::onItemDoubleClicked);
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionManagerPanel::onContextMenu);
+
+    // Detect when user stops interacting with tree to flush deferred updates
+    m_treeWidget->viewport()->installEventFilter(this);
+    m_treeWidget->installEventFilter(this);
 
     layout->addWidget(m_treeWidget);
 
@@ -1916,6 +1943,27 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         }
 
+        // Mute auto-expand toggle for sessions with subagents
+        if (isActive && activeSession && !activeSession->subagents().isEmpty()) {
+            bool muted = m_mutedSessions.contains(sessionId);
+            QAction *muteAction = menu.addAction(QIcon::fromTheme(muted ? QStringLiteral("audio-volume-high") : QStringLiteral("audio-volume-muted")),
+                                                 muted ? i18n("Unmute Auto-Expand") : i18n("Mute Auto-Expand"));
+            muteAction->setCheckable(true);
+            muteAction->setChecked(muted);
+            connect(muteAction, &QAction::triggered, this, [this, sessionId](bool checked) {
+                if (checked) {
+                    m_mutedSessions.insert(sessionId);
+                    // Immediately collapse the session in the tree
+                    if (QTreeWidgetItem *sessionItem = findTreeItem(sessionId)) {
+                        sessionItem->setExpanded(false);
+                    }
+                } else {
+                    m_mutedSessions.remove(sessionId);
+                }
+                scheduleTreeUpdate();
+            });
+        }
+
         // Restart option for active sessions
         if (isActive && activeSession) {
             QAction *restartAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart Claude"));
@@ -1963,6 +2011,32 @@ void SessionManagerPanel::scheduleTreeUpdate()
         m_updateDebounce->setSingleShot(true);
         connect(m_updateDebounce, &QTimer::timeout, this, &SessionManagerPanel::updateTreeWidget);
     }
+
+    // Defer rebuild while user is interacting with the tree (hover or focus)
+    if (isTreeInteractionActive()) {
+        m_pendingUpdate = true;
+        if (!m_deferRetryTimer) {
+            m_deferRetryTimer = new QTimer(this);
+            m_deferRetryTimer->setSingleShot(true);
+            connect(m_deferRetryTimer, &QTimer::timeout, this, [this]() {
+                if (!m_pendingUpdate) {
+                    return;
+                }
+                if (isTreeInteractionActive()) {
+                    m_deferRetryTimer->start(1000); // Still interacting, retry
+                } else {
+                    m_pendingUpdate = false;
+                    m_updateDebounce->start(100); // Short debounce for deferred flush
+                }
+            });
+        }
+        if (!m_deferRetryTimer->isActive()) {
+            m_deferRetryTimer->start(1000);
+        }
+        return;
+    }
+
+    m_pendingUpdate = false;
     // Restart the 500ms window on each call — only the last one fires.
     m_updateDebounce->start(500);
 }
@@ -2095,6 +2169,14 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     // Invalidate conversation cache so summaries refresh from disk
     m_conversationCache.clear();
     m_gitBranchCache.clear();
+
+    // Prune stale expansion keys if the set has grown large
+    if (m_knownItems.size() > 500) {
+        pruneStaleKeys();
+    }
+
+    // Save expansion state, scroll position, and selection before destroying items
+    saveTreeState();
 
     // Clear existing items (except categories)
     while (m_pinnedCategory->childCount() > 0) {
@@ -2249,6 +2331,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     if (!m_filterEdit->text().isEmpty()) {
         applyFilter(m_filterEdit->text());
     }
+
+    // Restore scroll position and selection
+    restoreTreeState();
 }
 
 void SessionManagerPanel::applyFilter(const QString &text)
@@ -2425,8 +2510,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" @%1").arg(meta.sshHost);
     }
 
+    // Muted indicator
+    if (m_mutedSessions.contains(meta.sessionId)) {
+        displayName += QStringLiteral(" [muted]");
+    }
+
     item->setText(0, displayName);
     item->setData(0, Qt::UserRole, meta.sessionId);
+
+    // Composite key for expansion state preservation
+    QString sessionKey = QStringLiteral("s:%1").arg(meta.sessionId);
+    item->setData(0, Qt::UserRole + 6, sessionKey);
+
+    // Muted visual styling
+    if (m_mutedSessions.contains(meta.sessionId)) {
+        QFont f = item->font(0);
+        f.setItalic(true);
+        item->setFont(0, f);
+        item->setForeground(0, QBrush(QColor(140, 140, 140)));
+    }
 
     // Enhanced tooltip
     QString tooltip;
@@ -2841,6 +2943,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     promptItem->setData(0, Qt::UserRole + 1, meta.sessionId);
                     promptItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
 
+                    // Composite key for expansion state preservation
+                    QString pgKey = QStringLiteral("pg:%1:%2").arg(meta.sessionId).arg(round);
+                    promptItem->setData(0, Qt::UserRole + 6, pgKey);
+
                     if (roundAnyWorking) {
                         promptItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
                         promptItem->setForeground(0, QBrush(Qt::darkGreen));
@@ -2852,7 +2958,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         promptItem->setForeground(0, QBrush(QColor(140, 140, 140)));
                     }
 
-                    promptItem->setExpanded(roundAnyWorking || roundAnyIdle);
+                    promptItem->setExpanded(shouldAutoExpand(pgKey, meta.sessionId, roundAnyWorking || roundAnyIdle));
+                    m_knownItems.insert(pgKey);
                     roundParent = promptItem;
                 }
 
@@ -2863,6 +2970,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 subtasksItem->setData(0, Qt::UserRole + 5, QStringLiteral("subtasks"));
                 subtasksItem->setData(0, Qt::UserRole + 1, meta.sessionId);
                 subtasksItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+
+                // Composite key for expansion state preservation
+                QString stKey = QStringLiteral("st:%1:%2").arg(meta.sessionId).arg(round);
+                subtasksItem->setData(0, Qt::UserRole + 6, stKey);
 
                 if (roundAnyWorking) {
                     subtasksItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
@@ -2875,8 +2986,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     subtasksItem->setForeground(0, QBrush(QColor(140, 140, 140)));
                 }
 
-                // Smart expand: show details when active, collapse when all done
-                subtasksItem->setExpanded(roundAnyWorking || roundAnyIdle);
+                // Smart expand: preserve user state, auto-expand only new items
+                subtasksItem->setExpanded(shouldAutoExpand(stKey, meta.sessionId, roundAnyWorking || roundAnyIdle));
+                m_knownItems.insert(stKey);
 
                 // Group agents by taskDescription within this round
                 QMap<QString, QList<const SubagentInfo *>> groups;
@@ -2931,6 +3043,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         groupItem->setData(0, Qt::UserRole + 1, meta.sessionId);
                         groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
 
+                        // Composite key for expansion state preservation
+                        QString tgKey = QStringLiteral("tg:%1:%2").arg(meta.sessionId).arg(qHash(groupKey));
+                        groupItem->setData(0, Qt::UserRole + 6, tgKey);
+
                         if (groupAnyWorking) {
                             groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
                             groupItem->setForeground(0, QBrush(Qt::darkGreen));
@@ -2943,7 +3059,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         }
 
                         groupItem->setToolTip(0, QStringLiteral("Task: %1\nAgents: %2").arg(groupKey).arg(agentList.size()));
-                        groupItem->setExpanded(groupAnyWorking || groupAnyIdle);
+                        groupItem->setExpanded(shouldAutoExpand(tgKey, meta.sessionId, groupAnyWorking || groupAnyIdle));
+                        m_knownItems.insert(tgKey);
 
                         for (const auto *info : agentList) {
                             addSubagentItem(groupItem, *info);
@@ -2957,9 +3074,11 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 }
             }
 
-            if (hasActiveItems) {
-                item->setExpanded(true);
+            // Smart expand: preserve user state, auto-expand only new items
+            item->setExpanded(shouldAutoExpand(sessionKey, meta.sessionId, hasActiveItems));
+            m_knownItems.insert(sessionKey);
 
+            if (hasActiveItems) {
                 // Start duration timer if not already running
                 if (!m_durationTimer) {
                     m_durationTimer = new QTimer(this);
@@ -2969,9 +3088,6 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!m_durationTimer->isActive()) {
                     m_durationTimer->start();
                 }
-            } else if (isPersistedTree) {
-                // Persisted tree: collapse by default (all items are "done")
-                item->setExpanded(false);
             }
         }
     }
@@ -3829,6 +3945,189 @@ void SessionManagerPanel::editSessionDescription(const QString &sessionId)
 
     // Refresh display
     scheduleTreeUpdate();
+}
+
+void SessionManagerPanel::updateSessionDescription(const QString &sessionId, const QString &desc)
+{
+    auto *meta = findMetadata(sessionId);
+    if (!meta) {
+        qWarning() << "SessionManagerPanel::updateSessionDescription: unknown sessionId" << sessionId;
+        return;
+    }
+    meta->description = desc;
+    scheduleMetadataSave();
+    scheduleTreeUpdate();
+}
+
+// --- Tree expansion state preservation ---
+
+QString SessionManagerPanel::compositeKeyForItem(QTreeWidgetItem *item) const
+{
+    if (!item) {
+        return {};
+    }
+    return item->data(0, Qt::UserRole + 6).toString();
+}
+
+void SessionManagerPanel::saveTreeState()
+{
+    m_expansionState.clear();
+
+    // Save scroll position
+    if (m_treeWidget && m_treeWidget->verticalScrollBar()) {
+        m_savedScrollPosition = m_treeWidget->verticalScrollBar()->value();
+    }
+
+    // Save selected item
+    m_savedSelectedKey.clear();
+    if (QTreeWidgetItem *sel = m_treeWidget->currentItem()) {
+        m_savedSelectedKey = compositeKeyForItem(sel);
+    }
+
+    // Walk all categories → session items → children recursively
+    auto walkItem = [this](QTreeWidgetItem *item, auto &&self) -> void {
+        QString key = compositeKeyForItem(item);
+        if (!key.isEmpty()) {
+            m_expansionState[key] = item->isExpanded();
+        }
+        for (int i = 0; i < item->childCount(); ++i) {
+            self(item->child(i), self);
+        }
+    };
+
+    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *category = m_treeWidget->topLevelItem(i);
+        for (int j = 0; j < category->childCount(); ++j) {
+            walkItem(category->child(j), walkItem);
+        }
+    }
+}
+
+void SessionManagerPanel::restoreTreeState()
+{
+    // Restore selection
+    if (!m_savedSelectedKey.isEmpty()) {
+        bool found = false;
+        auto walkRestore = [this, &found](QTreeWidgetItem *item, auto &&self) -> void {
+            if (found) {
+                return;
+            }
+            if (compositeKeyForItem(item) == m_savedSelectedKey) {
+                m_treeWidget->setCurrentItem(item);
+                found = true;
+                return;
+            }
+            for (int i = 0; i < item->childCount(); ++i) {
+                self(item->child(i), self);
+            }
+        };
+        for (int i = 0; i < m_treeWidget->topLevelItemCount() && !found; ++i) {
+            QTreeWidgetItem *cat = m_treeWidget->topLevelItem(i);
+            for (int j = 0; j < cat->childCount() && !found; ++j) {
+                walkRestore(cat->child(j), walkRestore);
+            }
+        }
+    }
+
+    // Restore scroll position after layout has settled
+    int savedScroll = m_savedScrollPosition;
+    QTimer::singleShot(0, this, [this, savedScroll]() {
+        if (m_treeWidget && m_treeWidget->verticalScrollBar()) {
+            m_treeWidget->verticalScrollBar()->setValue(savedScroll);
+        }
+    });
+}
+
+bool SessionManagerPanel::shouldAutoExpand(const QString &key, const QString &sessionId, bool hasActiveChildren) const
+{
+    // Muted sessions are always collapsed
+    if (m_mutedSessions.contains(sessionId)) {
+        return false;
+    }
+
+    // Known item → restore saved state
+    if (m_knownItems.contains(key)) {
+        auto it = m_expansionState.constFind(key);
+        if (it != m_expansionState.constEnd()) {
+            return it.value();
+        }
+        // Known but somehow missing from expansion state — default collapsed
+        return false;
+    }
+
+    // New item → auto-expand if it has active children
+    return hasActiveChildren;
+}
+
+void SessionManagerPanel::pruneStaleKeys()
+{
+    // Collect valid session IDs
+    QSet<QString> validIds;
+    for (auto it = m_metadata.constBegin(); it != m_metadata.constEnd(); ++it) {
+        validIds.insert(it.key());
+    }
+
+    // Helper: extract session ID from composite key "prefix:sessionId" or "prefix:sessionId:extra"
+    auto extractSessionId = [](const QString &key) -> QString {
+        int first = key.indexOf(QLatin1Char(':'));
+        if (first < 0) {
+            return {};
+        }
+        int second = key.indexOf(QLatin1Char(':'), first + 1);
+        if (second > 0) {
+            return key.mid(first + 1, second - first - 1);
+        }
+        return key.mid(first + 1);
+    };
+
+    auto pruneSet = [&](QSet<QString> &set) {
+        auto it = set.begin();
+        while (it != set.end()) {
+            QString sid = extractSessionId(*it);
+            if (!sid.isEmpty() && !validIds.contains(sid)) {
+                it = set.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+
+    auto pruneHash = [&](QHash<QString, bool> &hash) {
+        auto it = hash.begin();
+        while (it != hash.end()) {
+            QString sid = extractSessionId(it.key());
+            if (!sid.isEmpty() && !validIds.contains(sid)) {
+                it = hash.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+
+    pruneSet(m_knownItems);
+    pruneHash(m_expansionState);
+    m_mutedSessions.intersect(validIds);
+}
+
+bool SessionManagerPanel::isTreeInteractionActive() const
+{
+    if (!m_treeWidget || !m_treeWidget->isVisible()) {
+        return false;
+    }
+    return m_treeWidget->underMouse() || m_treeWidget->hasFocus();
+}
+
+bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_treeWidget || watched == m_treeWidget->viewport()) {
+        if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) {
+            if (m_pendingUpdate && !isTreeInteractionActive()) {
+                m_pendingUpdate = false;
+                scheduleTreeUpdate();
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 } // namespace Konsolai

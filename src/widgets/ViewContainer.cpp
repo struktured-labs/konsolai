@@ -11,6 +11,7 @@
 // Qt
 #include <QBoxLayout>
 #include <QFile>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QTabBar>
@@ -537,7 +538,11 @@ void TabbedViewContainer::closeCurrentTab()
 void TabbedViewContainer::tabDoubleClicked(int index)
 {
     if (index >= 0) {
-        renameTab(index);
+        if (auto *claudeSession = getClaudeSessionForTab(index)) {
+            editClaudeTabDescription(index, claudeSession);
+        } else {
+            renameTab(index);
+        }
     } else {
         Q_EMIT newViewRequest();
     }
@@ -573,6 +578,107 @@ void TabbedViewContainer::openTabContextMenu(const QPoint &point)
         return;
     }
 
+    // Check if this is a Claude tab — show Claude-specific context menu
+    auto *claudeSession = getClaudeSessionForTab(_contextMenuTabIndex);
+    if (claudeSession) {
+        QMenu claudeMenu(tabBar());
+        QPointer<Konsolai::ClaudeSession> safeSession(claudeSession);
+
+        // Helper: find current tab index for a session (tabs may have moved since menu opened)
+        auto findTabForSession = [this](Konsolai::ClaudeSession *s) -> int {
+            for (int i = 0; i < count(); ++i) {
+                if (getClaudeSessionForTab(i) == s) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        // Set Description...
+        claudeMenu.addAction(QIcon::fromTheme(QStringLiteral("edit-rename")),
+                             i18nc("@action:inmenu", "Set &Description..."),
+                             this,
+                             [this, safeSession, findTabForSession]() {
+                                 if (safeSession) {
+                                     editClaudeTabDescription(findTabForSession(safeSession), safeSession);
+                                 }
+                             });
+
+        claudeMenu.addSeparator();
+
+        // Yolo Mode toggles
+        auto *yoloAction = claudeMenu.addAction(i18nc("@action:inmenu", "Yolo Mode"));
+        yoloAction->setCheckable(true);
+        yoloAction->setChecked(claudeSession->yoloMode());
+        connect(yoloAction, &QAction::triggered, this, [safeSession](bool checked) {
+            if (safeSession) {
+                safeSession->setYoloMode(checked);
+            }
+        });
+
+        auto *doubleYoloAction = claudeMenu.addAction(i18nc("@action:inmenu", "Double Yolo"));
+        doubleYoloAction->setCheckable(true);
+        doubleYoloAction->setChecked(claudeSession->doubleYoloMode());
+        connect(doubleYoloAction, &QAction::triggered, this, [safeSession](bool checked) {
+            if (safeSession) {
+                safeSession->setDoubleYoloMode(checked);
+            }
+        });
+
+        auto *tripleYoloAction = claudeMenu.addAction(i18nc("@action:inmenu", "Triple Yolo"));
+        tripleYoloAction->setCheckable(true);
+        tripleYoloAction->setChecked(claudeSession->tripleYoloMode());
+        connect(tripleYoloAction, &QAction::triggered, this, [safeSession](bool checked) {
+            if (safeSession) {
+                safeSession->setTripleYoloMode(checked);
+            }
+        });
+
+        claudeMenu.addSeparator();
+
+        // Restart Claude
+        claudeMenu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18nc("@action:inmenu", "&Restart Claude"), this, [safeSession]() {
+            if (safeSession) {
+                safeSession->restart();
+            }
+        });
+
+        claudeMenu.addSeparator();
+
+        // Detach Tab — look up current index at action time (tabs may have shifted)
+        auto *detachAction = claudeMenu.addAction(QIcon::fromTheme(QStringLiteral("tab-detach")),
+                                                  i18nc("@action:inmenu", "D&etach Tab"),
+                                                  this,
+                                                  [this, safeSession, findTabForSession]() {
+                                                      if (!safeSession) {
+                                                          return;
+                                                      }
+                                                      int tabIdx = findTabForSession(safeSession);
+                                                      if (tabIdx >= 0) {
+                                                          Q_EMIT detachTab(tabIdx);
+                                                      }
+                                                  });
+        detachAction->setEnabled(count() > 1);
+
+        // Close Tab — look up current index at action time
+        claudeMenu.addAction(QIcon::fromTheme(QStringLiteral("tab-close")),
+                             i18nc("@action:inmenu", "&Close Tab"),
+                             this,
+                             [this, safeSession, findTabForSession]() {
+                                 if (!safeSession) {
+                                     return;
+                                 }
+                                 int tabIdx = findTabForSession(safeSession);
+                                 if (tabIdx >= 0) {
+                                     closeTerminalTab(tabIdx);
+                                 }
+                             });
+
+        claudeMenu.exec(tabBar()->mapToGlobal(point));
+        return;
+    }
+
+    // Non-Claude tab: show default context menu
     // TODO: add a countChanged signal so we can remove this for.
     // Detaching in mac causes crashes.
     const auto actions = _contextPopupMenu->actions();
@@ -850,6 +956,41 @@ void TabbedViewContainer::moveToNewTab(TerminalDisplay *display)
     // Ensure that the current terminal is not maximized so that the other views will be shown properly
     activeViewSplitter()->clearMaximized();
     addView(display);
+}
+
+Konsolai::ClaudeSession *TabbedViewContainer::getClaudeSessionForTab(int index)
+{
+    if (index < 0 || index >= count()) {
+        return nullptr;
+    }
+    auto *splitter = viewSplitterAt(index);
+    if (!splitter) {
+        return nullptr;
+    }
+    auto *display = splitter->activeTerminalDisplay();
+    if (!display || !display->sessionController() || !display->sessionController()->session()) {
+        return nullptr;
+    }
+    return qobject_cast<Konsolai::ClaudeSession *>(display->sessionController()->session().data());
+}
+
+void TabbedViewContainer::editClaudeTabDescription(int index, Konsolai::ClaudeSession *session)
+{
+    Q_UNUSED(index);
+    QPointer<Konsolai::ClaudeSession> safeSession(session);
+    bool ok = false;
+    QString currentDesc = safeSession ? safeSession->taskDescription() : QString();
+    QString newDesc = QInputDialog::getText(this,
+                                            i18nc("@title:window", "Set Session Description"),
+                                            i18nc("@label:textbox", "Description:"),
+                                            QLineEdit::Normal,
+                                            currentDesc,
+                                            &ok);
+    // Session may have been destroyed while dialog was open
+    if (ok && safeSession) {
+        safeSession->setTaskDescription(newDesc);
+        Q_EMIT claudeTabDescriptionEdited(safeSession, newDesc);
+    }
 }
 
 #include "moc_ViewContainer.cpp"

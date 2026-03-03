@@ -138,6 +138,15 @@ MainWindow::MainWindow()
     connect(_viewManager, &Konsole::ViewManager::terminalsDetached, this, &Konsole::MainWindow::terminalsDetached);
     connect(_viewManager, &Konsole::ViewManager::activationRequest, this, &Konsole::MainWindow::activationRequest);
 
+    // Connect tab description edits from the tab context menu to persist metadata
+    if (auto *container = _viewManager->activeContainer()) {
+        connect(container, &Konsole::TabbedViewContainer::claudeTabDescriptionEdited, this, [this](Konsolai::ClaudeSession *session, const QString &newDesc) {
+            if (_sessionPanel && session) {
+                _sessionPanel->updateSessionDescription(session->sessionId(), newDesc);
+            }
+        });
+    }
+
     setCentralWidget(_viewManager->widget());
 
     // Create in-terminal notification overlay on the central widget

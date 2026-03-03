@@ -22,6 +22,7 @@ class QMenu;
 
 namespace Konsolai
 {
+class ClaudeSession;
 class ClaudeTabIndicator;
 }
 
@@ -214,6 +215,9 @@ Q_SIGNALS:
     /** remove the color tab */
     void removeColor(int idx);
 
+    /** Emitted when user edits a Claude tab's description (via double-click or context menu) */
+    void claudeTabDescriptionEdited(Konsolai::ClaudeSession *session, const QString &newDesc);
+
 protected:
     // close tabs and unregister
     void closeTerminalTab(int idx);
@@ -248,6 +252,8 @@ private:
     bool _stylesheetSet = false;
 
     void setupClaudeIndicator(int tabIndex, QWidget *splitterWidget);
+    Konsolai::ClaudeSession *getClaudeSessionForTab(int index);
+    void editClaudeTabDescription(int index, Konsolai::ClaudeSession *session);
 
     QHash<const QWidget *, TabIconState> _tabIconState;
     QHash<const QWidget *, Konsolai::ClaudeTabIndicator *> _claudeIndicators;

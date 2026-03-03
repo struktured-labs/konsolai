@@ -200,6 +200,11 @@ public Q_SLOTS:
     QString sessionIdForName(const QString &sessionName) const;
 
     /**
+     * Update a session's description in persisted metadata (called from tab context menu)
+     */
+    void updateSessionDescription(const QString &sessionId, const QString &desc);
+
+    /**
      * Dismiss a session (soft delete — hides from normal view, metadata retained)
      */
     void dismissSession(const QString &sessionId);
@@ -273,6 +278,7 @@ private Q_SLOTS:
     void onNewSessionClicked();
 
 private:
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void setupUi();
     void loadMetadata();
     void saveMetadata();
@@ -292,6 +298,14 @@ private:
     SessionMetadata *findMetadata(const QString &sessionId);
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
     void applyFilter(const QString &text);
+
+    // Tree expansion state preservation
+    void saveTreeState();
+    void restoreTreeState();
+    QString compositeKeyForItem(QTreeWidgetItem *item) const;
+    bool shouldAutoExpand(const QString &key, const QString &sessionId, bool hasActiveChildren) const;
+    void pruneStaleKeys();
+    bool isTreeInteractionActive() const;
 
     QTreeWidget *m_treeWidget = nullptr;
     QLabel *m_emptyStateLabel = nullptr;
@@ -344,6 +358,25 @@ private:
     // Sessions explicitly closed via closeSession() — forced to "Closed" category
     // even if tmux hasn't died yet (async kill race)
     QSet<QString> m_explicitlyClosed;
+
+    // --- Tree expansion state preservation ---
+
+    // Composite key → isExpanded, captured before each tree rebuild
+    QHash<QString, bool> m_expansionState;
+
+    // Composite keys seen in at least one rebuild (distinguishes new items from existing)
+    QSet<QString> m_knownItems;
+
+    // Sessions the user has muted (suppresses auto-expand). Ephemeral, not persisted.
+    QSet<QString> m_mutedSessions;
+
+    // Saved scroll position and selection key for restoration after rebuild
+    int m_savedScrollPosition = 0;
+    QString m_savedSelectedKey;
+
+    // Whether a tree update is pending due to interaction deferral
+    bool m_pendingUpdate = false;
+    QTimer *m_deferRetryTimer = nullptr;
 };
 
 } // namespace Konsolai
