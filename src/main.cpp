@@ -142,6 +142,9 @@ static void migrateRenamedConfigKeys()
 // KDE Plasma creates app scopes with a default MemoryHigh (e.g. 192 MiB)
 // that is too small for a terminal emulator managing multiple tmux sessions.
 // Without this, the kernel throttles the process (D state) causing UI freezes.
+//
+// KDE may nest the process inside a sub-scope (e.g. .../app-foo.scope/main.scope),
+// so we walk up the cgroup hierarchy checking memory.high at each level.
 static void ensureCgroupMemoryLimit()
 {
     // Read our cgroup path from /proc/self/cgroup
@@ -158,35 +161,38 @@ static void ensureCgroupMemoryLimit()
         return;
     }
     QString cgroupPath = cgroupLine.mid(colonPos + 2);
-    QString memHighPath = QStringLiteral("/sys/fs/cgroup%1/memory.high").arg(cgroupPath);
 
-    QFile memHighFile(memHighPath);
-    if (!memHighFile.open(QIODevice::ReadWrite | QIODevice::Text)) {
-        return;
-    }
-
-    QString currentValue = QString::fromUtf8(memHighFile.readAll()).trimmed();
-    if (currentValue == QLatin1String("max")) {
-        memHighFile.close();
-        return; // No limit set, nothing to do
-    }
-
-    bool ok = false;
-    qint64 currentLimit = currentValue.toLongLong(&ok);
-    if (!ok || currentLimit <= 0) {
-        memHighFile.close();
-        return;
-    }
-
-    // Raise to 1 GiB if the limit is below that
     constexpr qint64 minLimit = 1073741824LL; // 1 GiB
-    if (currentLimit < minLimit) {
-        memHighFile.seek(0);
-        QTextStream stream(&memHighFile);
-        stream << minLimit;
-        qDebug("Konsolai: Raised cgroup memory.high from %lld to %lld bytes", currentLimit, minLimit);
+
+    // Walk up the hierarchy from the process cgroup to the app.slice level,
+    // raising any memory.high limit that is too low at any parent scope.
+    QString path = cgroupPath;
+    while (path.contains(QLatin1String("app.slice"))) {
+        QString memHighPath = QStringLiteral("/sys/fs/cgroup%1/memory.high").arg(path);
+
+        QFile memHighFile(memHighPath);
+        if (memHighFile.open(QIODevice::ReadWrite | QIODevice::Text)) {
+            QString currentValue = QString::fromUtf8(memHighFile.readAll()).trimmed();
+            if (currentValue != QLatin1String("max")) {
+                bool ok = false;
+                qint64 currentLimit = currentValue.toLongLong(&ok);
+                if (ok && currentLimit > 0 && currentLimit < minLimit) {
+                    memHighFile.seek(0);
+                    QTextStream stream(&memHighFile);
+                    stream << minLimit;
+                    qDebug("Konsolai: Raised cgroup memory.high from %lld to %lld bytes at %s", currentLimit, minLimit, qPrintable(memHighPath));
+                }
+            }
+            memHighFile.close();
+        }
+
+        // Move up one level in the hierarchy
+        int lastSlash = path.lastIndexOf(QLatin1Char('/'));
+        if (lastSlash <= 0) {
+            break;
+        }
+        path = path.left(lastSlash);
     }
-    memHighFile.close();
 }
 #endif
 
@@ -255,6 +261,12 @@ int main(int argc, char *argv[])
                      QString(),
                      QStringLiteral("https://github.com/struktured-labs/konsolai"));
     fillAboutData(about);
+    // Explicitly set the desktop filename to match the installed .desktop file.
+    // KAboutData's constructor derives it from the homepage URL (github.com →
+    // com.github.konsolai), but the desktop file is org.kde.konsolai.desktop.
+    // Without this, KDE's app scope uses a wrong ID and applies default
+    // (restrictive) cgroup memory limits instead of terminal-specific ones.
+    about.setDesktopFileName(QStringLiteral("org.kde.konsolai"));
 
     KAboutData::setApplicationData(about);
 
