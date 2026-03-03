@@ -3972,14 +3972,19 @@ QString SessionManagerPanel::compositeKeyForItem(QTreeWidgetItem *item) const
 void SessionManagerPanel::saveTreeState()
 {
     m_expansionState.clear();
+    m_savedSelectedKey.clear();
+    m_savedScrollPosition = 0;
+
+    if (!m_treeWidget) {
+        return;
+    }
 
     // Save scroll position
-    if (m_treeWidget && m_treeWidget->verticalScrollBar()) {
+    if (m_treeWidget->verticalScrollBar()) {
         m_savedScrollPosition = m_treeWidget->verticalScrollBar()->value();
     }
 
     // Save selected item
-    m_savedSelectedKey.clear();
     if (QTreeWidgetItem *sel = m_treeWidget->currentItem()) {
         m_savedSelectedKey = compositeKeyForItem(sel);
     }
@@ -4005,6 +4010,10 @@ void SessionManagerPanel::saveTreeState()
 
 void SessionManagerPanel::restoreTreeState()
 {
+    if (!m_treeWidget) {
+        return;
+    }
+
     // Restore selection
     if (!m_savedSelectedKey.isEmpty()) {
         bool found = false;
@@ -4119,7 +4128,7 @@ bool SessionManagerPanel::isTreeInteractionActive() const
 
 bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_treeWidget || watched == m_treeWidget->viewport()) {
+    if (m_treeWidget && (watched == m_treeWidget || watched == m_treeWidget->viewport())) {
         if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) {
             if (m_pendingUpdate && !isTreeInteractionActive()) {
                 m_pendingUpdate = false;
