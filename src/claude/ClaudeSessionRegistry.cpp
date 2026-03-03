@@ -291,8 +291,15 @@ void ClaudeSessionRegistry::refreshOrphanedSessions(const QList<TmuxManager::Ses
                 state.sessionId = match.captured(2);
             }
 
-            state.created = QDateTime::currentDateTime();  // Unknown, use now
-            state.lastAccessed = QDateTime::currentDateTime();
+            // Use the tmux session creation time if available, otherwise fall back to now
+            bool ok = false;
+            qint64 epoch = info.created.toLongLong(&ok);
+            if (ok && epoch > 0) {
+                state.created = QDateTime::fromSecsSinceEpoch(epoch);
+            } else {
+                state.created = QDateTime::currentDateTime();
+            }
+            state.lastAccessed = state.created;
             state.isAttached = m_activeSessions.contains(info.name);
 
             m_sessionStates.insert(info.name, state);

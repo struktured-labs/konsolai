@@ -751,7 +751,7 @@ void SessionManagerPanel::refresh()
                     meta.profileName = state.profileName;
                     meta.workingDirectory = state.workingDirectory;
                     meta.lastAccessed = state.lastAccessed;
-                    meta.createdAt = state.lastAccessed; // Approximate
+                    meta.createdAt = state.created;
                     meta.isArchived = false;
                     meta.isPinned = false;
                     guard->m_metadata[state.sessionId] = meta;
