@@ -27,6 +27,10 @@
 #ifdef Q_OS_LINUX
 #include <QFile>
 #include <QTextStream>
+#include <fcntl.h>
+#include <string.h>
+#include <thread>
+#include <unistd.h>
 #endif
 
 // KDE
@@ -138,61 +142,104 @@ static void migrateRenamedConfigKeys()
 }
 
 #ifdef Q_OS_LINUX
-// Raise the cgroup memory.high limit if the desktop launcher set it too low.
-// KDE Plasma creates app scopes with a default MemoryHigh (e.g. 192 MiB)
-// that is too small for a terminal emulator managing multiple tmux sessions.
-// Without this, the kernel throttles the process (D state) causing UI freezes.
-//
-// KDE may nest the process inside a sub-scope (e.g. .../app-foo.scope/main.scope),
-// so we walk up the cgroup hierarchy checking memory.high at each level.
-static void ensureCgroupMemoryLimit()
+// Walk up a cgroup path from the given starting point, raising any memory.high
+// limit below 1 GiB. Uses only raw POSIX I/O (no heap allocations) so it can
+// run safely from a watchdog thread even when the cgroup is memory-throttled.
+static bool fixCgroupMemoryHighRaw(const char *cgroupPath)
 {
-    // Read our cgroup path from /proc/self/cgroup
-    QFile cgroupFile(QStringLiteral("/proc/self/cgroup"));
-    if (!cgroupFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return;
-    }
-    QString cgroupLine = QString::fromUtf8(cgroupFile.readAll()).trimmed();
-    cgroupFile.close();
+    bool fixed = false;
 
-    // Format: "0::/user.slice/..."
-    int colonPos = cgroupLine.lastIndexOf(QLatin1String("::"));
-    if (colonPos < 0) {
-        return;
-    }
-    QString cgroupPath = cgroupLine.mid(colonPos + 2);
+    char pathBuf[512];
+    strncpy(pathBuf, cgroupPath, sizeof(pathBuf) - 1);
+    pathBuf[sizeof(pathBuf) - 1] = '\0';
 
-    constexpr qint64 minLimit = 1073741824LL; // 1 GiB
+    while (strstr(pathBuf, "app.slice")) {
+        char memHighPath[1024];
+        snprintf(memHighPath, sizeof(memHighPath), "/sys/fs/cgroup%s/memory.high", pathBuf);
 
-    // Walk up the hierarchy from the process cgroup to the app.slice level,
-    // raising any memory.high limit that is too low at any parent scope.
-    QString path = cgroupPath;
-    while (path.contains(QLatin1String("app.slice"))) {
-        QString memHighPath = QStringLiteral("/sys/fs/cgroup%1/memory.high").arg(path);
+        int mfd = open(memHighPath, O_RDWR);
+        if (mfd >= 0) {
+            char val[64];
+            ssize_t vn = read(mfd, val, sizeof(val) - 1);
+            if (vn > 0) {
+                val[vn] = '\0';
+                // Trim trailing whitespace/newline
+                while (vn > 0 && (val[vn - 1] == '\n' || val[vn - 1] == ' '))
+                    val[--vn] = '\0';
 
-        QFile memHighFile(memHighPath);
-        if (memHighFile.open(QIODevice::ReadWrite | QIODevice::Text)) {
-            QString currentValue = QString::fromUtf8(memHighFile.readAll()).trimmed();
-            if (currentValue != QLatin1String("max")) {
-                bool ok = false;
-                qint64 currentLimit = currentValue.toLongLong(&ok);
-                if (ok && currentLimit > 0 && currentLimit < minLimit) {
-                    memHighFile.seek(0);
-                    QTextStream stream(&memHighFile);
-                    stream << minLimit;
-                    qDebug("Konsolai: Raised cgroup memory.high from %lld to %lld bytes at %s", currentLimit, minLimit, qPrintable(memHighPath));
+                // Remove any limit that isn't "max" — terminal emulators
+                // managing many sessions can easily exceed several GiB.
+                if (strncmp(val, "max", 3) != 0) {
+                    lseek(mfd, 0, SEEK_SET);
+                    const char newVal[] = "max";
+                    if (write(mfd, newVal, sizeof(newVal) - 1) > 0)
+                        fixed = true;
                 }
             }
-            memHighFile.close();
+            close(mfd);
         }
 
-        // Move up one level in the hierarchy
-        int lastSlash = path.lastIndexOf(QLatin1Char('/'));
-        if (lastSlash <= 0) {
+        char *lastSlash = strrchr(pathBuf, '/');
+        if (!lastSlash || lastSlash == pathBuf)
             break;
-        }
-        path = path.left(lastSlash);
+        *lastSlash = '\0';
     }
+    return fixed;
+}
+
+// Read /proc/self/cgroup and extract the cgroup path after "::".
+// Returns the path in outBuf, or empty string on failure.
+static void readSelfCgroupPath(char *outBuf, size_t outSize)
+{
+    outBuf[0] = '\0';
+    int fd = open("/proc/self/cgroup", O_RDONLY);
+    if (fd < 0)
+        return;
+    char buf[512];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return;
+    buf[n] = '\0';
+
+    char *sep = strstr(buf, "::");
+    if (!sep)
+        return;
+    char *path = sep + 2;
+    char *nl = strchr(path, '\n');
+    if (nl)
+        *nl = '\0';
+
+    strncpy(outBuf, path, outSize - 1);
+    outBuf[outSize - 1] = '\0';
+}
+
+// Watchdog thread: retries for 30 seconds in case the app scope is created
+// AFTER the process starts (which is the normal KDE Plasma behavior).
+// Uses only raw POSIX syscalls — no heap allocations — so it keeps running
+// even when the main thread is blocked in D state due to memory.high throttling.
+static void cgroupMemoryWatchdog()
+{
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        usleep(1000000); // 1 second
+
+        char cgpath[512];
+        readSelfCgroupPath(cgpath, sizeof(cgpath));
+        if (cgpath[0] == '\0')
+            continue;
+
+        if (fixCgroupMemoryHighRaw(cgpath))
+            return; // Fixed, watchdog can exit
+    }
+}
+
+// Qt wrapper for the delayed event-loop check (belt to the watchdog's suspenders).
+static void ensureCgroupMemoryLimit()
+{
+    char cgpath[512];
+    readSelfCgroupPath(cgpath, sizeof(cgpath));
+    if (cgpath[0] != '\0')
+        fixCgroupMemoryHighRaw(cgpath);
 }
 #endif
 
@@ -202,7 +249,13 @@ static void ensureCgroupMemoryLimit()
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_LINUX
+    // Early check (covers restarts where the scope already exists)
     ensureCgroupMemoryLimit();
+    // Watchdog thread: KDE creates the app scope AFTER the process starts,
+    // so the early check above runs before the scope/limit exist. The watchdog
+    // retries every second for 30s using raw POSIX I/O (no heap allocations)
+    // so it keeps running even if the main thread is D-state throttled.
+    std::thread(cgroupMemoryWatchdog).detach();
 #endif
 #ifdef PROFILE_STARTUP
     QElapsedTimer timer;
