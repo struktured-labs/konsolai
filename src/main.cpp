@@ -27,10 +27,57 @@
 #ifdef Q_OS_LINUX
 #include <QFile>
 #include <QTextStream>
+#include <execinfo.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <string.h>
 #include <thread>
 #include <unistd.h>
+
+static void crashHandler(int sig)
+{
+    // Async-signal-safe: only use write(), backtrace(), backtrace_symbols_fd()
+    const char *msg = "\n=== KONSOLAI CRASH (signal ";
+    write(STDERR_FILENO, msg, strlen(msg));
+    // Write signal number
+    char sigbuf[16];
+    int len = 0;
+    int s = sig;
+    if (s == 0) {
+        sigbuf[len++] = '0';
+    } else {
+        char tmp[16];
+        int tl = 0;
+        while (s > 0) {
+            tmp[tl++] = '0' + (s % 10);
+            s /= 10;
+        }
+        while (tl > 0)
+            sigbuf[len++] = tmp[--tl];
+    }
+    write(STDERR_FILENO, sigbuf, len);
+    const char *msg2 = ") ===\n";
+    write(STDERR_FILENO, msg2, strlen(msg2));
+
+    void *frames[64];
+    int nframes = backtrace(frames, 64);
+    backtrace_symbols_fd(frames, nframes, STDERR_FILENO);
+
+    // Also write to a crash log file
+    const char *logpath = "/tmp/konsolai-crash.log";
+    int fd = open(logpath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        write(fd, msg, strlen(msg));
+        write(fd, sigbuf, len);
+        write(fd, msg2, strlen(msg2));
+        backtrace_symbols_fd(frames, nframes, fd);
+        close(fd);
+    }
+
+    // Re-raise with default handler to get core dump
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
 #endif
 
 // KDE
@@ -249,6 +296,10 @@ static void ensureCgroupMemoryLimit()
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_LINUX
+    // Install crash handler to capture backtraces before KCrash/DrKonqi
+    signal(SIGSEGV, crashHandler);
+    signal(SIGABRT, crashHandler);
+
     // Early check (covers restarts where the scope already exists)
     ensureCgroupMemoryLimit();
     // Watchdog thread: KDE creates the app scope AFTER the process starts,

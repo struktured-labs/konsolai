@@ -180,7 +180,9 @@ void SessionManager::applyProfile(Session *session, const Profile::Ptr &profile,
     ShouldApplyProperty apply(profile, modifiedPropertiesOnly);
 
     // Basic session settings
-    if (apply.shouldApply(Profile::Name)) {
+    // Skip NameRole override for sessions with user-set titles (e.g. ClaudeSession)
+    // to prevent the profile name from replacing the project-based display name
+    if (apply.shouldApply(Profile::Name) && !session->isTabTitleSetByUser()) {
         session->setTitle(Session::NameRole, profile->name());
     }
 

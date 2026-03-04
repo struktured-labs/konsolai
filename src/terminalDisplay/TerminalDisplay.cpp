@@ -419,6 +419,10 @@ void TerminalDisplay::setWallpaper(const ColorSchemeWallpaper::Ptr &p)
 
 void TerminalDisplay::scrollScreenWindow(enum ScreenWindow::RelativeScrollMode mode, int amount)
 {
+    if (_screenWindow.isNull()) {
+        return;
+    }
+
     _screenWindow->scrollBy(mode, amount, _scrollBar->scrollFullPage());
     _screenWindow->setTrackOutput(_screenWindow->atEndOfOutput());
     updateImage();
@@ -686,6 +690,12 @@ void TerminalDisplay::showNotification(QString text)
 
 void TerminalDisplay::paintEvent(QPaintEvent *pe)
 {
+    // Guard: if the screen window has been cleared (session finished and
+    // emulation destroyed), skip painting to avoid dangling-pointer access.
+    if (_screenWindow.isNull()) {
+        return;
+    }
+
     if (_linesAtLastOsd != _lines || _columnsAtLastOsd != _columns) {
         showResizeNotification();
     }
@@ -1768,6 +1778,10 @@ void TerminalDisplay::viewScrolledByUser()
 */
 QPoint TerminalDisplay::findLineStart(const QPoint &pnt)
 {
+    if (_screenWindow.isNull()) {
+        return pnt;
+    }
+
     const int visibleScreenLines = _lineProperties.size();
     const int topVisibleLine = _screenWindow->currentLine();
     Screen *screen = _screenWindow->screen();
@@ -1801,6 +1815,10 @@ QPoint TerminalDisplay::findLineStart(const QPoint &pnt)
 */
 QPoint TerminalDisplay::findLineEnd(const QPoint &pnt)
 {
+    if (_screenWindow.isNull()) {
+        return pnt;
+    }
+
     const int visibleScreenLines = _lineProperties.size();
     const int topVisibleLine = _screenWindow->currentLine();
     const int maxY = _screenWindow->lineCount() - 1;
@@ -1826,6 +1844,10 @@ QPoint TerminalDisplay::findLineEnd(const QPoint &pnt)
 
 QPoint TerminalDisplay::findWordStart(const QPoint &pnt)
 {
+    if (_screenWindow.isNull()) {
+        return pnt;
+    }
+
     // Don't ask me why x and y are switched ¯\_(ツ)_/¯
     QSharedPointer<HotSpot> hotspot = _filterChain->hotSpotAt(pnt.y(), pnt.x());
     if (hotspot) {
@@ -1904,6 +1926,10 @@ out:
 
 QPoint TerminalDisplay::findWordEnd(const QPoint &pnt)
 {
+    if (_screenWindow.isNull()) {
+        return pnt;
+    }
+
     const int maxY = _screenWindow->lineCount() - 1;
     const int maxX = _columns - 1;
 
@@ -2046,6 +2072,10 @@ void TerminalDisplay::removeLines(int lines)
 
 void TerminalDisplay::selectLine(QPoint pos, bool entireLine, bool fromTripleClick)
 {
+    if (_screenWindow.isNull()) {
+        return;
+    }
+
     _iPntSel = pos;
 
     clearSelection();
@@ -2189,6 +2219,10 @@ bool TerminalDisplay::bracketedPasteMode() const
 
 void TerminalDisplay::scrollPrepareEvent(QScrollPrepareEvent *event)
 {
+    if (_screenWindow.isNull()) {
+        return;
+    }
+
     // Ignore scroller events that were triggered in regions that we
     // expect to handle the input different (e.g. the find dialog)
     if (!isInTerminalRegion(event->startPos().toPoint())) {
@@ -2219,6 +2253,10 @@ void TerminalDisplay::scrollPrepareEvent(QScrollPrepareEvent *event)
 
 void TerminalDisplay::scrollEvent(QScrollEvent *event)
 {
+    if (_screenWindow.isNull()) {
+        return;
+    }
+
     const int lineHeight = _terminalFont->fontHeight() + _terminalFont->lineSpacing();
     const int targetLine = int(event->contentPos().y() / lineHeight);
     const int linesScrolled = targetLine - _screenWindow->currentLine();
@@ -2631,10 +2669,14 @@ void TerminalDisplay::updateReadOnlyState(bool readonly)
 
 void TerminalDisplay::keyPressEvent(QKeyEvent *event)
 {
+    if (_screenWindow.isNull()) {
+        QWidget::keyPressEvent(event);
+        return;
+    }
     Screen *screen = screenWindow()->screen();
     int histLines = screen->getHistLines();
     bool moved = true;
-    if (session()->getSelectMode()) {
+    if (session() && session()->getSelectMode()) {
         int y;
         bool startSelect = false;
         int modifiers = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier);
@@ -3368,6 +3410,10 @@ int TerminalDisplay::bidiMap(Character *screenline,
 
 void TerminalDisplay::clearSelection()
 {
+    if (_screenWindow.isNull()) {
+        return;
+    }
+
     _screenWindow->clearSelection();
     _doubleClickSelectedText.clear();
     _doubleClickSelectedHtml.clear();

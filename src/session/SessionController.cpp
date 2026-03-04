@@ -496,6 +496,9 @@ void SessionController::updateWebSearchMenu()
     }
 
     if (_selectionChanged) {
+        if (!view() || !view()->screenWindow()) {
+            return;
+        }
         _selectedText = view()->screenWindow()->selectedText(Screen::PreserveLineBreaks);
         _selectionChanged = false;
     }

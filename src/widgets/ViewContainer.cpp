@@ -738,7 +738,14 @@ void TabbedViewContainer::setTabActivity(int index, bool activity)
 void TabbedViewContainer::updateTitle(ViewProperties *item)
 {
     auto controller = qobject_cast<SessionController *>(item);
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
     if (controller->view() != topLevelSplitter->activeTerminalDisplay()) {
         return;
     }
@@ -755,7 +762,14 @@ void TabbedViewContainer::updateTitle(ViewProperties *item)
 void TabbedViewContainer::updateColor(ViewProperties *item)
 {
     auto controller = qobject_cast<SessionController *>(item);
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
     const int index = indexOf(topLevelSplitter);
 
     Q_EMIT setColor(index, item->color());
@@ -764,7 +778,14 @@ void TabbedViewContainer::updateColor(ViewProperties *item)
 void TabbedViewContainer::updateIcon(ViewProperties *item)
 {
     auto controller = qobject_cast<SessionController *>(item);
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
     const int index = indexOf(topLevelSplitter);
 
     // Claude tabs use the ClaudeTabIndicator widget instead of a static icon
@@ -821,7 +842,14 @@ void TabbedViewContainer::updateIcon(ViewProperties *item)
 void TabbedViewContainer::updateActivity(ViewProperties *item)
 {
     auto controller = qobject_cast<SessionController *>(item);
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
 
     const int index = indexOf(topLevelSplitter);
     if (index != currentIndex()) {
@@ -832,7 +860,14 @@ void TabbedViewContainer::updateActivity(ViewProperties *item)
 void TabbedViewContainer::updateNotification(ViewProperties *item, Session::Notification notification, bool enabled)
 {
     auto controller = qobject_cast<SessionController *>(item);
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
     const int index = indexOf(topLevelSplitter);
     auto &state = _tabIconState[topLevelSplitter];
 
@@ -848,7 +883,14 @@ void TabbedViewContainer::updateNotification(ViewProperties *item, Session::Noti
 void TabbedViewContainer::updateSpecialState(ViewProperties *item)
 {
     auto controller = qobject_cast<SessionController *>(item);
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
 
     auto &state = _tabIconState[topLevelSplitter];
     state.readOnly = true;
@@ -867,7 +909,14 @@ void TabbedViewContainer::updateSpecialState(ViewProperties *item)
 
 void TabbedViewContainer::currentSessionControllerChanged(SessionController *controller)
 {
-    auto topLevelSplitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget())->getToplevelSplitter();
+    if (!controller || !controller->view()) {
+        return;
+    }
+    auto *splitter = qobject_cast<ViewSplitter *>(controller->view()->parentWidget());
+    if (!splitter) {
+        return;
+    }
+    auto *topLevelSplitter = splitter->getToplevelSplitter();
     const int index = indexOf(topLevelSplitter);
 
     if (index == currentIndex()) {

@@ -157,6 +157,10 @@ void TerminalPainter::drawContents(Character *image,
                                    QVector<LineProperty> lineProperties,
                                    CharacterColor const *ulColorTable)
 {
+    if (m_parentDisplay->screenWindow().isNull()) {
+        return;
+    }
+
     auto currentProfile = SessionManager::instance()->sessionProfile(m_parentDisplay->session());
     const bool wordMode = currentProfile ? currentProfile->property<bool>(Profile::WordMode) : false;
     const bool wordModeAttr = currentProfile ? currentProfile->property<bool>(Profile::WordModeAttr) : true;
@@ -502,6 +506,10 @@ void TerminalPainter::highlightScrolledLines(QPainter &painter, bool isTimerActi
 
 QRegion TerminalPainter::highlightScrolledLinesRegion(TerminalScrollBar *scrollBar)
 {
+    if (m_parentDisplay->screenWindow().isNull()) {
+        return {};
+    }
+
     QRegion dirtyRegion;
     const int highlightLeftPosition = m_parentDisplay->scrollBar()->scrollBarPosition() == Enum::ScrollBarLeft ? m_parentDisplay->scrollBar()->width() : 0;
 
@@ -986,6 +994,10 @@ void TerminalPainter::drawAboveText(QPainter &painter,
 
 void TerminalPainter::drawImagesBelowText(QPainter &painter, const QRect &rect, int fontWidth, int fontHeight, int &placementIdx, QRegion &sixelRegion)
 {
+    if (m_parentDisplay->screenWindow().isNull()) {
+        return;
+    }
+
     Screen *screen = m_parentDisplay->screenWindow()->screen();
 
     placementIdx = 0;
@@ -1019,6 +1031,10 @@ void TerminalPainter::drawImagesBelowText(QPainter &painter, const QRect &rect, 
 
 void TerminalPainter::drawImagesAboveText(QPainter &painter, const QRect &rect, int fontWidth, int fontHeight, int &placementIdx)
 {
+    if (m_parentDisplay->screenWindow().isNull()) {
+        return;
+    }
+
     // setup painter
     Screen *screen = m_parentDisplay->screenWindow()->screen();
 
