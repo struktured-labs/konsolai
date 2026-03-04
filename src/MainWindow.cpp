@@ -138,6 +138,20 @@ MainWindow::MainWindow()
     connect(_viewManager, &Konsole::ViewManager::terminalsDetached, this, &Konsole::MainWindow::terminalsDetached);
     connect(_viewManager, &Konsole::ViewManager::activationRequest, this, &Konsole::MainWindow::activationRequest);
 
+    // Connect notification handlers for Claude sessions on tab switch.
+    // Must be here (not in setupActions) because _viewManager doesn't exist yet during setupActions().
+    connect(_viewManager, &Konsole::ViewManager::activeViewChanged, this, [this](SessionController *controller) {
+        if (!controller || !controller->session()) {
+            return;
+        }
+        auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(controller->session().data());
+        if (!claudeSession) {
+            return;
+        }
+        _sessionPanel->registerSession(claudeSession);
+        connectClaudeNotifications(claudeSession);
+    });
+
     // Connect tab description edits from the tab context menu to persist metadata
     if (auto *container = _viewManager->activeContainer()) {
         connect(container, &Konsole::TabbedViewContainer::claudeTabDescriptionEdited, this, [this](Konsolai::ClaudeSession *session, const QString &newDesc) {
@@ -832,68 +846,52 @@ void MainWindow::setupActions()
     });
 
     // Resume a specific conversation from the session panel
-    connect(_sessionPanel, &Konsolai::SessionManagerPanel::resumeConversationRequested,
-            this, [this](const QString &workDir, const QString &conversationId,
-                          const QString &sshHost, const QString &sshUsername, int sshPort) {
-        // Find a Claude-enabled profile
-        Profile::Ptr claudeProfile;
-        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
-        for (const Profile::Ptr &profile : profiles) {
-            if (profile->property<bool>(Profile::ClaudeEnabled)) {
-                claudeProfile = profile;
-                break;
-            }
-        }
-        if (!claudeProfile) {
-            qWarning() << "No Claude profile found for resume";
-            return;
-        }
+    connect(_sessionPanel,
+            &Konsolai::SessionManagerPanel::resumeConversationRequested,
+            this,
+            [this](const QString &workDir, const QString &conversationId, const QString &sshHost, const QString &sshUsername, int sshPort) {
+                // Find a Claude-enabled profile
+                Profile::Ptr claudeProfile;
+                const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+                for (const Profile::Ptr &profile : profiles) {
+                    if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                        claudeProfile = profile;
+                        break;
+                    }
+                }
+                if (!claudeProfile) {
+                    qWarning() << "No Claude profile found for resume";
+                    return;
+                }
 
-        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
-        claudeSession->setResumeSessionId(conversationId);
+                auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
+                claudeSession->setResumeSessionId(conversationId);
 
-        if (!sshHost.isEmpty()) {
-            claudeSession->setIsRemote(true);
-            claudeSession->setSshHost(sshHost);
-            claudeSession->setSshUsername(sshUsername);
-            claudeSession->setSshPort(sshPort);
-        }
+                if (!sshHost.isEmpty()) {
+                    claudeSession->setIsRemote(true);
+                    claudeSession->setSshHost(sshHost);
+                    claudeSession->setSshUsername(sshUsername);
+                    claudeSession->setSshPort(sshPort);
+                }
 
-        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
-        claudeSession->setInitialWorkingDirectory(workDir);
+                SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+                claudeSession->setInitialWorkingDirectory(workDir);
 
-        auto *view = _viewManager->createView(claudeSession);
-        _viewManager->activeContainer()->addView(view);
+                auto *view = _viewManager->createView(claudeSession);
+                _viewManager->activeContainer()->addView(view);
 
-        if (!claudeSession->isRunning()) {
-            claudeSession->run();
-        }
+                if (!claudeSession->isRunning()) {
+                    claudeSession->run();
+                }
 
-        _sessionPanel->registerSession(claudeSession);
-        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
-        if (registry) {
-            registry->registerSession(claudeSession);
-        }
-        _claudeMenu->setActiveSession(claudeSession);
-        _claudeStatusWidget->setSession(claudeSession);
-    });
-
-    // Connect active view changes to update Claude menu and status
-    // Connect notification handlers for Claude sessions on tab switch.
-    // Note: setActiveSession/setSession are handled in MainWindow::activeViewChanged() above.
-    connect(viewManager(), &ViewManager::activeViewChanged, this, [this](SessionController *controller) {
-        if (!controller || !controller->session()) {
-            return;
-        }
-
-        auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(controller->session().data());
-        if (!claudeSession) {
-            return;
-        }
-
-        _sessionPanel->registerSession(claudeSession);
-        connectClaudeNotifications(claudeSession);
-    });
+                _sessionPanel->registerSession(claudeSession);
+                auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+                if (registry) {
+                    registry->registerSession(claudeSession);
+                }
+                _claudeMenu->setActiveSession(claudeSession);
+                _claudeStatusWidget->setSession(claudeSession);
+            });
 }
 
 void MainWindow::connectClaudeNotifications(Konsolai::ClaudeSession *claudeSession)
