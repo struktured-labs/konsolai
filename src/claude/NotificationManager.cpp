@@ -75,9 +75,10 @@ void NotificationManager::notify(NotificationType type, const QString &title, co
         showDesktopNotification(type, title, message);
     }
 
-    // Play sound via QSoundEffect only when KNotification won't handle it.
-    // KNotification plays sounds via Sound= in the .notifyrc when Desktop channel is active.
-    if (channels.testFlag(Channel::Audio) && !channels.testFlag(Channel::Desktop)) {
+    // Always play sound via QSoundEffect — KNotification Sound= is unreliable
+    // due to stale user-local overrides in ~/.local/share/knotifications6/.
+    // The .notifyrc has Action=Popup (no Sound) to prevent double-playing.
+    if (channels.testFlag(Channel::Audio)) {
         playSound(type);
     }
 
