@@ -36,6 +36,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -79,6 +80,14 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
     , m_registry(ClaudeSessionRegistry::instance())
 {
     setupUi();
+    showLoadingState();
+    // Defer heavy init (metadata parse, tmux queries, timers) so the event loop
+    // can paint the window first, making startup feel snappy.
+    QTimer::singleShot(0, this, &SessionManagerPanel::deferredInit);
+}
+
+void SessionManagerPanel::deferredInit()
+{
     loadMetadata();
     cleanupStaleSockets(); // async — returns immediately
     refreshRemoteTmuxSessions(); // async SSH query for remote session liveness
@@ -106,6 +115,17 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
         m_gsdBadgeCache.clear();
     });
     m_convCacheTimer->start();
+
+    // Process any sessions that registered before init completed
+    m_initialized = true;
+    for (auto *session : std::as_const(m_pendingRegistrations)) {
+        if (session) {
+            registerSession(session);
+        }
+    }
+    m_pendingRegistrations.clear();
+
+    showReadyState();
 }
 
 SessionManagerPanel::~SessionManagerPanel()
@@ -263,6 +283,14 @@ void SessionManagerPanel::setupUi()
     connect(m_filterEdit, &QLineEdit::textChanged, this, &SessionManagerPanel::applyFilter);
     layout->addWidget(m_filterEdit);
 
+    // Loading progress bar (shown during deferred init, hidden after)
+    m_loadingBar = new QProgressBar(this);
+    m_loadingBar->setRange(0, 0); // indeterminate
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(4);
+    m_loadingBar->setVisible(false);
+    layout->addWidget(m_loadingBar);
+
     // Tree widget for sessions
     m_treeWidget = new QTreeWidget(this);
     m_treeWidget->setColumnCount(2);
@@ -338,6 +366,22 @@ void SessionManagerPanel::setupUi()
 
     setMinimumWidth(200);
     setMaximumWidth(350);
+}
+
+void SessionManagerPanel::showLoadingState()
+{
+    m_emptyStateLabel->setText(i18n("Loading sessions..."));
+    m_emptyStateLabel->setVisible(true);
+    m_loadingBar->setVisible(true);
+    m_treeWidget->setVisible(false);
+}
+
+void SessionManagerPanel::showReadyState()
+{
+    m_loadingBar->setVisible(false);
+    m_emptyStateLabel->setText(i18n("No Claude sessions yet\nOpen a Claude tab to get started"));
+    // Tree visibility will be managed by updateTreeWidget — just ensure it's shown
+    m_treeWidget->setVisible(true);
 }
 
 void SessionManagerPanel::setCollapsed(bool collapsed)
@@ -457,6 +501,12 @@ void SessionManagerPanel::ensureHooksConfigured(ClaudeSession *session)
 void SessionManagerPanel::registerSession(ClaudeSession *session)
 {
     if (!session) {
+        return;
+    }
+
+    // Queue sessions arriving before deferred init completes
+    if (!m_initialized) {
+        m_pendingRegistrations.append(session);
         return;
     }
 
@@ -2118,6 +2168,10 @@ void SessionManagerPanel::onNewSessionClicked()
 
 void SessionManagerPanel::scheduleTreeUpdate()
 {
+    if (!m_initialized) {
+        return;
+    }
+
     // Debounce: coalesce rapid-fire signals (e.g. approvalCountChanged fires
     // many times per minute during yolo mode) into a single deferred update.
     if (!m_updateDebounce) {
@@ -2252,6 +2306,10 @@ void SessionManagerPanel::scheduleMetadataSave()
 
 void SessionManagerPanel::updateTreeWidget()
 {
+    if (!m_initialized) {
+        return;
+    }
+
     // Guard against overlapping async tmux queries - if one is already running,
     // mark that we need another update after it finishes
     if (m_asyncQueryInFlight) {

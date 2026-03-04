@@ -21,6 +21,7 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProcess>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
@@ -281,6 +282,9 @@ private Q_SLOTS:
 private:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void setupUi();
+    void deferredInit();
+    void showLoadingState();
+    void showReadyState();
     void loadMetadata();
     void saveMetadata();
     void scheduleTreeUpdate(); // debounced — coalesces rapid-fire calls
@@ -321,6 +325,10 @@ private:
     QTreeWidgetItem *m_archivedCategory = nullptr;
     QTreeWidgetItem *m_dismissedCategory = nullptr;
     QTreeWidgetItem *m_discoveredCategory = nullptr;
+
+    QProgressBar *m_loadingBar = nullptr;
+    bool m_initialized = false;
+    QVector<ClaudeSession *> m_pendingRegistrations;
 
     QMap<QString, SessionMetadata> m_metadata;
     QMap<QString, QPointer<ClaudeSession>> m_activeSessions;

@@ -8,6 +8,7 @@
 #include "SessionManagerPanelTest.h"
 
 // Qt
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -22,6 +23,12 @@
 #include "../claude/SessionManagerPanel.h"
 
 using namespace Konsolai;
+
+// Helper macro: construct SessionManagerPanel and process events so that
+// the deferred init (QTimer::singleShot(0, ...)) fires before tests inspect state.
+#define SessionManagerPanel_INIT(varName)                                                                                                                      \
+    SessionManagerPanel varName;                                                                                                                               \
+    QCoreApplication::processEvents()
 
 static QString sessionsFilePath()
 {
@@ -73,7 +80,7 @@ void SessionManagerPanelTest::cleanup()
 
 void SessionManagerPanelTest::testAllSessionsEmpty()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     // With no sessions file, should have no sessions
     QCOMPARE(panel.allSessions().size(), 0);
 }
@@ -85,7 +92,7 @@ void SessionManagerPanelTest::testAllSessionsLoaded()
     sessions.append(makeSession(QStringLiteral("bbb22222"), QStringLiteral("konsolai-test-bbb22222")));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.allSessions().size(), 2);
 }
 
@@ -96,7 +103,7 @@ void SessionManagerPanelTest::testPinnedSessionsFilter()
     sessions.append(makeSession(QStringLiteral("nop22222"), QStringLiteral("konsolai-test-nop22222"), false));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> pinned = panel.pinnedSessions();
     QCOMPARE(pinned.size(), 1);
     QCOMPARE(pinned[0].sessionId, QStringLiteral("pin11111"));
@@ -109,7 +116,7 @@ void SessionManagerPanelTest::testArchivedSessionsFilter()
     sessions.append(makeSession(QStringLiteral("act22222"), QStringLiteral("konsolai-test-act22222"), false, false));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> archived = panel.archivedSessions();
     QCOMPARE(archived.size(), 1);
     QCOMPARE(archived[0].sessionId, QStringLiteral("arc11111"));
@@ -122,7 +129,7 @@ void SessionManagerPanelTest::testPinnedExcludesArchived()
     sessions.append(makeSession(QStringLiteral("both1111"), QStringLiteral("konsolai-test-both1111"), true, true));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.pinnedSessions().size(), 0);
     QCOMPARE(panel.archivedSessions().size(), 1);
 }
@@ -137,7 +144,7 @@ void SessionManagerPanelTest::testPinSession()
     sessions.append(makeSession(QStringLiteral("pin11111"), QStringLiteral("konsolai-test-pin11111"), false));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.pinnedSessions().size(), 0);
 
     panel.pinSession(QStringLiteral("pin11111"));
@@ -150,7 +157,7 @@ void SessionManagerPanelTest::testUnpinSession()
     sessions.append(makeSession(QStringLiteral("unp11111"), QStringLiteral("konsolai-test-unp11111"), true));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.pinnedSessions().size(), 1);
 
     panel.unpinSession(QStringLiteral("unp11111"));
@@ -159,7 +166,7 @@ void SessionManagerPanelTest::testUnpinSession()
 
 void SessionManagerPanelTest::testPinNonexistentSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     // Should be a no-op, not crash
     panel.pinSession(QStringLiteral("nonexistent"));
     QCOMPARE(panel.pinnedSessions().size(), 0);
@@ -175,7 +182,7 @@ void SessionManagerPanelTest::testArchiveSession()
     sessions.append(makeSession(QStringLiteral("arc11111"), QStringLiteral("konsolai-test-arc11111"), false, false));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.archivedSessions().size(), 0);
 
     panel.archiveSession(QStringLiteral("arc11111"));
@@ -185,7 +192,7 @@ void SessionManagerPanelTest::testArchiveSession()
 
 void SessionManagerPanelTest::testArchiveNonexistentSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     // Should be a no-op, not crash
     panel.archiveSession(QStringLiteral("nonexistent"));
     QCOMPARE(panel.archivedSessions().size(), 0);
@@ -201,7 +208,7 @@ void SessionManagerPanelTest::testCloseSessionNotArchived()
     sessions.append(makeSession(QStringLiteral("cls11111"), QStringLiteral("konsolai-test-cls11111"), false, false));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     panel.closeSession(QStringLiteral("cls11111"));
 
     // Should NOT be archived
@@ -217,7 +224,7 @@ void SessionManagerPanelTest::testCloseSessionNotArchived()
 
 void SessionManagerPanelTest::testCloseNonexistentSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     // Should be a no-op, not crash
     panel.closeSession(QStringLiteral("nonexistent"));
     QCOMPARE(panel.allSessions().size(), 0);
@@ -233,7 +240,7 @@ void SessionManagerPanelTest::testMarkExpired()
     sessions.append(makeSession(QStringLiteral("exp11111"), QStringLiteral("konsolai-test-exp11111"), false, false, false));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     panel.markExpired(QStringLiteral("konsolai-test-exp11111"));
 
     QList<SessionMetadata> all = panel.allSessions();
@@ -244,7 +251,7 @@ void SessionManagerPanelTest::testMarkExpired()
 
 void SessionManagerPanelTest::testMarkExpiredUnknownSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     // Should be a no-op, not crash
     panel.markExpired(QStringLiteral("konsolai-nonexistent-12345678"));
 }
@@ -255,7 +262,7 @@ void SessionManagerPanelTest::testMarkExpiredUnknownSession()
 
 void SessionManagerPanelTest::testCollapsedToggle()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QVERIFY(!panel.isCollapsed());
 
     panel.setCollapsed(true);
@@ -267,7 +274,7 @@ void SessionManagerPanelTest::testCollapsedToggle()
 
 void SessionManagerPanelTest::testCollapsedSignal()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QSignalSpy spy(&panel, &SessionManagerPanel::collapsedChanged);
 
     panel.setCollapsed(true);
@@ -281,7 +288,7 @@ void SessionManagerPanelTest::testCollapsedSignal()
 
 void SessionManagerPanelTest::testCollapsedIdempotent()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QSignalSpy spy(&panel, &SessionManagerPanel::collapsedChanged);
 
     panel.setCollapsed(false); // Already not collapsed
@@ -300,13 +307,13 @@ void SessionManagerPanelTest::testMetadataPersistence()
     writeTestSessions(sessions);
 
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         panel.pinSession(QStringLiteral("per11111"));
         // Destructor calls saveMetadata()
     }
 
     // New panel should load the saved state
-    SessionManagerPanel panel2;
+    SessionManagerPanel_INIT(panel2);
     QCOMPARE(panel2.pinnedSessions().size(), 1);
     QCOMPARE(panel2.pinnedSessions()[0].sessionId, QStringLiteral("per11111"));
 }
@@ -321,7 +328,7 @@ void SessionManagerPanelTest::testMetadataYoloPersistence()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QVERIFY(all[0].yoloMode);
@@ -340,7 +347,7 @@ void SessionManagerPanelTest::testMetadataSshFields()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QVERIFY(all[0].isRemote);
@@ -359,7 +366,7 @@ void SessionManagerPanelTest::testDismissSession()
     sessions.append(makeSession(QStringLiteral("dis11111"), QStringLiteral("konsolai-test-dis11111"), false, true));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.archivedSessions().size(), 1);
 
     panel.dismissSession(QStringLiteral("dis11111"));
@@ -374,7 +381,7 @@ void SessionManagerPanelTest::testDismissSession()
 
 void SessionManagerPanelTest::testDismissNonexistentSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     panel.dismissSession(QStringLiteral("nonexistent"));
     QCOMPARE(panel.allSessions().size(), 0);
 }
@@ -387,7 +394,7 @@ void SessionManagerPanelTest::testRestoreSession()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     // archivedSessions() includes dismissed (isArchived is still true)
     QCOMPARE(panel.archivedSessions().size(), 1);
     QVERIFY(panel.allSessions()[0].isDismissed);
@@ -402,7 +409,7 @@ void SessionManagerPanelTest::testRestoreSession()
 
 void SessionManagerPanelTest::testRestoreNonexistentSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     panel.restoreSession(QStringLiteral("nonexistent"));
     QCOMPARE(panel.allSessions().size(), 0);
 }
@@ -415,7 +422,7 @@ void SessionManagerPanelTest::testPurgeSession()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.allSessions().size(), 1);
 
     panel.purgeSession(QStringLiteral("prg11111"));
@@ -424,7 +431,7 @@ void SessionManagerPanelTest::testPurgeSession()
 
 void SessionManagerPanelTest::testPurgeNonexistentSession()
 {
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     panel.purgeSession(QStringLiteral("nonexistent"));
     QCOMPARE(panel.allSessions().size(), 0);
 }
@@ -443,7 +450,7 @@ void SessionManagerPanelTest::testPurgeDismissed()
     sessions.append(s3);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.allSessions().size(), 3);
 
     panel.purgeDismissed();
@@ -459,7 +466,7 @@ void SessionManagerPanelTest::testDismissRestorePurgeRoundTrip()
     sessions.append(makeSession(QStringLiteral("rnd11111"), QStringLiteral("konsolai-test-rnd11111"), false, true));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
 
     // Start: archived
     QCOMPARE(panel.archivedSessions().size(), 1);
@@ -494,7 +501,7 @@ void SessionManagerPanelTest::testMetadataBudgetPersistence()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].budgetTimeLimitMinutes, 60);
@@ -513,7 +520,7 @@ void SessionManagerPanelTest::testMetadataCorruptedJson()
     file.close();
 
     // Panel should handle gracefully — no sessions, no crash
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.allSessions().size(), 0);
 }
 
@@ -528,7 +535,7 @@ void SessionManagerPanelTest::testMetadataMissingFields()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].sessionId, QStringLiteral("min11111"));
@@ -553,7 +560,7 @@ void SessionManagerPanelTest::testMetadataApprovalCountPersistence()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].yoloApprovalCount, 42);
@@ -602,7 +609,7 @@ void SessionManagerPanelTest::testMetadataAllFieldsRoundTrip()
 
     // Load, modify, save, and reload
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         QList<SessionMetadata> all = panel.allSessions();
         QCOMPARE(all.size(), 1);
 
@@ -635,7 +642,7 @@ void SessionManagerPanelTest::testMetadataAllFieldsRoundTrip()
 
     // Reload and verify persistence
     {
-        SessionManagerPanel panel2;
+        SessionManagerPanel_INIT(panel2);
         QList<SessionMetadata> all = panel2.allSessions();
         QCOMPARE(all.size(), 1);
 
@@ -691,7 +698,7 @@ void SessionManagerPanelTest::testMetadataApprovalLogRoundTrip()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].yoloApprovalCount, 1);
@@ -738,14 +745,14 @@ void SessionManagerPanelTest::testMetadataMultipleSessionsRoundTrip()
     writeTestSessions(sessions);
 
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         QList<SessionMetadata> all = panel.allSessions();
         QCOMPARE(all.size(), 3);
         // Panel destructor saves
     }
 
     // Reload
-    SessionManagerPanel panel2;
+    SessionManagerPanel_INIT(panel2);
     QList<SessionMetadata> all = panel2.allSessions();
     QCOMPARE(all.size(), 3);
 
@@ -790,7 +797,7 @@ void SessionManagerPanelTest::testMetadataSaveLoadIdempotent()
 
     // First load & save
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         QCOMPARE(panel.allSessions().size(), 1);
     }
 
@@ -802,7 +809,7 @@ void SessionManagerPanelTest::testMetadataSaveLoadIdempotent()
 
     // Second load & save
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         QCOMPARE(panel.allSessions().size(), 1);
     }
 
@@ -866,7 +873,7 @@ void SessionManagerPanelTest::testMetadataSubagentPersistence()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].subagents.size(), 2);
@@ -907,7 +914,7 @@ void SessionManagerPanelTest::testMetadataSubprocessPersistence()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].subprocesses.size(), 1);
@@ -939,7 +946,7 @@ void SessionManagerPanelTest::testMetadataPromptLabelsPersistence()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QList<SessionMetadata> all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].promptGroupLabels.size(), 3);
@@ -957,7 +964,7 @@ void SessionManagerPanelTest::testMetadataSubagentEmptyNotSerialized()
     writeTestSessions(sessions);
 
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         QList<SessionMetadata> all = panel.allSessions();
         QCOMPARE(all.size(), 1);
         QVERIFY(all[0].subagents.isEmpty());
@@ -1007,14 +1014,14 @@ void SessionManagerPanelTest::testMetadataSubagentRoundTrip()
 
     // First load & save
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
         QCOMPARE(panel.allSessions().size(), 1);
         QCOMPARE(panel.allSessions()[0].subagents.size(), 1);
     }
 
     // Second load — verify persistence
     {
-        SessionManagerPanel panel2;
+        SessionManagerPanel_INIT(panel2);
         QList<SessionMetadata> all = panel2.allSessions();
         QCOMPARE(all.size(), 1);
         QCOMPARE(all[0].subagents.size(), 1);
@@ -1036,7 +1043,7 @@ void SessionManagerPanelTest::testRegisterSessionCapturesRemoteFields()
 {
     // registerSession() should capture isRemote/sshHost/sshUsername/sshPort
     // from the ClaudeSession object into metadata
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
 
     auto *session = new ClaudeSession(QStringLiteral("Claude"), QStringLiteral("/home/struktured/projects/fluxit"), this);
     session->setIsRemote(true);
@@ -1069,7 +1076,7 @@ void SessionManagerPanelTest::testUnarchiveEmitsRemoteFields()
     sessions.append(s);
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QSignalSpy spy(&panel, &SessionManagerPanel::unarchiveRequested);
 
     panel.unarchiveSession(QStringLiteral("una11111"));
@@ -1091,7 +1098,7 @@ void SessionManagerPanelTest::testUnarchiveLocalSessionEmitsNoRemoteFields()
     sessions.append(makeSession(QStringLiteral("loc11111"), QStringLiteral("konsolai-test-loc11111")));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QSignalSpy spy(&panel, &SessionManagerPanel::unarchiveRequested);
 
     panel.unarchiveSession(QStringLiteral("loc11111"));
@@ -1106,7 +1113,7 @@ void SessionManagerPanelTest::testRegisterRemoteSessionRoundTrip()
 {
     // Register a remote session → save → reload → verify remote fields persisted
     {
-        SessionManagerPanel panel;
+        SessionManagerPanel_INIT(panel);
 
         // Parent to test, not panel, to avoid SSH cleanup on panel destruct
         auto *session = new ClaudeSession(QStringLiteral("Claude"), QStringLiteral("/home/struktured/projects/fluxit"), this);
@@ -1130,7 +1137,7 @@ void SessionManagerPanelTest::testRegisterRemoteSessionRoundTrip()
     }
 
     // Reload from disk
-    SessionManagerPanel panel2;
+    SessionManagerPanel_INIT(panel2);
     QList<SessionMetadata> all = panel2.allSessions();
     QCOMPARE(all.size(), 1);
     QVERIFY(all[0].isRemote);
@@ -1152,7 +1159,7 @@ void SessionManagerPanelTest::testBulkArchiveMultipleSessions()
     sessions.append(makeSession(QStringLiteral("bulk03"), QStringLiteral("konsolai-bulk03")));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.allSessions().size(), 3);
     QCOMPARE(panel.archivedSessions().size(), 0);
 
@@ -1177,7 +1184,7 @@ void SessionManagerPanelTest::testBulkDismissMultipleSessions()
     sessions.append(makeSession(QStringLiteral("bdis03"), QStringLiteral("konsolai-bdis03"), false, true));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.archivedSessions().size(), 3);
 
     // Dismiss all three
@@ -1219,7 +1226,7 @@ void SessionManagerPanelTest::testBulkDismissOlderThan()
 
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
     QCOMPARE(panel.archivedSessions().size(), 3);
 
     // Dismiss sessions older than 1 month — should only get age01
@@ -1267,7 +1274,7 @@ void SessionManagerPanelTest::testBulkCloseMultipleSessions()
     sessions.append(makeSession(QStringLiteral("bcls02"), QStringLiteral("konsolai-bcls02")));
     writeTestSessions(sessions);
 
-    SessionManagerPanel panel;
+    SessionManagerPanel_INIT(panel);
 
     // Close both — should NOT mark as archived
     panel.closeSession(QStringLiteral("bcls01"));
