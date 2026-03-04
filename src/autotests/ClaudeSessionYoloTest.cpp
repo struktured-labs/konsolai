@@ -847,7 +847,7 @@ void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithDoubleYolo()
     auto *process = session.claudeProcess();
     QVERIFY(process);
 
-    // Enable double yolo — taskComplete should be suppressed
+    // Enable double yolo — taskComplete should still fire (notifications always emit)
     session.setYoloMode(false);
     session.setDoubleYoloMode(true);
     session.setTripleYoloMode(false);
@@ -858,7 +858,7 @@ void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithDoubleYolo()
     process->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
     QCOMPARE(process->state(), ClaudeProcess::State::Idle);
 
-    QCOMPARE(taskCompleteSpy.count(), 0);
+    QCOMPARE(taskCompleteSpy.count(), 1);
 }
 
 void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithTripleYolo()
@@ -867,7 +867,7 @@ void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithTripleYolo()
     auto *process = session.claudeProcess();
     QVERIFY(process);
 
-    // Enable triple yolo — taskComplete should be suppressed
+    // Enable triple yolo — taskComplete should still fire (notifications always emit)
     session.setYoloMode(false);
     session.setDoubleYoloMode(false);
     session.setTripleYoloMode(true);
@@ -878,7 +878,7 @@ void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithTripleYolo()
     process->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
     QCOMPARE(process->state(), ClaudeProcess::State::Idle);
 
-    QCOMPARE(taskCompleteSpy.count(), 0);
+    QCOMPARE(taskCompleteSpy.count(), 1);
 }
 
 void ClaudeSessionYoloTest::testTaskComplete_NotEmittedOnNonIdleState()

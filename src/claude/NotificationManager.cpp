@@ -75,7 +75,9 @@ void NotificationManager::notify(NotificationType type, const QString &title, co
         showDesktopNotification(type, title, message);
     }
 
-    if (channels.testFlag(Channel::Audio)) {
+    // Play sound via QSoundEffect only when KNotification won't handle it.
+    // KNotification plays sounds via Sound= in the .notifyrc when Desktop channel is active.
+    if (channels.testFlag(Channel::Audio) && !channels.testFlag(Channel::Desktop)) {
         playSound(type);
     }
 

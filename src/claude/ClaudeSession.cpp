@@ -875,10 +875,8 @@ void ClaudeSession::connectSignals()
     connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
         if (newState == ClaudeProcess::State::Idle) {
             refreshTokenUsage();
-            // Only notify if double/triple yolo won't immediately continue
-            if (!m_doubleYoloMode && !m_tripleYoloMode) {
-                Q_EMIT taskComplete(QString());
-            }
+            // Always emit taskComplete so notification fires even when yolo will auto-continue
+            Q_EMIT taskComplete(QString());
         }
     });
 }

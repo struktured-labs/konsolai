@@ -37,6 +37,7 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollBar>
 #include <QSet>
 #include <QSlider>
@@ -88,6 +89,23 @@ SessionManagerPanel::SessionManagerPanel(QWidget *parent)
     m_remoteTmuxTimer->setInterval(60000);
     connect(m_remoteTmuxTimer, &QTimer::timeout, this, &SessionManagerPanel::refreshRemoteTmuxSessions);
     m_remoteTmuxTimer->start();
+
+    // TTL-based cache invalidation timers
+    m_gitCacheTimer = new QTimer(this);
+    m_gitCacheTimer->setInterval(60000); // 60s TTL for git branch cache
+    connect(m_gitCacheTimer, &QTimer::timeout, this, [this]() {
+        m_gitBranchCache.clear();
+    });
+    m_gitCacheTimer->start();
+
+    m_convCacheTimer = new QTimer(this);
+    m_convCacheTimer->setInterval(120000); // 120s TTL for conversation + discovered + GSD caches
+    connect(m_convCacheTimer, &QTimer::timeout, this, [this]() {
+        m_conversationCache.clear();
+        m_discoveredCacheValid = false;
+        m_gsdBadgeCache.clear();
+    });
+    m_convCacheTimer->start();
 }
 
 SessionManagerPanel::~SessionManagerPanel()
@@ -107,6 +125,12 @@ SessionManagerPanel::~SessionManagerPanel()
     }
     if (m_remoteTmuxTimer) {
         m_remoteTmuxTimer->stop();
+    }
+    if (m_gitCacheTimer) {
+        m_gitCacheTimer->stop();
+    }
+    if (m_convCacheTimer) {
+        m_convCacheTimer->stop();
     }
 
     // Block signals during destruction — saveMetadata() emits usageAggregateChanged(),
@@ -194,6 +218,12 @@ void SessionManagerPanel::setupUi()
         vbox->addWidget(yoloCheck);
 
         connect(audioCheck, &QCheckBox::toggled, volSlider, &QSlider::setEnabled);
+
+        auto *testSoundBtn = new QPushButton(i18n("Test Sound"), dlg);
+        connect(testSoundBtn, &QPushButton::clicked, mgr, [mgr]() {
+            mgr->playSound(NotificationManager::NotificationType::TaskComplete);
+        });
+        vbox->addWidget(testSoundBtn);
 
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
         vbox->addWidget(buttons);
@@ -481,6 +511,16 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     }
 
     saveMetadata();
+
+    // Invalidate caches for this session's working directory so fresh data is shown immediately
+    const QString &workDir = session->workingDirectory();
+    if (!workDir.isEmpty()) {
+        m_conversationCache.remove(workDir);
+        m_gitBranchCache.remove(workDir);
+        m_gsdBadgeCache.remove(workDir);
+    }
+    m_discoveredCacheValid = false;
+
     updateTreeWidget();
 
     // Avoid duplicate signal connections if registerSession is called
@@ -491,7 +531,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     connect(session, &Konsole::Session::finished, this, [this, sessionId]() {
         if (m_activeSessions.contains(sessionId)) {
             m_activeSessions.remove(sessionId);
-            updateTreeWidget();
+            scheduleTreeUpdate();
         }
     });
 
@@ -499,7 +539,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     connect(session, &QObject::destroyed, this, [this, sessionId]() {
         if (m_activeSessions.contains(sessionId)) {
             m_activeSessions.remove(sessionId);
-            updateTreeWidget();
+            scheduleTreeUpdate();
         }
     });
 
@@ -509,6 +549,17 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         if (!safeSession || !m_metadata.contains(sessionId) || newPath.isEmpty()) {
             return;
         }
+        // Invalidate caches for old and new working directory
+        const QString oldPath = m_metadata[sessionId].workingDirectory;
+        if (!oldPath.isEmpty()) {
+            m_conversationCache.remove(oldPath);
+            m_gitBranchCache.remove(oldPath);
+            m_gsdBadgeCache.remove(oldPath);
+        }
+        m_conversationCache.remove(newPath);
+        m_gitBranchCache.remove(newPath);
+        m_gsdBadgeCache.remove(newPath);
+
         m_metadata[sessionId].workingDirectory = newPath;
         // Re-run hook setup now that we have a valid working directory
         // (hooks require workDir and skip if empty at registerSession time)
@@ -518,8 +569,14 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;
     });
 
-    // Connect to approval count changes to update display (debounced)
-    connect(session, &ClaudeSession::approvalCountChanged, this, [this]() {
+    // Connect to approval count changes to update display (debounced, with smart filtering)
+    connect(session, &ClaudeSession::approvalCountChanged, this, [this, sessionId]() {
+        ClaudeSession *s = m_activeSessions.value(sessionId);
+        int newCount = s ? s->totalApprovalCount() : 0;
+        if (m_lastKnownApprovalCount.value(sessionId, -1) == newCount) {
+            return; // No visible change, skip rebuild
+        }
+        m_lastKnownApprovalCount[sessionId] = newCount;
         scheduleTreeUpdate();
     });
 
@@ -527,7 +584,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     connect(session, &ClaudeSession::approvalLogged, this, [this, sessionId](const ApprovalLogEntry &entry) {
         Q_UNUSED(entry);
         if (m_metadata.contains(sessionId)) {
-            if (auto *s = m_activeSessions.value(sessionId)) {
+            if (ClaudeSession *s = m_activeSessions.value(sessionId)) {
                 m_metadata[sessionId].yoloApprovalCount = s->yoloApprovalCount();
                 m_metadata[sessionId].doubleYoloApprovalCount = s->doubleYoloApprovalCount();
                 m_metadata[sessionId].tripleYoloApprovalCount = s->tripleYoloApprovalCount();
@@ -560,8 +617,12 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         scheduleTreeUpdate();
     });
 
-    // Connect to state changes (Working/Idle/etc.) to update live activity line
-    connect(session, &ClaudeSession::stateChanged, this, [this]() {
+    // Connect to state changes (Working/Idle/etc.) to update live activity line (with smart filtering)
+    connect(session, &ClaudeSession::stateChanged, this, [this, sessionId](ClaudeProcess::State newState) {
+        if (m_lastKnownState.value(sessionId, static_cast<ClaudeProcess::State>(-1)) == newState) {
+            return; // No visible change, skip rebuild
+        }
+        m_lastKnownState[sessionId] = newState;
         scheduleTreeUpdate();
     });
 
@@ -624,6 +685,11 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
     }
 
     m_activeSessions.remove(sessionId);
+
+    // Clean up signal-filtering state maps
+    m_lastKnownState.remove(sessionId);
+    m_lastKnownApprovalCount.remove(sessionId);
+    m_discoveredCacheValid = false;
 
     updateTreeWidget();
 }
@@ -759,6 +825,33 @@ void SessionManagerPanel::refresh()
             }
         }
 
+        // Repair stale createdAt timestamps for existing metadata entries.
+        // A previous bug recorded the discovery time instead of tmux creation time,
+        // causing multiple sessions to share the same timestamp and display name.
+        static const QRegularExpression idPattern(QStringLiteral("^konsolai-.+-([a-f0-9]{8})$"));
+        for (const TmuxManager::SessionInfo &info : liveSessions) {
+            QRegularExpressionMatch idMatch = idPattern.match(info.name);
+            if (!idMatch.hasMatch()) {
+                continue;
+            }
+            QString sessionId = idMatch.captured(1);
+            if (!guard->m_metadata.contains(sessionId)) {
+                continue;
+            }
+            bool ok = false;
+            qint64 epoch = info.created.toLongLong(&ok);
+            if (!ok || epoch <= 0) {
+                continue;
+            }
+            QDateTime tmuxCreated = QDateTime::fromSecsSinceEpoch(epoch);
+            auto &meta = guard->m_metadata[sessionId];
+            // If metadata createdAt is later than tmux creation, it was set from
+            // discovery time — replace with the real tmux creation time.
+            if (meta.createdAt > tmuxCreated) {
+                meta.createdAt = tmuxCreated;
+            }
+        }
+
         guard->updateTreeWidget();
     });
 }
@@ -767,8 +860,8 @@ void SessionManagerPanel::pinSession(const QString &sessionId)
 {
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].isPinned = true;
-        saveMetadata();
-        updateTreeWidget();
+        scheduleMetadataSave();
+        scheduleTreeUpdate();
     }
 }
 
@@ -776,8 +869,8 @@ void SessionManagerPanel::unpinSession(const QString &sessionId)
 {
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].isPinned = false;
-        saveMetadata();
-        updateTreeWidget();
+        scheduleMetadataSave();
+        scheduleTreeUpdate();
     }
 }
 
@@ -831,6 +924,9 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
         qDebug() << "SessionManagerPanel::archiveSession - no session name, skipping tmux kill";
         updateTreeWidget();
     } else {
+        if (m_pendingAsyncKills++ == 0) {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+        }
         auto *tmux = new TmuxManager(nullptr);
         QPointer<SessionManagerPanel> guard(this);
         tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
@@ -839,7 +935,12 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
             }
             tmux->deleteLater();
             if (guard) {
+                if (--guard->m_pendingAsyncKills == 0) {
+                    QApplication::restoreOverrideCursor();
+                }
                 guard->updateTreeWidget();
+            } else {
+                QApplication::restoreOverrideCursor();
             }
         });
     }
@@ -900,6 +1001,9 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
         qDebug() << "SessionManagerPanel::closeSession - no session name, skipping tmux kill";
         updateTreeWidget();
     } else {
+        if (m_pendingAsyncKills++ == 0) {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+        }
         auto *tmux = new TmuxManager(nullptr);
         QPointer<SessionManagerPanel> guard(this);
         tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
@@ -908,7 +1012,12 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
             }
             tmux->deleteLater();
             if (guard) {
+                if (--guard->m_pendingAsyncKills == 0) {
+                    QApplication::restoreOverrideCursor();
+                }
                 guard->updateTreeWidget();
+            } else {
+                QApplication::restoreOverrideCursor();
             }
         });
     }
@@ -1125,7 +1234,10 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 
         // Check for existing conversations — offer resume before creating new
         if (!isRemoteItem) {
-            auto conversations = ClaudeSessionRegistry::readClaudeConversations(workDir);
+            if (!m_conversationCache.contains(workDir)) {
+                m_conversationCache.insert(workDir, ClaudeSessionRegistry::readClaudeConversations(workDir));
+            }
+            const auto &conversations = m_conversationCache[workDir];
             if (!conversations.isEmpty()) {
                 QString id = ClaudeConversationPicker::pick(conversations, this);
                 if (!id.isEmpty()) {
@@ -1573,7 +1685,10 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
 
         // Resume Conversation action (for items with conversations)
         if (!isRemoteItem) {
-            auto conversations = ClaudeSessionRegistry::readClaudeConversations(workDir);
+            if (!m_conversationCache.contains(workDir)) {
+                m_conversationCache.insert(workDir, ClaudeSessionRegistry::readClaudeConversations(workDir));
+            }
+            const auto &conversations = m_conversationCache[workDir];
             if (!conversations.isEmpty()) {
                 QAction *resumeAction = menu.addAction(
                     QIcon::fromTheme(QStringLiteral("media-playback-start")),
@@ -1834,54 +1949,53 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         });
 
         // View Session Activity — show parsed conversation transcript
+        // Defer the expensive .jsonl lookup to when user actually clicks the action
         if (!meta.workingDirectory.isEmpty()) {
-            // Find the conversation .jsonl for this session
             QString convId = meta.lastResumeSessionId;
             if (convId.isEmpty() && isActive && activeSession) {
                 convId = activeSession->resumeSessionId();
             }
-            // Locate .jsonl files for this project
-            auto conversations = ClaudeSessionRegistry::readClaudeConversations(meta.workingDirectory);
-            QString jsonlPath;
-            if (!convId.isEmpty()) {
-                // Find exact match
-                for (const auto &conv : conversations) {
-                    if (conv.sessionId == convId) {
-                        // Reconstruct path from project hash
-                        QString projectsDir = QDir::homePath() + QStringLiteral("/.claude/projects");
-                        QDirIterator it(projectsDir, QDir::Dirs | QDir::NoDotAndDotDot);
-                        while (it.hasNext()) {
-                            QString dir = it.next();
-                            QString candidate = dir + QStringLiteral("/") + convId + QStringLiteral(".jsonl");
-                            if (QFile::exists(candidate)) {
-                                jsonlPath = candidate;
-                                break;
-                            }
+            QAction *activityAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-text")), i18n("View Session Activity"));
+            connect(activityAction, &QAction::triggered, this, [this, convId, meta]() {
+                // Use cached conversations to avoid disk I/O
+                if (!m_conversationCache.contains(meta.workingDirectory)) {
+                    m_conversationCache.insert(meta.workingDirectory, ClaudeSessionRegistry::readClaudeConversations(meta.workingDirectory));
+                }
+                const auto &conversations = m_conversationCache[meta.workingDirectory];
+
+                // Find the .jsonl path for this conversation
+                auto findJsonlPath = [](const QString &targetId) -> QString {
+                    if (targetId.isEmpty())
+                        return {};
+                    QString projectsDir = QDir::homePath() + QStringLiteral("/.claude/projects");
+                    QDirIterator it(projectsDir, QDir::Dirs | QDir::NoDotAndDotDot);
+                    while (it.hasNext()) {
+                        QString dir = it.next();
+                        QString candidate = dir + QStringLiteral("/") + targetId + QStringLiteral(".jsonl");
+                        if (QFile::exists(candidate)) {
+                            return candidate;
                         }
-                        break;
+                    }
+                    return {};
+                };
+
+                QString jsonlPath;
+                if (!convId.isEmpty()) {
+                    for (const auto &conv : conversations) {
+                        if (conv.sessionId == convId) {
+                            jsonlPath = findJsonlPath(convId);
+                            break;
+                        }
                     }
                 }
-            }
-            // Fallback: most recent conversation for this project
-            if (jsonlPath.isEmpty() && !conversations.isEmpty()) {
-                const auto &latest = conversations.first();
-                QString projectsDir = QDir::homePath() + QStringLiteral("/.claude/projects");
-                QDirIterator it(projectsDir, QDir::Dirs | QDir::NoDotAndDotDot);
-                while (it.hasNext()) {
-                    QString dir = it.next();
-                    QString candidate = dir + QStringLiteral("/") + latest.sessionId + QStringLiteral(".jsonl");
-                    if (QFile::exists(candidate)) {
-                        jsonlPath = candidate;
-                        break;
-                    }
+                // Fallback: most recent conversation
+                if (jsonlPath.isEmpty() && !conversations.isEmpty()) {
+                    jsonlPath = findJsonlPath(conversations.first().sessionId);
                 }
-            }
-            if (!jsonlPath.isEmpty()) {
-                QAction *activityAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-text")), i18n("View Session Activity"));
-                connect(activityAction, &QAction::triggered, this, [this, jsonlPath, meta]() {
+                if (!jsonlPath.isEmpty()) {
                     showSessionActivity(jsonlPath, meta.workingDirectory);
-                });
-            }
+                }
+            });
         }
 
         // Show approval log for active sessions with approvals
@@ -2041,6 +2155,91 @@ void SessionManagerPanel::scheduleTreeUpdate()
     m_updateDebounce->start(500);
 }
 
+void SessionManagerPanel::updateDurationLabels()
+{
+    if (!m_treeWidget) {
+        return;
+    }
+
+    // Walk tree items and update only the duration QLabel widgets in column 1,
+    // avoiding a full teardown/rebuild just to refresh elapsed time strings.
+    // Also check if any active items remain — stop timer if not.
+    bool anyActive = false;
+
+    // Helper: update labels for child items of a given tree item
+    std::function<void(QTreeWidgetItem *)> walkChildren = [&](QTreeWidgetItem *parent) {
+        for (int i = 0; i < parent->childCount(); ++i) {
+            auto *child = parent->child(i);
+
+            // Check if this item has a duration label widget in column 1
+            auto *widget = m_treeWidget->itemWidget(child, 1);
+            auto *label = qobject_cast<QLabel *>(widget);
+            if (label) {
+                // Look up the session and find the matching subagent/subprocess by ID
+                QString parentSessionId = child->data(0, Qt::UserRole + 1).toString();
+                ClaudeSession *session = m_activeSessions.value(parentSessionId);
+                if (session) {
+                    // Try as subagent (agentId in UserRole)
+                    QString agentId = child->data(0, Qt::UserRole).toString();
+                    if (!agentId.isEmpty() && session->subagents().contains(agentId)) {
+                        const auto &info = session->subagents()[agentId];
+                        QString elapsed = formatElapsed(info.startedAt);
+                        if (label->text() != elapsed) {
+                            label->setText(elapsed);
+                        }
+                        if (info.state == ClaudeProcess::State::Working || info.state == ClaudeProcess::State::Idle) {
+                            anyActive = true;
+                        }
+                    }
+                    // Try as subprocess (id in UserRole + 4)
+                    QString procId = child->data(0, Qt::UserRole + 4).toString();
+                    if (!procId.isEmpty() && session->subprocesses().contains(procId)) {
+                        const auto &info = session->subprocesses()[procId];
+                        QString col1;
+                        QString elapsed = formatElapsed(info.startedAt);
+                        if (!elapsed.isEmpty()) {
+                            col1 = elapsed;
+                        }
+                        if (info.resourceUsage.rssBytes > 0 || info.resourceUsage.cpuPercent > 0.0) {
+                            if (!col1.isEmpty())
+                                col1 += QStringLiteral(" ");
+                            col1 += info.resourceUsage.formatCompact();
+                        }
+                        if (label->text() != col1) {
+                            label->setText(col1);
+                        }
+                        if (info.status == SubprocessInfo::Running) {
+                            anyActive = true;
+                        }
+                    }
+                }
+            }
+
+            // Recurse into children (prompt groups, subtasks containers, task groups)
+            if (child->childCount() > 0) {
+                walkChildren(child);
+            }
+        }
+    };
+
+    // Walk all category items
+    auto categories = {m_pinnedCategory, m_activeCategory, m_detachedCategory, m_closedCategory, m_archivedCategory};
+    for (auto *category : categories) {
+        if (!category) {
+            continue;
+        }
+        for (int i = 0; i < category->childCount(); ++i) {
+            auto *sessionItem = category->child(i);
+            walkChildren(sessionItem);
+        }
+    }
+
+    // Stop duration timer if no active items remain
+    if (!anyActive && m_durationTimer) {
+        m_durationTimer->stop();
+    }
+}
+
 void SessionManagerPanel::scheduleMetadataSave()
 {
     if (!m_saveDebounce) {
@@ -2166,9 +2365,19 @@ void SessionManagerPanel::refreshRemoteTmuxSessions()
 
 void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames)
 {
-    // Invalidate conversation cache so summaries refresh from disk
-    m_conversationCache.clear();
-    m_gitBranchCache.clear();
+    // Purge stale null QPointer entries — sessions destroyed via deleteLater()
+    // leave null entries in the map that would otherwise be treated as "active".
+    for (auto it = m_activeSessions.begin(); it != m_activeSessions.end();) {
+        if (it.value().isNull()) {
+            it = m_activeSessions.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Caches are now TTL-based (git 60s, conversations/discovered/GSD 120s)
+    // and invalidated on targeted events (register, unregister, workDir change).
+    // No unconditional clear here — this was the main perf bottleneck.
 
     // Prune stale expansion keys if the set has grown large
     if (m_knownItems.size() > 500) {
@@ -2177,6 +2386,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 
     // Save expansion state, scroll position, and selection before destroying items
     saveTreeState();
+
+    // Suppress repaints during rebuild to eliminate flicker
+    m_treeWidget->setUpdatesEnabled(false);
 
     // Clear existing items (except categories)
     while (m_pinnedCategory->childCount() > 0) {
@@ -2263,16 +2475,19 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         delete m_discoveredCategory->takeChild(0);
     }
     if (m_registry) {
-        // Scan workspace root for Claude footprints
-        QString searchRoot;
-        auto *settings = KonsolaiSettings::instance();
-        if (settings) {
-            searchRoot = settings->projectRoot();
-        } else {
-            searchRoot = QDir::homePath() + QStringLiteral("/projects");
+        // Use cached discoverSessions() result (invalidated on 120s timer and session register/unregister)
+        if (!m_discoveredCacheValid) {
+            QString searchRoot;
+            auto *settings = KonsolaiSettings::instance();
+            if (settings) {
+                searchRoot = settings->projectRoot();
+            } else {
+                searchRoot = QDir::homePath() + QStringLiteral("/projects");
+            }
+            m_cachedDiscoveredSessions = m_registry->discoverSessions(searchRoot);
+            m_discoveredCacheValid = true;
         }
-        const auto discovered = m_registry->discoverSessions(searchRoot);
-        for (const auto &state : discovered) {
+        for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
             auto *item = new QTreeWidgetItem(m_discoveredCategory);
             QString displayName = QDir(state.workingDirectory).dirName();
             item->setText(0, displayName);
@@ -2280,8 +2495,11 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             item->setData(0, Qt::UserRole + 1, state.workingDirectory);
             item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-cloud")));
 
-            // Show conversation count for local discovered items
-            auto conversations = ClaudeSessionRegistry::readClaudeConversations(state.workingDirectory);
+            // Show conversation count via cache (same TTL as conversation cache)
+            if (!m_conversationCache.contains(state.workingDirectory)) {
+                m_conversationCache.insert(state.workingDirectory, ClaudeSessionRegistry::readClaudeConversations(state.workingDirectory));
+            }
+            const auto &conversations = m_conversationCache[state.workingDirectory];
             if (!conversations.isEmpty()) {
                 item->setText(1, QStringLiteral("%1 conv").arg(conversations.size()));
             }
@@ -2332,17 +2550,27 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         applyFilter(m_filterEdit->text());
     }
 
+    // Re-enable repaints after rebuild
+    m_treeWidget->setUpdatesEnabled(true);
+
     // Restore scroll position and selection
     restoreTreeState();
 }
 
 void SessionManagerPanel::applyFilter(const QString &text)
 {
+    if (!m_treeWidget) {
+        return;
+    }
+
     // Iterate all category items, show/hide children based on filter match
     const QList<QTreeWidgetItem *> categories = {m_pinnedCategory, m_activeCategory,    m_detachedCategory,  m_closedCategory,
                                                   m_archivedCategory, m_dismissedCategory, m_discoveredCategory};
 
     for (auto *cat : categories) {
+        if (!cat) {
+            continue;
+        }
         int visibleChildren = 0;
         for (int i = 0; i < cat->childCount(); ++i) {
             auto *child = cat->child(i);
@@ -2447,6 +2675,17 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     }
     // No hash fallback — directory name alone is clearer than a random hex string
 
+    // When multiple sessions share the same directory in the same category,
+    // append creation date to disambiguate visually-identical entries.
+    if (hasSiblings && meta.createdAt.isValid()) {
+        // Use "MMM d" for older sessions, "h:mm AP" for today's sessions
+        if (meta.createdAt.date() == QDate::currentDate()) {
+            displayName += QStringLiteral(" — %1").arg(meta.createdAt.toString(QStringLiteral("h:mm AP")));
+        } else {
+            displayName += QStringLiteral(" — %1").arg(meta.createdAt.toString(QStringLiteral("MMM d")));
+        }
+    }
+
     // Add team badge when subagents exist (active or completed/persisted)
     if (isActive) {
         ClaudeSession *activeSession = m_activeSessions[meta.sessionId];
@@ -2473,10 +2712,13 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" [team: done]");
     }
 
-    // Add GSD badge when .planning/ or ROADMAP.md exists in working directory
+    // Add GSD badge when .planning/ or ROADMAP.md exists in working directory (cached)
     if (!meta.workingDirectory.isEmpty()) {
-        QDir workDir(meta.workingDirectory);
-        if (workDir.exists(QStringLiteral(".planning")) || workDir.exists(QStringLiteral("ROADMAP.md"))) {
+        if (!m_gsdBadgeCache.contains(meta.workingDirectory)) {
+            QDir workDir(meta.workingDirectory);
+            m_gsdBadgeCache.insert(meta.workingDirectory, workDir.exists(QStringLiteral(".planning")) || workDir.exists(QStringLiteral("ROADMAP.md")));
+        }
+        if (m_gsdBadgeCache.value(meta.workingDirectory)) {
             displayName += QStringLiteral(" [GSD]");
         }
     }
@@ -3083,7 +3325,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!m_durationTimer) {
                     m_durationTimer = new QTimer(this);
                     m_durationTimer->setInterval(10000); // 10 seconds
-                    connect(m_durationTimer, &QTimer::timeout, this, &SessionManagerPanel::scheduleTreeUpdate);
+                    // In-place label update instead of full tree rebuild
+                    connect(m_durationTimer, &QTimer::timeout, this, &SessionManagerPanel::updateDurationLabels);
                 }
                 if (!m_durationTimer->isActive()) {
                     m_durationTimer->start();

@@ -19,6 +19,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QProcess>
 #include <QPushButton>
 #include <QSet>
@@ -298,6 +299,7 @@ private:
     SessionMetadata *findMetadata(const QString &sessionId);
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
     void applyFilter(const QString &text);
+    void updateDurationLabels(); // In-place duration label updates without full rebuild
 
     // Tree expansion state preservation
     void saveTreeState();
@@ -321,7 +323,7 @@ private:
     QTreeWidgetItem *m_discoveredCategory = nullptr;
 
     QMap<QString, SessionMetadata> m_metadata;
-    QMap<QString, ClaudeSession *> m_activeSessions;
+    QMap<QString, QPointer<ClaudeSession>> m_activeSessions;
     ClaudeSessionRegistry *m_registry = nullptr;
     bool m_collapsed = false;
 
@@ -349,8 +351,23 @@ private:
     // Cache conversations per working directory to avoid disk I/O during tree rebuilds
     QHash<QString, QList<ClaudeConversation>> m_conversationCache; // workDir → conversations
 
-    // Cache git branch names per working directory (refreshed each tree rebuild)
+    // Cache git branch names per working directory (TTL-based, refreshed every 60s)
     QHash<QString, QString> m_gitBranchCache; // workDir → branch name
+
+    // TTL timers for cache invalidation
+    QTimer *m_gitCacheTimer = nullptr; // 60s TTL for git branch cache
+    QTimer *m_convCacheTimer = nullptr; // 120s TTL for conversation + discovered + GSD caches
+
+    // Cached discoverSessions() results (invalidated on 120s timer and session register/unregister)
+    QList<ClaudeSessionState> m_cachedDiscoveredSessions;
+    bool m_discoveredCacheValid = false;
+
+    // Smart signal filtering: skip rebuilds when state hasn't visually changed
+    QHash<QString, ClaudeProcess::State> m_lastKnownState;
+    QHash<QString, int> m_lastKnownApprovalCount;
+
+    // GSD badge cache (workDir → has .planning/ or ROADMAP.md)
+    QHash<QString, bool> m_gsdBadgeCache;
 
     // Per-session toggle: sessions in this set hide completed (NotRunning) agents
     QSet<QString> m_hideCompletedAgents;
@@ -377,6 +394,11 @@ private:
     // Whether a tree update is pending due to interaction deferral
     bool m_pendingUpdate = false;
     QTimer *m_deferRetryTimer = nullptr;
+
+    // Track pending async tmux kill operations for wait cursor management.
+    // setOverrideCursor pushes to a stack — we use a counter so batch operations
+    // (Archive All, Close All) only push/pop once.
+    int m_pendingAsyncKills = 0;
 };
 
 } // namespace Konsolai

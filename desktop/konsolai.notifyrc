@@ -1541,27 +1541,32 @@ Action=Popup
 [Event/permissionRequired]
 Name=Permission Required
 Comment=Claude requires permission to perform an action
-Action=Popup
+Action=Sound|Popup
+Sound=konsolai/permission.wav
 
 [Event/error]
 Name=Claude Error
 Comment=Claude encountered an error
-Action=Popup
+Action=Sound|Popup
+Sound=konsolai/error.wav
 
 [Event/waitingInput]
 Name=Waiting for Input
 Comment=Claude is waiting for user input
-Action=Popup
+Action=Sound|Popup
+Sound=konsolai/waiting.wav
 
 [Event/taskComplete]
 Name=Task Complete
 Comment=Claude completed a task
-Action=Popup
+Action=Sound|Popup
+Sound=konsolai/complete.wav
 
 [Event/yoloApproval]
 Name=Yolo Auto-Approval
 Comment=An action was automatically approved by yolo mode
-Action=
+Action=Sound
+Sound=konsolai/yolo.wav
 
 [Event/info]
 Name=Information

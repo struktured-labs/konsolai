@@ -341,8 +341,6 @@ void MainWindow::activeViewChanged(SessionController *controller)
     if (controller->session()) {
         // Check if this is a ClaudeSession
         auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(controller->session().data());
-        qDebug() << "MainWindow::activeViewChanged - session:" << controller->session() << "isClaudeSession:" << (claudeSession != nullptr)
-                 << "title:" << controller->session()->title(Session::DisplayedTitleRole);
         if (claudeSession) {
             _claudeMenu->setActiveSession(claudeSession);
             _claudeStatusWidget->setSession(claudeSession);
@@ -919,6 +917,11 @@ void MainWindow::setupActions()
                         qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
                         safeSession->approvePermission();
                         safeSession->logApproval(action, QStringLiteral("auto-approved"), 1);
+                        // Still notify so user hears the permission sound (rate-limited by NotificationManager)
+                        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                                          i18n("Permission Auto-Approved"),
+                                          i18n("Yolo approved: %1", action),
+                                          safeSession);
                     } else {
                         notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
                                           i18n("Permission Required"),
