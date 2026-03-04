@@ -37,6 +37,12 @@ NotificationManager::NotificationManager(QObject *parent)
 
 NotificationManager::~NotificationManager()
 {
+    if (m_audioThread) {
+        m_audioThread->quit();
+        m_audioThread->wait(1000);
+        delete m_soundEffect; // lives on m_audioThread, safe after thread exits
+        delete m_audioThread;
+    }
     if (s_notificationManagerInstance == this) {
         s_notificationManagerInstance = nullptr;
     }
@@ -160,12 +166,19 @@ void NotificationManager::showDesktopNotification(NotificationType type, const Q
     notification->sendEvent();
 }
 
-void NotificationManager::ensureSoundEffect()
+void NotificationManager::ensureAudioThread()
 {
-    if (m_soundEffect) {
+    if (m_audioThread) {
         return;
     }
-    m_soundEffect = new QSoundEffect(this);
+    // QSoundEffect must live on a dedicated thread so PipeWire/PulseAudio
+    // interactions (setSource, play) never block the UI thread.
+    m_audioThread = new QThread(this);
+    m_audioThread->setObjectName(QStringLiteral("KonsolaiAudio"));
+    m_audioThread->start();
+
+    m_soundEffect = new QSoundEffect(); // no parent — moved to thread
+    m_soundEffect->moveToThread(m_audioThread);
     m_soundEffect->setVolume(m_audioVolume);
 }
 
@@ -196,16 +209,22 @@ void NotificationManager::playSound(NotificationType type)
 
     qDebug() << "NotificationManager::playSound: Playing" << path << "volume:" << m_audioVolume;
 
-    ensureSoundEffect();
-    m_soundEffect->setVolume(m_audioVolume);
+    ensureAudioThread();
 
-    // Only change source if a different sound is needed
-    if (m_loadedSoundPath != path) {
-        m_soundEffect->setSource(QUrl::fromLocalFile(path));
-        m_loadedSoundPath = path;
-    }
-
-    m_soundEffect->play();
+    // Invoke on the audio thread via queued connection to avoid blocking UI
+    qreal volume = m_audioVolume;
+    QString loadedPath = m_loadedSoundPath;
+    QMetaObject::invokeMethod(
+        m_soundEffect,
+        [this, path, volume, loadedPath]() {
+            m_soundEffect->setVolume(volume);
+            if (loadedPath != path) {
+                m_soundEffect->setSource(QUrl::fromLocalFile(path));
+            }
+            m_soundEffect->play();
+        },
+        Qt::QueuedConnection);
+    m_loadedSoundPath = path;
 }
 
 void NotificationManager::enableChannel(Channel channel, bool enable)

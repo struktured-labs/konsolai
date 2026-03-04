@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QObject>
 #include <QString>
+#include <QThread>
 #include <QUrl>
 
 class QSoundEffect;
@@ -178,13 +179,15 @@ Q_SIGNALS:
 
 private:
     void initSystemTray();
-    void ensureSoundEffect();
+    void ensureAudioThread();
 
 #if HAVE_KSTATUSNOTIFIERITEM
     KStatusNotifierItem *m_systemTray = nullptr;
 #endif
-    ::QSoundEffect *m_soundEffect = nullptr;
-    QString m_loadedSoundPath; // track which sound is loaded to avoid re-loading
+    // Audio runs on a dedicated thread to avoid PipeWire/PulseAudio blocking the UI
+    QThread *m_audioThread = nullptr;
+    QSoundEffect *m_soundEffect = nullptr; // lives on m_audioThread
+    QString m_loadedSoundPath;
     Channels m_enabledChannels = Channel::All;
     qreal m_audioVolume = 0.7;
     bool m_yoloNotificationsEnabled = false;
