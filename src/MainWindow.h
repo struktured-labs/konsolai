@@ -34,6 +34,7 @@ namespace Konsolai
 {
 class ClaudeMenu;
 class ClaudeNotificationWidget;
+class ClaudeSession;
 class ClaudeStatusWidget;
 class SessionManagerPanel;
 }
@@ -222,6 +223,7 @@ private:
     void removeMenuAccelerators();
     void restoreMenuAccelerators();
     void setupActions();
+    void connectClaudeNotifications(Konsolai::ClaudeSession *claudeSession);
     QString activeSessionDir() const;
     void triggerAction(const QString &name) const;
 

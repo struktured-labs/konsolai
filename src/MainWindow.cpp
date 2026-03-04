@@ -892,82 +892,87 @@ void MainWindow::setupActions()
         }
 
         _sessionPanel->registerSession(claudeSession);
+        connectClaudeNotifications(claudeSession);
+    });
+}
 
-        // Disconnect any previous MainWindow connections from this session
-        // to prevent duplicate handlers accumulating across tab switches.
-        disconnect(claudeSession, nullptr, this, nullptr);
+void MainWindow::connectClaudeNotifications(Konsolai::ClaudeSession *claudeSession)
+{
+    if (!claudeSession) {
+        return;
+    }
 
-        auto *notifyMgr = Konsolai::NotificationManager::instance();
-        Q_ASSERT(notifyMgr);
+    // Disconnect any previous MainWindow connections from this session
+    // to prevent duplicate handlers accumulating across tab switches or re-registration.
+    disconnect(claudeSession, nullptr, this, nullptr);
 
-        // Use QPointer to safely detect session destruction in lambdas.
-        // Session::finished → deleteLater() can destroy the session while
-        // queued signals (stateChanged → taskComplete) are still pending.
-        QPointer<Konsolai::ClaudeSession> safeSession = claudeSession;
+    auto *notifyMgr = Konsolai::NotificationManager::instance();
+    Q_ASSERT(notifyMgr);
 
-        // Permission requested - notify and maybe auto-approve
-        connect(claudeSession,
-                &Konsolai::ClaudeSession::permissionRequested,
-                this,
-                [this, safeSession, notifyMgr](const QString &action, const QString &details) {
-                    Q_UNUSED(details)
-                    if (!safeSession)
-                        return;
-                    if (safeSession->yoloMode()) {
-                        qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
-                        safeSession->approvePermission();
-                        safeSession->logApproval(action, QStringLiteral("auto-approved"), 1);
-                        // Still notify so user hears the permission sound (rate-limited by NotificationManager)
-                        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
-                                          i18n("Permission Auto-Approved"),
-                                          i18n("Yolo approved: %1", action),
-                                          safeSession);
-                    } else {
-                        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
-                                          i18n("Permission Required"),
-                                          i18n("Claude needs permission to: %1", action),
-                                          safeSession);
-                    }
-                });
+    // Use QPointer to safely detect session destruction in lambdas.
+    // Session::finished → deleteLater() can destroy the session while
+    // queued signals (stateChanged → taskComplete) are still pending.
+    QPointer<Konsolai::ClaudeSession> safeSession = claudeSession;
 
-        // Task complete notification
-        connect(claudeSession, &Konsolai::ClaudeSession::taskComplete, this, [safeSession, notifyMgr](const QString &summary) {
-            if (!safeSession)
-                return;
-            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::TaskComplete,
-                              i18n("Task Complete"),
-                              summary.isEmpty() ? i18n("Claude has finished the task") : summary,
+    // Permission requested - notify and maybe auto-approve
+    connect(claudeSession, &Konsolai::ClaudeSession::permissionRequested, this, [this, safeSession, notifyMgr](const QString &action, const QString &details) {
+        Q_UNUSED(details)
+        if (!safeSession)
+            return;
+        if (safeSession->yoloMode()) {
+            qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
+            safeSession->approvePermission();
+            safeSession->logApproval(action, QStringLiteral("auto-approved"), 1);
+            // Still notify so user hears the permission sound
+            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                              i18n("Permission Auto-Approved"),
+                              i18n("Yolo approved: %1", action),
                               safeSession);
-        });
-
-        // Waiting for input notification
-        connect(claudeSession, &Konsolai::ClaudeSession::waitingForInput, this, [safeSession, notifyMgr](const QString &prompt) {
-            if (!safeSession)
-                return;
-            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::WaitingInput,
-                              i18n("Input Required"),
-                              prompt.isEmpty() ? i18n("Claude is waiting for your input") : prompt,
+        } else {
+            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                              i18n("Permission Required"),
+                              i18n("Claude needs permission to: %1", action),
                               safeSession);
-        });
+        }
+    });
 
-        // Error notification
-        connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, this, [safeSession, notifyMgr](const QString &error) {
-            if (!safeSession)
-                return;
-            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Error"), error, safeSession);
-        });
+    // Task complete notification
+    connect(claudeSession, &Konsolai::ClaudeSession::taskComplete, this, [safeSession, notifyMgr](const QString &summary) {
+        if (!safeSession)
+            return;
+        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::TaskComplete,
+                          i18n("Task Complete"),
+                          summary.isEmpty() ? i18n("Claude has finished the task") : summary,
+                          safeSession);
+    });
 
-        // Yolo approval notification (only fires when yolo mode is active)
-        connect(claudeSession, &Konsolai::ClaudeSession::approvalLogged, this, [safeSession, notifyMgr](const Konsolai::ApprovalLogEntry &entry) {
-            if (!safeSession)
-                return;
-            if (entry.yoloLevel == 1) {
-                notifyMgr->notify(Konsolai::NotificationManager::NotificationType::YoloApproval,
-                                  i18n("Auto-Approved"),
-                                  i18n("Yolo approved: %1", entry.toolName),
-                                  safeSession);
-            }
-        });
+    // Waiting for input notification
+    connect(claudeSession, &Konsolai::ClaudeSession::waitingForInput, this, [safeSession, notifyMgr](const QString &prompt) {
+        if (!safeSession)
+            return;
+        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::WaitingInput,
+                          i18n("Input Required"),
+                          prompt.isEmpty() ? i18n("Claude is waiting for your input") : prompt,
+                          safeSession);
+    });
+
+    // Error notification
+    connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, this, [safeSession, notifyMgr](const QString &error) {
+        if (!safeSession)
+            return;
+        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Error"), error, safeSession);
+    });
+
+    // Yolo approval notification (only fires when yolo mode is active)
+    connect(claudeSession, &Konsolai::ClaudeSession::approvalLogged, this, [safeSession, notifyMgr](const Konsolai::ApprovalLogEntry &entry) {
+        if (!safeSession)
+            return;
+        if (entry.yoloLevel == 1) {
+            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::YoloApproval,
+                              i18n("Auto-Approved"),
+                              i18n("Yolo approved: %1", entry.toolName),
+                              safeSession);
+        }
     });
 }
 
@@ -1216,14 +1221,13 @@ Session *MainWindow::createSession(Profile::Ptr profile, const QString &director
         session->run();
     }
 
-    // Register Claude sessions and connect to status UI
+    // Register Claude sessions and connect to status UI + notifications
     auto *claudeSession = qobject_cast<Konsolai::ClaudeSession *>(session);
     if (claudeSession) {
         _sessionPanel->registerSession(claudeSession);
-        // Explicitly connect status widget and menu - activeViewChanged may not
-        // fire reliably when creating sessions programmatically
         _claudeMenu->setActiveSession(claudeSession);
         _claudeStatusWidget->setSession(claudeSession);
+        connectClaudeNotifications(claudeSession);
         qDebug() << "MainWindow::createSession - connected Claude UI to session:" << claudeSession->sessionId();
     }
 
