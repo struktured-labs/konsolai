@@ -1128,7 +1128,7 @@ void ClaudeSession::kill()
 void ClaudeSession::sendText(const QString &text)
 {
     if (m_tmuxManager) {
-        m_tmuxManager->sendKeys(m_sessionName, text);
+        m_tmuxManager->sendKeysAsync(m_sessionName, text);
     }
 }
 
@@ -1178,10 +1178,16 @@ void ClaudeSession::sendPrompt(const QString &prompt)
     // not as form submission. Sending Enter via sendKeySequence (without -l)
     // correctly triggers the submit action.
     if (m_tmuxManager) {
-        m_tmuxManager->sendKeys(m_sessionName, prompt);
+        // Capture prompt prefix as the label for the current prompt round
+        if (!prompt.trimmed().isEmpty()) {
+            const QString prefix = prompt.trimmed().left(80);
+            m_promptGroupLabels[m_currentPromptRound] = prefix;
+        }
+
+        m_tmuxManager->sendKeysAsync(m_sessionName, prompt);
         QTimer::singleShot(150, this, [this]() {
             if (m_tmuxManager) {
-                m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Enter"));
+                m_tmuxManager->sendKeySequenceAsync(m_sessionName, QStringLiteral("Enter"));
             }
         });
     }
@@ -1191,7 +1197,9 @@ void ClaudeSession::approvePermission()
 {
     // Claude Code uses a selection UI where option 1 (Yes) is pre-selected
     // Just send Enter to confirm the selection
-    sendText(QStringLiteral("\n"));
+    if (m_tmuxManager) {
+        m_tmuxManager->sendKeysAsync(m_sessionName, QStringLiteral("\n"));
+    }
 }
 
 void ClaudeSession::approvePermissionAlways()
@@ -1235,13 +1243,15 @@ void ClaudeSession::approvePermissionAlways()
             QString key = delta > 0 ? QStringLiteral("Down") : QStringLiteral("Up");
             int steps = qAbs(delta);
             for (int i = 0; i < steps; ++i) {
-                m_tmuxManager->sendKeySequence(m_sessionName, key);
+                m_tmuxManager->sendKeySequenceAsync(m_sessionName, key);
             }
         }
 
         // Confirm selection
         QTimer::singleShot(50, this, [this]() {
-            sendText(QStringLiteral("\n"));
+            if (m_tmuxManager) {
+                m_tmuxManager->sendKeysAsync(m_sessionName, QStringLiteral("\n"));
+            }
         });
     });
 }
@@ -1249,7 +1259,9 @@ void ClaudeSession::approvePermissionAlways()
 void ClaudeSession::denyPermission()
 {
     // Send 'n' followed by Enter to deny
-    sendText(QStringLiteral("n\n"));
+    if (m_tmuxManager) {
+        m_tmuxManager->sendKeysAsync(m_sessionName, QStringLiteral("n\n"));
+    }
 }
 
 void ClaudeSession::stop()
@@ -1257,7 +1269,7 @@ void ClaudeSession::stop()
     // Send Ctrl+C to stop Claude (use sendKeySequence, not sendKeys,
     // because sendKeys uses -l which would type literal "C-c")
     if (m_tmuxManager) {
-        m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("C-c"));
+        m_tmuxManager->sendKeySequenceAsync(m_sessionName, QStringLiteral("C-c"));
     }
 }
 
@@ -1798,9 +1810,9 @@ void ClaudeSession::autoAcceptSuggestion()
     // then Enter to submit it.  If there is no suggestion, Tab is a
     // no-op in Claude Code's Ink UI and Enter on an empty prompt is
     // ignored, so this is safe to fire speculatively.
-    m_tmuxManager->sendKeySequence(m_sessionName, QStringLiteral("Tab"));
+    m_tmuxManager->sendKeySequenceAsync(m_sessionName, QStringLiteral("Tab"));
     QTimer::singleShot(100, this, [this]() {
-        approvePermission(); // sends Enter
+        approvePermission(); // sends Enter (async)
 
         // Defer approval counter: wait 1.5s then check if Claude left Idle.
         // Only count it as a real approval if the suggestion was actually
