@@ -342,8 +342,29 @@ void MainWindow::activeViewChanged(SessionController *controller)
     disconnect(bookmarkHandler(), &Konsole::BookmarkHandler::openUrl, nullptr, nullptr);
     connect(bookmarkHandler(), &Konsole::BookmarkHandler::openUrl, controller, &Konsole::SessionController::openUrl);
 
+    // Skip expensive KXmlGuiFactory remove/add cycle when switching between
+    // controllers that share the same action set (e.g., two Claude tabs).
+    // The XML GUI merge result is identical, so the churn is pure waste.
+    bool skipGuiFactorySwap = false;
+    if (!_pluggedController.isNull() && _pluggedController->isValid() && controller->isValid()) {
+        // Same action count heuristic: if both controllers have the same number
+        // of actions, the GUI merge result will be identical.
+        skipGuiFactorySwap = (_pluggedController->actionCollection()->count() == controller->actionCollection()->count());
+    }
+
     if (!_pluggedController.isNull()) {
-        disconnectController(_pluggedController);
+        if (skipGuiFactorySwap) {
+            // Lightweight disconnect: just remove signals and event filter,
+            // skip the expensive guiFactory()->removeClient() call.
+            disconnect(_pluggedController, &Konsole::SessionController::titleChanged, this, &Konsole::MainWindow::activeViewTitleChanged);
+            disconnect(_pluggedController, &Konsole::SessionController::rawTitleChanged, this, &Konsole::MainWindow::updateWindowCaption);
+            disconnect(_pluggedController, &Konsole::SessionController::iconChanged, this, &Konsole::MainWindow::updateWindowIcon);
+            if (auto view = _pluggedController->view()) {
+                view->removeEventFilter(this);
+            }
+        } else {
+            disconnectController(_pluggedController);
+        }
     }
 
     _pluggedController = controller;
@@ -379,7 +400,9 @@ void MainWindow::activeViewChanged(SessionController *controller)
     }
 
     controller->setShowMenuAction(_toggleMenuBarAction);
-    guiFactory()->addClient(controller);
+    if (!skipGuiFactorySwap) {
+        guiFactory()->addClient(controller);
+    }
 
     // update session title to match newly activated session
     activeViewTitleChanged(controller);

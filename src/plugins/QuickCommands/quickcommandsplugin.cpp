@@ -26,6 +26,7 @@ struct QuickCommandsPlugin::Private {
     QAction *showQuickAccess = nullptr;
     QMap<Konsole::MainWindow *, QuickCommandsWidget *> widgetForWindow;
     QMap<Konsole::MainWindow *, QDockWidget *> dockForWindow;
+    QKeySequence cachedShortcut; // cached to avoid QSettings read on every tab switch
 };
 
 QuickCommandsPlugin::QuickCommandsPlugin(QObject *object, const QVariantList &args)
@@ -52,6 +53,7 @@ void QuickCommandsPlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWi
     mainWindow->addDockWidget(Qt::LeftDockWidgetArea, qcDockWidget);
     connect(qcWidget, &QuickCommandsWidget::quickAccessShortcutChanged, this, [this, mainWindow](QKeySequence s) {
         mainWindow->actionCollection()->setDefaultShortcut(priv->showQuickAccess, s);
+        priv->cachedShortcut = s; // update cache
 
         QString sequenceText = s.toString();
         QSettings settings;
@@ -74,14 +76,15 @@ void QuickCommandsPlugin::activeViewChanged(Konsole::SessionController *controll
     priv->showQuickAccess->deleteLater();
     priv->showQuickAccess = new QAction(i18n("Show Quick Access"));
 
-    QSettings settings;
-    settings.beginGroup(QStringLiteral("plugins"));
-    settings.beginGroup(QStringLiteral("quickcommands"));
-
-    const QKeySequence def(Qt::CTRL | Qt::ALT | Qt::Key_G);
-    const QString defText = def.toString();
-    const QString entry = settings.value(QStringLiteral("shortcut"), defText).toString();
-    const QKeySequence shortcutEntry(entry);
+    // Cache shortcut to avoid QSettings disk read on every tab switch
+    if (priv->cachedShortcut.isEmpty()) {
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("plugins"));
+        settings.beginGroup(QStringLiteral("quickcommands"));
+        const QKeySequence def(Qt::CTRL | Qt::ALT | Qt::Key_G);
+        priv->cachedShortcut = QKeySequence(settings.value(QStringLiteral("shortcut"), def.toString()).toString());
+    }
+    const QKeySequence shortcutEntry = priv->cachedShortcut;
 
     mainWindow->actionCollection()->setDefaultShortcut(priv->showQuickAccess, shortcutEntry);
 

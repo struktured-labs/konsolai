@@ -513,11 +513,11 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     QString sessionId = session->sessionId();
 
     // Fast path: session already registered (tab switch, not new registration).
-    // Just touch lastAccessed and schedule a lightweight debounced update.
+    // Update lastAccessed in memory only — no save or tree rebuild needed.
+    // The timestamp will be persisted on the next natural save (state change, approval, etc.).
     if (m_activeSessions.contains(sessionId) && m_activeSessions[sessionId] == session) {
         if (m_metadata.contains(sessionId)) {
             m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-            scheduleMetadataSave();
         }
         return;
     }

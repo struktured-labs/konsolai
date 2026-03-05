@@ -41,6 +41,7 @@ struct SSHManagerPluginPrivate {
     QMap<Konsole::MainWindow *, SSHManagerTreeWidget *> widgetForWindow;
     QMap<Konsole::MainWindow *, QDockWidget *> dockForWindow;
     QAction *showQuickAccess = nullptr;
+    QKeySequence cachedShortcut; // cached to avoid QSettings read on every tab switch
 };
 
 SSHManagerPlugin::SSHManagerPlugin(QObject *object, const QVariantList &args)
@@ -79,6 +80,7 @@ void SSHManagerPlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindo
 
     connect(managerWidget, &SSHManagerTreeWidget::quickAccessShortcutChanged, this, [this, mainWindow](QKeySequence s) {
         mainWindow->actionCollection()->setDefaultShortcut(d->showQuickAccess, s);
+        d->cachedShortcut = s; // update cache
 
         QString sequenceText = s.toString();
         QSettings settings;
@@ -114,14 +116,15 @@ void SSHManagerPlugin::activeViewChanged(Konsole::SessionController *controller,
     d->showQuickAccess->deleteLater();
     d->showQuickAccess = new QAction(i18n("Show Quick Access for SSH Actions"));
 
-    QSettings settings;
-    settings.beginGroup(QStringLiteral("plugins"));
-    settings.beginGroup(QStringLiteral("sshplugin"));
-
-    const QKeySequence def(Qt::CTRL | Qt::ALT | Qt::Key_H);
-    const QString defText = def.toString();
-    const QString entry = settings.value(QStringLiteral("ssh_shortcut"), defText).toString();
-    const QKeySequence shortcutEntry(entry);
+    // Cache shortcut to avoid QSettings disk read on every tab switch
+    if (d->cachedShortcut.isEmpty()) {
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("plugins"));
+        settings.beginGroup(QStringLiteral("sshplugin"));
+        const QKeySequence def(Qt::CTRL | Qt::ALT | Qt::Key_H);
+        d->cachedShortcut = QKeySequence(settings.value(QStringLiteral("ssh_shortcut"), def.toString()).toString());
+    }
+    const QKeySequence shortcutEntry = d->cachedShortcut;
 
     mainWindow->actionCollection()->setDefaultShortcut(d->showQuickAccess, shortcutEntry);
     terminalDisplay->addAction(d->showQuickAccess);
