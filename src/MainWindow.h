@@ -163,6 +163,7 @@ protected:
 
     // reimplemented from QWidget
     bool focusNextPrevChild(bool next) override;
+    void changeEvent(QEvent *event) override;
 
     // reimplemented from KXMLGUIBuilder
     QWidget *createContainer(QWidget *parent, int index, const QDomElement &element, QAction *&containerAction) override;

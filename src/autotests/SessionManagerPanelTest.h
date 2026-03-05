@@ -93,6 +93,21 @@ private Q_SLOTS:
     void testBulkDismissMultipleSessions();
     void testBulkDismissOlderThan();
     void testBulkCloseMultipleSessions();
+
+    // Tree widget rendering — subagent/team subnodes
+    void testTreeSubagentItemsRendered();
+    void testTreeSubprocessItemsRendered();
+    void testTreeMultiRoundPromptGroups();
+    void testTreeTaskGrouping();
+    void testTreeHideCompletedAgents();
+    void testTreeSubagentStateIcons();
+    void testTreePersistedAgentsForcedNotRunning();
+
+    // Timer pause/resume (window activation)
+    void testPauseResumeIdempotent();
+
+    // Register fast-path (tab switch)
+    void testRegisterSessionFastPath();
 };
 
 }

@@ -1949,6 +1949,26 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
     }
 }
 
+void ClaudeSession::pauseDisplayTimers()
+{
+    if (m_tokenRefreshTimer && m_tokenRefreshTimer->isActive()) {
+        m_tokenRefreshTimer->stop();
+    }
+    if (m_resourceTimer && m_resourceTimer->isActive()) {
+        m_resourceTimer->stop();
+    }
+}
+
+void ClaudeSession::resumeDisplayTimers()
+{
+    if (m_tokenRefreshTimer) {
+        m_tokenRefreshTimer->start(30000);
+    }
+    if (m_resourceTimer) {
+        m_resourceTimer->start(15000);
+    }
+}
+
 void ClaudeSession::startResourceTracking()
 {
 #ifndef Q_OS_LINUX

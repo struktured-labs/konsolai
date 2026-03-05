@@ -17,6 +17,7 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTest>
+#include <QTreeWidget>
 
 // Konsolai
 #include "../claude/ClaudeSession.h"
@@ -1286,6 +1287,362 @@ void SessionManagerPanelTest::testBulkCloseMultipleSessions()
     for (const auto &meta : all) {
         QVERIFY(!meta.isArchived);
     }
+}
+
+// ============================================================
+// Tree widget rendering — subagent/team subnodes
+// ============================================================
+
+// Helper: find the QTreeWidget inside a SessionManagerPanel (m_treeWidget is private)
+static QTreeWidget *findTree(SessionManagerPanel &panel)
+{
+    auto trees = panel.findChildren<QTreeWidget *>();
+    return trees.isEmpty() ? nullptr : trees.first();
+}
+
+// Helper: force a synchronous tree rebuild.
+// updateTreeWidget() uses an async tmux query whose QProcess finished signal
+// is unreliable in QTEST_MAIN environments. rebuildTreeSync() bypasses that.
+static void forceTreeRebuild(SessionManagerPanel &panel)
+{
+    panel.rebuildTreeSync();
+}
+
+// Helper: recursively collect all tree items matching a predicate
+static void collectItems(QTreeWidgetItem *root, std::function<bool(QTreeWidgetItem *)> pred, QList<QTreeWidgetItem *> &out)
+{
+    if (pred(root)) {
+        out.append(root);
+    }
+    for (int i = 0; i < root->childCount(); ++i) {
+        collectItems(root->child(i), pred, out);
+    }
+}
+
+static QList<QTreeWidgetItem *> findItemsByRole(QTreeWidget *tree, int role, const QVariant &value)
+{
+    QList<QTreeWidgetItem *> result;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        collectItems(
+            tree->topLevelItem(i),
+            [&](QTreeWidgetItem *item) {
+                return item->data(0, role) == value;
+            },
+            result);
+    }
+    return result;
+}
+
+// Helper: build a session JSON with subagents attached
+static QJsonObject makeSessionWithAgents(const QString &id,
+                                         const QString &name,
+                                         const QJsonArray &agents,
+                                         const QJsonArray &procs = {},
+                                         const QJsonObject &labels = {},
+                                         int promptRound = 0,
+                                         bool archived = true)
+{
+    QJsonObject s = makeSession(id, name, false, archived);
+    if (!agents.isEmpty()) {
+        s[QStringLiteral("subagents")] = agents;
+    }
+    if (!procs.isEmpty()) {
+        s[QStringLiteral("subprocesses")] = procs;
+    }
+    if (!labels.isEmpty()) {
+        s[QStringLiteral("promptLabels")] = labels;
+    }
+    if (promptRound > 0) {
+        s[QStringLiteral("promptRound")] = promptRound;
+    }
+    return s;
+}
+
+static QJsonObject makeAgent(const QString &agentId,
+                             const QString &agentType,
+                             int state = 3 /*NotRunning*/,
+                             int promptGroupId = 0,
+                             const QString &teammateName = {},
+                             const QString &taskDesc = {},
+                             const QString &taskSubject = {})
+{
+    QJsonObject a;
+    a[QStringLiteral("agentId")] = agentId;
+    a[QStringLiteral("agentType")] = agentType;
+    a[QStringLiteral("state")] = state;
+    a[QStringLiteral("promptGroupId")] = promptGroupId;
+    if (!teammateName.isEmpty())
+        a[QStringLiteral("teammateName")] = teammateName;
+    if (!taskDesc.isEmpty())
+        a[QStringLiteral("taskDescription")] = taskDesc;
+    if (!taskSubject.isEmpty())
+        a[QStringLiteral("currentTaskSubject")] = taskSubject;
+    return a;
+}
+
+static QJsonObject makeProc(const QString &id, const QString &command, int status = 1 /*Completed*/, int promptGroupId = 0, int exitCode = 0)
+{
+    QJsonObject p;
+    p[QStringLiteral("id")] = id;
+    p[QStringLiteral("command")] = command;
+    p[QStringLiteral("fullCommand")] = command;
+    p[QStringLiteral("status")] = status;
+    p[QStringLiteral("exitCode")] = exitCode;
+    p[QStringLiteral("promptGroupId")] = promptGroupId;
+    // Give subprocesses a 5-second duration so they aren't filtered as instant commands
+    QDateTime start = QDateTime::currentDateTime().addSecs(-10);
+    p[QStringLiteral("startedAt")] = start.toString(Qt::ISODate);
+    p[QStringLiteral("finishedAt")] = start.addSecs(5).toString(Qt::ISODate);
+    return p;
+}
+
+void SessionManagerPanelTest::testTreeSubagentItemsRendered()
+{
+    // Verify subagent items appear in the tree under their session
+    QJsonArray agents;
+    agents.append(makeAgent(QStringLiteral("a1"), QStringLiteral("Explore"), 3, 0, QStringLiteral("researcher")));
+    agents.append(makeAgent(QStringLiteral("a2"), QStringLiteral("Bash"), 3, 0));
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree01"), QStringLiteral("konsolai-test-tree01"), agents));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Find items with agentId stored in UserRole
+    auto a1Items = findItemsByRole(tree, Qt::UserRole, QStringLiteral("a1"));
+    auto a2Items = findItemsByRole(tree, Qt::UserRole, QStringLiteral("a2"));
+    QCOMPARE(a1Items.size(), 1);
+    QCOMPARE(a2Items.size(), 1);
+
+    // Verify display text includes agent type and teammate name
+    QVERIFY(a1Items.first()->text(0).contains(QStringLiteral("Explore")));
+    QVERIFY(a1Items.first()->text(0).contains(QStringLiteral("researcher")));
+    QVERIFY(a2Items.first()->text(0).contains(QStringLiteral("Bash")));
+}
+
+void SessionManagerPanelTest::testTreeSubprocessItemsRendered()
+{
+    // Verify subprocess items appear in the tree
+    QJsonArray procs;
+    procs.append(makeProc(QStringLiteral("p1"), QStringLiteral("ninja -j4")));
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree02"), QStringLiteral("konsolai-test-tree02"), {}, procs));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Find subprocess items by UserRole+4 (subprocess ID)
+    auto pItems = findItemsByRole(tree, Qt::UserRole + 4, QStringLiteral("p1"));
+    QCOMPARE(pItems.size(), 1);
+    QVERIFY(pItems.first()->text(0).contains(QStringLiteral("ninja")));
+}
+
+void SessionManagerPanelTest::testTreeMultiRoundPromptGroups()
+{
+    // Two prompt rounds → two "Prompt #N" group nodes
+    QJsonArray agents;
+    agents.append(makeAgent(QStringLiteral("r0a"), QStringLiteral("Explore"), 3, 0));
+    agents.append(makeAgent(QStringLiteral("r1a"), QStringLiteral("Plan"), 3, 1));
+
+    QJsonObject labels;
+    labels[QStringLiteral("0")] = QStringLiteral("Fix the bug");
+    labels[QStringLiteral("1")] = QStringLiteral("Add tests");
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree03"), QStringLiteral("konsolai-test-tree03"), agents, {}, labels, 1));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Prompt group nodes identified by UserRole+3 (prompt round ID)
+    auto pg0 = findItemsByRole(tree, Qt::UserRole + 3, 0);
+    auto pg1 = findItemsByRole(tree, Qt::UserRole + 3, 1);
+    QCOMPARE(pg0.size(), 1);
+    QCOMPARE(pg1.size(), 1);
+
+    // Verify custom labels are used
+    QVERIFY(pg0.first()->text(0).contains(QStringLiteral("Fix the bug")));
+    QVERIFY(pg1.first()->text(0).contains(QStringLiteral("Add tests")));
+
+    // Each prompt group should have a "Subtasks" child
+    auto subtasks = findItemsByRole(tree, Qt::UserRole + 5, QStringLiteral("subtasks"));
+    QCOMPARE(subtasks.size(), 2); // one per round
+}
+
+void SessionManagerPanelTest::testTreeTaskGrouping()
+{
+    // Multiple agents with same taskDescription → grouped under task group node
+    QJsonArray agents;
+    agents.append(makeAgent(QStringLiteral("tg1"), QStringLiteral("Explore"), 3, 0, QStringLiteral("scout"), QStringLiteral("Search codebase")));
+    agents.append(makeAgent(QStringLiteral("tg2"), QStringLiteral("Bash"), 3, 0, QStringLiteral("runner"), QStringLiteral("Search codebase")));
+    agents.append(makeAgent(QStringLiteral("tg3"), QStringLiteral("Plan"), 3, 0, {}, QStringLiteral("Different task")));
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree04"), QStringLiteral("konsolai-test-tree04"), agents));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Task group node identified by UserRole+2 = task description
+    auto taskGroups = findItemsByRole(tree, Qt::UserRole + 2, QStringLiteral("Search codebase"));
+    QCOMPARE(taskGroups.size(), 1);
+
+    // Task group should contain 2 agents
+    QTreeWidgetItem *group = taskGroups.first();
+    QVERIFY(group->text(0).contains(QStringLiteral("2 agents")));
+
+    // The third agent ("Different task") should NOT be in a task group (single agent → inline)
+    auto diffItems = findItemsByRole(tree, Qt::UserRole, QStringLiteral("tg3"));
+    QCOMPARE(diffItems.size(), 1);
+    // Single-agent tasks get the task description prepended inline
+    QVERIFY(diffItems.first()->text(0).contains(QStringLiteral("Different task")));
+}
+
+void SessionManagerPanelTest::testTreeHideCompletedAgents()
+{
+    // Archived/persisted sessions force all agents to NotRunning.
+    // hideCompletedAgents only applies to active sessions, not persisted trees.
+    // So for persisted trees, all agents should always be visible.
+    QJsonArray agents;
+    agents.append(makeAgent(QStringLiteral("hc1"), QStringLiteral("Explore"), 3, 0)); // NotRunning
+    agents.append(makeAgent(QStringLiteral("hc2"), QStringLiteral("Bash"), 3, 0)); // NotRunning
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree05"), QStringLiteral("konsolai-test-tree05"), agents));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Both agents should be visible even though they are NotRunning,
+    // because persisted trees don't hide completed items
+    auto hc1 = findItemsByRole(tree, Qt::UserRole, QStringLiteral("hc1"));
+    auto hc2 = findItemsByRole(tree, Qt::UserRole, QStringLiteral("hc2"));
+    QCOMPARE(hc1.size(), 1);
+    QCOMPARE(hc2.size(), 1);
+}
+
+void SessionManagerPanelTest::testTreeSubagentStateIcons()
+{
+    // Verify that different states produce items with different foreground colors.
+    // Persisted agents are forced to NotRunning, so we can only test that state here.
+    QJsonArray agents;
+    agents.append(makeAgent(QStringLiteral("si1"), QStringLiteral("Explore"), 3, 0)); // NotRunning
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree06"), QStringLiteral("konsolai-test-tree06"), agents));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    auto items = findItemsByRole(tree, Qt::UserRole, QStringLiteral("si1"));
+    QCOMPARE(items.size(), 1);
+
+    // NotRunning agents should have gray-ish foreground (QColor(140,140,140))
+    QColor fg = items.first()->foreground(0).color();
+    QVERIFY(fg.red() > 100 && fg.green() > 100 && fg.blue() > 100); // gray range
+    QVERIFY(!items.first()->icon(0).isNull());
+}
+
+void SessionManagerPanelTest::testTreePersistedAgentsForcedNotRunning()
+{
+    // Even if persisted JSON says Working/Idle, tree rendering forces NotRunning
+    QJsonArray agents;
+    // State 1 = Working in ClaudeProcess::State enum
+    agents.append(makeAgent(QStringLiteral("pf1"), QStringLiteral("Explore"), 1, 0));
+    // State 2 = Idle
+    agents.append(makeAgent(QStringLiteral("pf2"), QStringLiteral("Bash"), 2, 0));
+
+    QJsonArray sessions;
+    sessions.append(makeSessionWithAgents(QStringLiteral("tree07"), QStringLiteral("konsolai-test-tree07"), agents));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Both items should be rendered (not filtered as completed, since persisted trees
+    // don't use hideCompleted)
+    auto pf1 = findItemsByRole(tree, Qt::UserRole, QStringLiteral("pf1"));
+    auto pf2 = findItemsByRole(tree, Qt::UserRole, QStringLiteral("pf2"));
+    QCOMPARE(pf1.size(), 1);
+    QCOMPARE(pf2.size(), 1);
+
+    // Both should have the gray "completed" foreground (forced NotRunning),
+    // NOT the green (Working) or gray (Idle) they were stored as
+    QColor fg1 = pf1.first()->foreground(0).color();
+    QColor fg2 = pf2.first()->foreground(0).color();
+    // QColor(140,140,140) — the "completed" color
+    QCOMPARE(fg1, QColor(140, 140, 140));
+    QCOMPARE(fg2, QColor(140, 140, 140));
+}
+
+// ============================================================
+// Timer pause/resume (window activation)
+// ============================================================
+
+void SessionManagerPanelTest::testPauseResumeIdempotent()
+{
+    SessionManagerPanel_INIT(panel);
+
+    // Pause twice — should not crash or change behavior
+    panel.pauseBackgroundTimers();
+    panel.pauseBackgroundTimers();
+
+    // Resume twice — should not crash
+    panel.resumeBackgroundTimers();
+    panel.resumeBackgroundTimers();
+
+    // Process events to ensure debounced timers fire
+    QCoreApplication::processEvents();
+}
+
+// ============================================================
+// Register fast-path (tab switch)
+// ============================================================
+
+void SessionManagerPanelTest::testRegisterSessionFastPath()
+{
+    // Registering the same session twice should hit the fast path and
+    // NOT duplicate metadata or tree entries
+    SessionManagerPanel_INIT(panel);
+
+    ClaudeSession session(QStringLiteral("TestProfile"), QStringLiteral("/home/user/project"));
+    panel.registerSession(&session);
+    QCoreApplication::processEvents(); // let debounced save/update fire
+
+    int countAfterFirst = panel.allSessions().size();
+
+    // Register again (simulates tab switch)
+    panel.registerSession(&session);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(panel.allSessions().size(), countAfterFirst);
+
+    // Metadata should still exist and lastAccessed should be updated
+    const SessionMetadata *meta = panel.sessionMetadata(session.sessionId());
+    QVERIFY(meta);
+    QVERIFY(meta->lastAccessed.secsTo(QDateTime::currentDateTime()) < 5);
 }
 
 QTEST_MAIN(SessionManagerPanelTest)

@@ -2099,4 +2099,18 @@ void MainWindow::saveNewToolbarConfig()
     plugActionList(QStringLiteral("plugin-submenu"), _pluginsActions);
 }
 
+void MainWindow::changeEvent(QEvent *event)
+{
+    KXmlGuiWindow::changeEvent(event);
+    if (event->type() == QEvent::ActivationChange) {
+        if (_sessionPanel) {
+            if (isActiveWindow()) {
+                _sessionPanel->resumeBackgroundTimers();
+            } else {
+                _sessionPanel->pauseBackgroundTimers();
+            }
+        }
+    }
+}
+
 #include "moc_MainWindow.cpp"

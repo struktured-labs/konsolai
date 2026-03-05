@@ -16,7 +16,9 @@
 #include <QSet>
 #include <QStandardPaths>
 
+#ifdef Q_OS_LINUX
 #include <unistd.h>
+#endif
 
 namespace Konsolai
 {
@@ -25,9 +27,14 @@ namespace Konsolai
  * Ensure SSH_AUTH_SOCK is set in the given process environment.
  * Desktop-launched apps may not inherit the SSH agent socket,
  * so we probe common locations if the variable is missing.
+ * Linux-only: SSH agent sockets use POSIX paths and uid_t.
  */
 void ClaudeSessionRegistry::ensureSshAuthSock(QProcess *process)
 {
+#ifndef Q_OS_LINUX
+    Q_UNUSED(process)
+    return;
+#else
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     if (!env.value(QStringLiteral("SSH_AUTH_SOCK")).isEmpty()) {
         return; // already set
@@ -68,6 +75,7 @@ void ClaudeSessionRegistry::ensureSshAuthSock(QProcess *process)
     }
 
     qWarning() << "ClaudeSessionRegistry: Could not find SSH_AUTH_SOCK - SSH connections may fail";
+#endif
 }
 
 static ClaudeSessionRegistry *s_registryInstance = nullptr;

@@ -511,6 +511,17 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     }
 
     QString sessionId = session->sessionId();
+
+    // Fast path: session already registered (tab switch, not new registration).
+    // Just touch lastAccessed and schedule a lightweight debounced update.
+    if (m_activeSessions.contains(sessionId) && m_activeSessions[sessionId] == session) {
+        if (m_metadata.contains(sessionId)) {
+            m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
+            scheduleMetadataSave();
+        }
+        return;
+    }
+
     m_activeSessions[sessionId] = session;
 
     // Ensure hooks are configured for this session's project
@@ -560,7 +571,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
                  << "triple:" << meta.tripleYoloMode << "approvals:" << (meta.yoloApprovalCount + meta.doubleYoloApprovalCount + meta.tripleYoloApprovalCount);
     }
 
-    saveMetadata();
+    scheduleMetadataSave();
 
     // Invalidate caches for this session's working directory so fresh data is shown immediately
     const QString &workDir = session->workingDirectory();
@@ -571,10 +582,10 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     }
     m_discoveredCacheValid = false;
 
-    updateTreeWidget();
+    scheduleTreeUpdate();
 
-    // Avoid duplicate signal connections if registerSession is called
-    // multiple times for the same session (e.g. on every tab switch).
+    // Signal connections below are idempotent — previous connections for this
+    // session pointer are disconnected first (handles session ID reuse after unarchive).
     disconnect(session, nullptr, this, nullptr);
 
     // Connect to session finished (PTY died, e.g. tab closed) — fires immediately
@@ -1199,6 +1210,68 @@ void SessionManagerPanel::purgeDismissed()
         updateTreeWidget();
         qDebug() << "SessionManagerPanel: Purged" << toRemove.size() << "dismissed sessions";
     }
+}
+
+void SessionManagerPanel::pauseBackgroundTimers()
+{
+    if (m_timersPaused) {
+        return;
+    }
+    m_timersPaused = true;
+
+    if (m_remoteTmuxTimer) {
+        m_remoteTmuxTimer->stop();
+    }
+    if (m_gitCacheTimer) {
+        m_gitCacheTimer->stop();
+    }
+    if (m_convCacheTimer) {
+        m_convCacheTimer->stop();
+    }
+    if (m_durationTimer) {
+        m_durationTimer->stop();
+    }
+
+    // Pause display timers on each active session
+    for (auto it = m_activeSessions.constBegin(); it != m_activeSessions.constEnd(); ++it) {
+        if (auto *session = it.value().data()) {
+            session->pauseDisplayTimers();
+        }
+    }
+
+    qDebug() << "SessionManagerPanel: Paused background timers (window inactive)";
+}
+
+void SessionManagerPanel::resumeBackgroundTimers()
+{
+    if (!m_timersPaused) {
+        return;
+    }
+    m_timersPaused = false;
+
+    if (m_remoteTmuxTimer) {
+        m_remoteTmuxTimer->start();
+    }
+    if (m_gitCacheTimer) {
+        m_gitCacheTimer->start();
+    }
+    if (m_convCacheTimer) {
+        m_convCacheTimer->start();
+    }
+    // m_durationTimer is started/stopped by updateTreeWidget based on active subagents,
+    // so just let the tree rebuild handle it.
+
+    // Resume display timers on each active session
+    for (auto it = m_activeSessions.constBegin(); it != m_activeSessions.constEnd(); ++it) {
+        if (auto *session = it.value().data()) {
+            session->resumeDisplayTimers();
+        }
+    }
+
+    // Schedule a gentle tree refresh to pick up changes that occurred while paused
+    scheduleTreeUpdate();
+
+    qDebug() << "SessionManagerPanel: Resumed background timers (window active)";
 }
 
 void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)

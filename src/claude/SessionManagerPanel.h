@@ -226,6 +226,25 @@ public Q_SLOTS:
      */
     void purgeDismissed();
 
+    /**
+     * Pause non-essential background timers (called when window becomes inactive)
+     */
+    void pauseBackgroundTimers();
+
+    /**
+     * Resume background timers (called when window becomes active again)
+     */
+    void resumeBackgroundTimers();
+
+    /**
+     * Force a synchronous tree rebuild using cached live session data.
+     * Used by tests to avoid async tmux query timing issues.
+     */
+    void rebuildTreeSync()
+    {
+        updateTreeWidgetWithLiveSessions(m_cachedLiveNames);
+    }
+
 Q_SIGNALS:
     /**
      * Emitted when user wants to attach to a session
@@ -407,6 +426,9 @@ private:
     // setOverrideCursor pushes to a stack — we use a counter so batch operations
     // (Archive All, Close All) only push/pop once.
     int m_pendingAsyncKills = 0;
+
+    // Whether background timers are paused (window inactive)
+    bool m_timersPaused = false;
 };
 
 } // namespace Konsolai

@@ -791,6 +791,17 @@ public Q_SLOTS:
      */
     Q_SCRIPTABLE QString getTranscript(int lines = 1000);
 
+    /**
+     * Pause display-only timers (token refresh, resource usage).
+     * Yolo-critical timers (permission poll, idle poll, suggestion) keep running.
+     */
+    void pauseDisplayTimers();
+
+    /**
+     * Resume display-only timers after a pause.
+     */
+    void resumeDisplayTimers();
+
 Q_SIGNALS:
     /**
      * Emitted when Claude state changes
