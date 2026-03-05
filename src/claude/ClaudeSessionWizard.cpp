@@ -36,6 +36,7 @@
 #include <QSpinBox>
 #include <QStringListModel>
 #include <QTextStream>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <KLocalizedString>
@@ -649,46 +650,44 @@ void ClaudeSessionWizard::onPromptChanged()
 void ClaudeSessionWizard::onFolderNameChanged(const QString &name)
 {
     Q_UNUSED(name);
-    QString dir = selectedDirectory();
-    if (!dir.isEmpty() && QDir(dir).exists()) {
-        detectGitState(dir);
-        if (m_isGitRepo) {
-            m_gitModeCombo->setCurrentIndex(GitWorktree);
-            m_sourceRepoEdit->setText(m_repoRoot);
-        } else {
-            m_gitModeCombo->setCurrentIndex(GitInit);
-            m_sourceRepoEdit->clear();
-        }
-        checkForConversations(dir);
-    } else {
-        m_resumeButton->setEnabled(false);
-        m_resumeLabel->clear();
-        m_resumeSessionId.clear();
-    }
     updatePreview();
+    debouncedDetectGitAndConversations();
 }
 
 void ClaudeSessionWizard::onProjectRootChanged(const QString &path)
 {
     Q_UNUSED(path);
     updateFolderCompleter();
-    QString dir = selectedDirectory();
-    if (!dir.isEmpty() && QDir(dir).exists()) {
-        detectGitState(dir);
-        if (m_isGitRepo) {
-            m_gitModeCombo->setCurrentIndex(GitWorktree);
-            m_sourceRepoEdit->setText(m_repoRoot);
-        } else {
-            m_gitModeCombo->setCurrentIndex(GitInit);
-            m_sourceRepoEdit->clear();
-        }
-        checkForConversations(dir);
-    } else {
-        m_resumeButton->setEnabled(false);
-        m_resumeLabel->clear();
-        m_resumeSessionId.clear();
-    }
     updatePreview();
+    debouncedDetectGitAndConversations();
+}
+
+void ClaudeSessionWizard::debouncedDetectGitAndConversations()
+{
+    if (!m_gitDebounce) {
+        m_gitDebounce = new QTimer(this);
+        m_gitDebounce->setSingleShot(true);
+        m_gitDebounce->setInterval(300);
+        connect(m_gitDebounce, &QTimer::timeout, this, [this]() {
+            QString dir = selectedDirectory();
+            if (!dir.isEmpty() && QDir(dir).exists()) {
+                detectGitState(dir);
+                if (m_isGitRepo) {
+                    m_gitModeCombo->setCurrentIndex(GitWorktree);
+                    m_sourceRepoEdit->setText(m_repoRoot);
+                } else {
+                    m_gitModeCombo->setCurrentIndex(GitInit);
+                    m_sourceRepoEdit->clear();
+                }
+                checkForConversations(dir);
+            } else {
+                m_resumeButton->setEnabled(false);
+                m_resumeLabel->clear();
+                m_resumeSessionId.clear();
+            }
+        });
+    }
+    m_gitDebounce->start();
 }
 
 void ClaudeSessionWizard::onCreatePressed()

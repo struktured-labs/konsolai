@@ -545,6 +545,11 @@ public:
         entry.toolInput = toolInput;
         m_approvalLog.append(entry);
 
+        // Cap in-memory log at 500 entries to prevent unbounded growth on long yolo runs
+        if (m_approvalLog.size() > 500) {
+            m_approvalLog.removeFirst();
+        }
+
         if (yoloLevel == 1) {
             m_yoloApprovalCount++;
         } else if (yoloLevel == 2) {
@@ -671,6 +676,32 @@ public:
             }
         }
         return false;
+    }
+
+    /**
+     * Remove completed/dead subagents and subprocesses older than 5 minutes
+     * to prevent unbounded growth during long yolo runs.
+     */
+    void purgeCompletedEntries()
+    {
+        const QDateTime now = QDateTime::currentDateTime();
+        const int maxAgeSecs = 300; // 5 minutes
+
+        for (auto it = m_subagents.begin(); it != m_subagents.end();) {
+            if (it->state == ClaudeProcess::State::NotRunning && it->lastUpdated.isValid() && it->lastUpdated.secsTo(now) > maxAgeSecs) {
+                it = m_subagents.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        for (auto it = m_subprocesses.begin(); it != m_subprocesses.end();) {
+            if (it->status != SubprocessInfo::Running && it->finishedAt.isValid() && it->finishedAt.secsTo(now) > maxAgeSecs) {
+                it = m_subprocesses.erase(it);
+            } else {
+                ++it;
+            }
+        }
     }
 
     /**

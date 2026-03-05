@@ -18,6 +18,7 @@
 class QLineEdit;
 class QPushButton;
 class QComboBox;
+class QTimer;
 class QCheckBox;
 class QLabel;
 class QGroupBox;
@@ -166,6 +167,8 @@ private:
     QSpinBox *m_tokenCeilingSpin = nullptr;
     QComboBox *m_budgetPolicyCombo = nullptr;
 
+    void debouncedDetectGitAndConversations();
+
     // State
     Konsole::Profile::Ptr m_profile;
     QString m_defaultDirectory;
@@ -176,6 +179,9 @@ private:
     QString m_selectedTmuxSession;
     bool m_isGitRepo = false;
     bool m_useExistingDir = false;
+
+    // Debounce timer for detectGitState + checkForConversations (avoids blocking git on every keystroke)
+    QTimer *m_gitDebounce = nullptr;
 };
 
 } // namespace Konsolai

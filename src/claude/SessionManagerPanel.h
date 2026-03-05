@@ -347,7 +347,7 @@ private:
 
     QProgressBar *m_loadingBar = nullptr;
     bool m_initialized = false;
-    QVector<ClaudeSession *> m_pendingRegistrations;
+    QVector<QPointer<ClaudeSession>> m_pendingRegistrations;
 
     QMap<QString, SessionMetadata> m_metadata;
     QMap<QString, QPointer<ClaudeSession>> m_activeSessions;

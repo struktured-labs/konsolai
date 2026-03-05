@@ -118,9 +118,9 @@ void SessionManagerPanel::deferredInit()
 
     // Process any sessions that registered before init completed
     m_initialized = true;
-    for (auto *session : std::as_const(m_pendingRegistrations)) {
+    for (const auto &session : std::as_const(m_pendingRegistrations)) {
         if (session) {
-            registerSession(session);
+            registerSession(session.data());
         }
     }
     m_pendingRegistrations.clear();
@@ -2490,6 +2490,16 @@ void SessionManagerPanel::refreshRemoteTmuxSessions()
                     }
                 });
 
+        // Kill SSH process after 15s to prevent leak on network hang
+        QPointer<QProcess> safeProc(proc);
+        QTimer::singleShot(15000, proc, [safeProc, pendingCount, accumulated, guard]() {
+            if (safeProc && safeProc->state() != QProcess::NotRunning) {
+                safeProc->kill();
+                // finished() signal will fire after kill, delivering deleteLater and
+                // decrementing pendingCount via the connection above.
+            }
+        });
+
         proc->start(QStringLiteral("ssh"), args);
     }
 }
@@ -2857,15 +2867,28 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     // Git branch badge (local sessions only, cached per working directory)
     if (!meta.workingDirectory.isEmpty() && !meta.isRemote) {
         if (!m_gitBranchCache.contains(meta.workingDirectory)) {
-            QProcess git;
-            git.setWorkingDirectory(meta.workingDirectory);
-            git.start(QStringLiteral("git"), {QStringLiteral("branch"), QStringLiteral("--show-current")});
-            if (git.waitForFinished(500)) { // 500ms timeout to avoid blocking UI
-                QString branch = QString::fromUtf8(git.readAllStandardOutput()).trimmed();
-                m_gitBranchCache.insert(meta.workingDirectory, branch);
-            } else {
-                m_gitBranchCache.insert(meta.workingDirectory, QString()); // empty = not a git repo or timed out
-            }
+            // Insert placeholder to prevent duplicate async queries for the same dir
+            m_gitBranchCache.insert(meta.workingDirectory, QString());
+
+            // Async git query — updates cache and triggers tree refresh when done
+            auto *git = new QProcess(this);
+            git->setWorkingDirectory(meta.workingDirectory);
+            QPointer<SessionManagerPanel> guard(this);
+            QString workDir = meta.workingDirectory;
+            connect(git, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [guard, git, workDir](int exitCode, QProcess::ExitStatus) {
+                git->deleteLater();
+                if (!guard) {
+                    return;
+                }
+                if (exitCode == 0) {
+                    QString branch = QString::fromUtf8(git->readAllStandardOutput()).trimmed();
+                    guard->m_gitBranchCache[workDir] = branch;
+                } else {
+                    guard->m_gitBranchCache[workDir] = QString();
+                }
+                guard->scheduleTreeUpdate();
+            });
+            git->start(QStringLiteral("git"), {QStringLiteral("branch"), QStringLiteral("--show-current")});
         }
         const QString &branch = m_gitBranchCache[meta.workingDirectory];
         if (!branch.isEmpty() && branch != QStringLiteral("main") && branch != QStringLiteral("master")) {

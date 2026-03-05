@@ -694,6 +694,9 @@ void ClaudeSession::connectSignals()
     // Advance prompt round when Claude finishes a response
     connect(m_claudeProcess, &ClaudeProcess::taskFinished, this, [this]() {
         m_currentPromptRound++;
+        // Purge completed subagents/subprocesses older than 5 minutes
+        // to prevent unbounded map growth during long yolo runs.
+        purgeCompletedEntries();
     });
 
     // Capture Task tool descriptions for subagent grouping
@@ -845,7 +848,7 @@ void ClaudeSession::connectSignals()
         // Walk backwards to find the most recent approval for this tool that has no output yet
         for (int i = m_approvalLog.size() - 1; i >= 0; --i) {
             if (m_approvalLog[i].toolName == toolName && m_approvalLog[i].toolOutput.isEmpty()) {
-                m_approvalLog[i].toolOutput = toolResponse;
+                m_approvalLog[i].toolOutput = toolResponse.left(4096);
                 break;
             }
         }
@@ -857,7 +860,8 @@ void ClaudeSession::connectSignals()
                 auto &info = m_subprocesses[id];
                 info.status = SubprocessInfo::Completed;
                 info.finishedAt = QDateTime::currentDateTime();
-                info.output = toolResponse;
+                // Cap in-memory output to 4KB to prevent unbounded growth on long yolo runs
+                info.output = toolResponse.left(4096);
                 // Try to parse exit code from response JSON
                 QJsonDocument doc = QJsonDocument::fromJson(toolResponse.toUtf8());
                 if (doc.isObject()) {
@@ -2455,8 +2459,10 @@ void ClaudeSession::removeHooksFromProjectSettings()
     QJsonObject hooks = settings[QStringLiteral("hooks")].toObject();
     bool anyRemoved = false;
 
-    for (auto it = hooks.begin(); it != hooks.end(); ++it) {
-        QJsonArray entries = it.value().toArray();
+    // Collect keys first to avoid modifying the QJsonObject during iteration
+    const QStringList hookKeys = hooks.keys();
+    for (const QString &key : hookKeys) {
+        QJsonArray entries = hooks[key].toArray();
         QJsonArray filtered;
         for (const auto &entry : entries) {
             QString entryStr = QString::fromUtf8(QJsonDocument(entry.toObject()).toJson());
@@ -2466,7 +2472,7 @@ void ClaudeSession::removeHooksFromProjectSettings()
                 filtered.append(entry);
             }
         }
-        hooks[it.key()] = filtered;
+        hooks[key] = filtered;
     }
 
     if (!anyRemoved) {
