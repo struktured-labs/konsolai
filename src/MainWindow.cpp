@@ -995,6 +995,13 @@ void MainWindow::connectClaudeNotifications(Konsolai::ClaudeSession *claudeSessi
                               safeSession);
         }
     });
+
+    // Budget gate notification — fires when cost, tokens, time, or resources exceed limits
+    connect(claudeSession, &Konsolai::ClaudeSession::budgetBlocked, this, [safeSession, notifyMgr](const QString &reason) {
+        if (!safeSession)
+            return;
+        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Budget Gate Active"), reason, safeSession);
+    });
 }
 
 void MainWindow::updateHamburgerMenu()

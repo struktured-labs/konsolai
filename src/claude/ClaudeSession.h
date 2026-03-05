@@ -925,6 +925,11 @@ Q_SIGNALS:
     void resourceUsageChanged();
 
     /**
+     * Emitted when a budget gate blocks yolo (cost, tokens, time, or resources exceeded)
+     */
+    void budgetBlocked(const QString &reason);
+
+    /**
      * Emitted when task description is set/changed
      */
     void taskDescriptionChanged();

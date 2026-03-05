@@ -929,6 +929,21 @@ BudgetController *ClaudeSession::budgetController()
         connect(this, &ClaudeSession::resourceUsageChanged, m_budgetController, [this]() {
             m_budgetController->onResourceUsageChanged(m_resourceUsage);
         });
+
+        // Forward budget exceeded and resource gate signals as budgetBlocked + approval log entries
+        connect(m_budgetController, &BudgetController::budgetExceeded, this, [this](const QString &type) {
+            QString reason = QStringLiteral("Budget exceeded: %1").arg(type);
+            logApproval(QStringLiteral("budget-gate"), reason, 0);
+            Q_EMIT budgetBlocked(reason);
+        });
+        connect(m_budgetController, &BudgetController::resourceGateTriggered, this, [this](const QString &reason) {
+            QString msg = QStringLiteral("Resource gate: %1").arg(reason);
+            logApproval(QStringLiteral("resource-gate"), msg, 0);
+            Q_EMIT budgetBlocked(msg);
+        });
+        connect(m_budgetController, &BudgetController::budgetWarning, this, [this](const QString &type, double percent) {
+            Q_EMIT budgetBlocked(QStringLiteral("Budget warning: %1 at %2%").arg(type).arg(percent, 0, 'f', 0));
+        });
     }
     return m_budgetController;
 }
