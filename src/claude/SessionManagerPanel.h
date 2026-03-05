@@ -429,6 +429,9 @@ private:
 
     // Whether background timers are paused (window inactive)
     bool m_timersPaused = false;
+
+    // Whether a metadata save was deferred during timer pause
+    bool m_pendingSave = false;
 };
 
 } // namespace Konsolai

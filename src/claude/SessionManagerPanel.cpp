@@ -1219,6 +1219,7 @@ void SessionManagerPanel::pauseBackgroundTimers()
     }
     m_timersPaused = true;
 
+    // Stop periodic timers
     if (m_remoteTmuxTimer) {
         m_remoteTmuxTimer->stop();
     }
@@ -1230,6 +1231,17 @@ void SessionManagerPanel::pauseBackgroundTimers()
     }
     if (m_durationTimer) {
         m_durationTimer->stop();
+    }
+
+    // Stop debounce timers — no point rebuilding tree or saving metadata
+    // while nobody is looking. Deferred work flushes on resume.
+    if (m_updateDebounce && m_updateDebounce->isActive()) {
+        m_updateDebounce->stop();
+        m_pendingUpdate = true;
+    }
+    if (m_saveDebounce && m_saveDebounce->isActive()) {
+        m_saveDebounce->stop();
+        m_pendingSave = true;
     }
 
     // Pause display timers on each active session
@@ -1249,6 +1261,7 @@ void SessionManagerPanel::resumeBackgroundTimers()
     }
     m_timersPaused = false;
 
+    // Restart periodic timers
     if (m_remoteTmuxTimer) {
         m_remoteTmuxTimer->start();
     }
@@ -1266,6 +1279,12 @@ void SessionManagerPanel::resumeBackgroundTimers()
         if (auto *session = it.value().data()) {
             session->resumeDisplayTimers();
         }
+    }
+
+    // Flush deferred metadata save first (so tree sees current data)
+    if (m_pendingSave) {
+        m_pendingSave = false;
+        saveMetadata();
     }
 
     // Schedule a gentle tree refresh to pick up changes that occurred while paused
@@ -2245,6 +2264,13 @@ void SessionManagerPanel::scheduleTreeUpdate()
         return;
     }
 
+    // When window is inactive, skip tree rebuilds entirely — nobody is looking.
+    // resumeBackgroundTimers() will trigger one rebuild when the window reactivates.
+    if (m_timersPaused) {
+        m_pendingUpdate = true;
+        return;
+    }
+
     // Debounce: coalesce rapid-fire signals (e.g. approvalCountChanged fires
     // many times per minute during yolo mode) into a single deferred update.
     if (!m_updateDebounce) {
@@ -2369,6 +2395,12 @@ void SessionManagerPanel::updateDurationLabels()
 
 void SessionManagerPanel::scheduleMetadataSave()
 {
+    // When window is inactive, defer saves — they'll flush on resume.
+    if (m_timersPaused) {
+        m_pendingSave = true;
+        return;
+    }
+
     if (!m_saveDebounce) {
         m_saveDebounce = new QTimer(this);
         m_saveDebounce->setSingleShot(true);
