@@ -434,6 +434,93 @@ void TmuxManagerTest::testGetPanePidAsyncNonexistent()
 }
 
 // ============================================================
+// Async kill tests
+// ============================================================
+
+void TmuxManagerTest::testKillSessionAsyncNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    bool success = true;
+
+    manager.killSessionAsync(QStringLiteral("konsolai-nonexistent-99999999"), [&](bool result) {
+        callbackCalled = true;
+        success = result;
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    QVERIFY(!success);
+}
+
+void TmuxManagerTest::testKillSessionAsyncNullCallback()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    // Should not crash with nullptr callback
+    manager.killSessionAsync(QStringLiteral("konsolai-nonexistent-99999999"), nullptr);
+
+    // Give it time to complete
+    QTest::qWait(500);
+}
+
+void TmuxManagerTest::testRespawnPaneAsyncNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    bool success = true;
+
+    manager.respawnPaneAsync(QStringLiteral("konsolai-nonexistent-99999999"), QStringLiteral("echo hello"), [&](bool result) {
+        callbackCalled = true;
+        success = result;
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    QVERIFY(!success);
+}
+
+void TmuxManagerTest::testGetPaneWorkingDirAsyncNonexistent()
+{
+    if (!TmuxManager::isAvailable()) {
+        QSKIP("tmux not available");
+    }
+
+    TmuxManager manager;
+    bool callbackCalled = false;
+    QString dir;
+
+    manager.getPaneWorkingDirectoryAsync(QStringLiteral("konsolai-nonexistent-99999999"), [&](const QString &result) {
+        callbackCalled = true;
+        dir = result;
+    });
+
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return callbackCalled;
+        },
+        5000));
+    QVERIFY(dir.isEmpty());
+}
+
+// ============================================================
 // Attach command passthrough
 // ============================================================
 

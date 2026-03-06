@@ -179,7 +179,15 @@ void NotificationManager::ensureAudioThread()
 
     m_soundEffect = new QSoundEffect(); // no parent — moved to thread
     m_soundEffect->moveToThread(m_audioThread);
-    m_soundEffect->setVolume(m_audioVolume);
+    // Set volume on the audio thread — calling methods after moveToThread
+    // from the main thread is a Qt threading contract violation.
+    qreal vol = m_audioVolume;
+    QMetaObject::invokeMethod(
+        m_soundEffect,
+        [this, vol]() {
+            m_soundEffect->setVolume(vol);
+        },
+        Qt::QueuedConnection);
 }
 
 void NotificationManager::playSound(NotificationType type)

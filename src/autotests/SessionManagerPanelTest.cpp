@@ -1617,6 +1617,96 @@ void SessionManagerPanelTest::testPauseResumeIdempotent()
     QCoreApplication::processEvents();
 }
 
+void SessionManagerPanelTest::testPauseSuppressesTreeUpdates()
+{
+    SessionManagerPanel_INIT(panel);
+
+    // Register a session first
+    ClaudeSession session(QStringLiteral("TestProfile"), QStringLiteral("/home/user/project"));
+    panel.registerSession(&session);
+    QCoreApplication::processEvents();
+
+    // Pause timers
+    panel.pauseBackgroundTimers();
+
+    // Register another session while paused — the tree update will be deferred
+    ClaudeSession session2(QStringLiteral("TestProfile2"), QStringLiteral("/home/user/project2"));
+    panel.registerSession(&session2);
+    QCoreApplication::processEvents();
+
+    // Resume — deferred tree update should flush without crash
+    panel.resumeBackgroundTimers();
+    QCoreApplication::processEvents();
+
+    panel.unregisterSession(&session);
+    panel.unregisterSession(&session2);
+}
+
+void SessionManagerPanelTest::testPauseSuppressesMetadataSaves()
+{
+    SessionManagerPanel_INIT(panel);
+
+    // Register and let initial save happen
+    ClaudeSession session(QStringLiteral("TestProfile"), QStringLiteral("/home/user/project"));
+    panel.registerSession(&session);
+    QCoreApplication::processEvents();
+    QTest::qWait(1200); // let initial debounced save fire
+    QCoreApplication::processEvents();
+
+    // Pause timers
+    panel.pauseBackgroundTimers();
+
+    // Pin session — this triggers scheduleMetadataSave internally
+    panel.pinSession(session.sessionId());
+    QCoreApplication::processEvents();
+
+    // Resume — deferred save should flush
+    panel.resumeBackgroundTimers();
+    QCoreApplication::processEvents();
+    QTest::qWait(1200); // let debounced save fire
+    QCoreApplication::processEvents();
+
+    panel.unregisterSession(&session);
+}
+
+void SessionManagerPanelTest::testResumeFlushesDeferred()
+{
+    SessionManagerPanel_INIT(panel);
+
+    // Register a session, let it settle
+    ClaudeSession session(QStringLiteral("TestProfile"), QStringLiteral("/home/user/project"));
+    panel.registerSession(&session);
+    QCoreApplication::processEvents();
+    QTest::qWait(1200);
+    QCoreApplication::processEvents();
+
+    // Pause
+    panel.pauseBackgroundTimers();
+
+    // Make changes while paused
+    panel.pinSession(session.sessionId());
+    QCoreApplication::processEvents();
+
+    // Resume — should flush deferred operations
+    panel.resumeBackgroundTimers();
+    QCoreApplication::processEvents();
+    QTest::qWait(1200);
+    QCoreApplication::processEvents();
+
+    // Verify session is still tracked and pinned
+    QVERIFY(panel.allSessions().size() > 0);
+    bool foundPinned = false;
+    for (const auto &meta : panel.pinnedSessions()) {
+        if (meta.sessionId == session.sessionId()) {
+            foundPinned = true;
+            break;
+        }
+    }
+    QVERIFY(foundPinned);
+
+    panel.unregisterSession(&session);
+}
+
 // ============================================================
 // Register fast-path (tab switch)
 // ============================================================

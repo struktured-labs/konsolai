@@ -2065,34 +2065,8 @@ qint64 ClaudeSession::findClaudePid(qint64 panePid)
         }
     }
 
-    // Fallback: scan /proc for processes whose ppid matches panePid
-    if (childPids.isEmpty()) {
-        QDir procDir(QStringLiteral("/proc"));
-        const QStringList entries = procDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QString &entry : entries) {
-            bool isNum = false;
-            qint64 pid = entry.toLongLong(&isNum);
-            if (!isNum || pid <= 0) {
-                continue;
-            }
-            QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
-            if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                continue;
-            }
-            QString statLine = QString::fromUtf8(statFile.readAll()).trimmed();
-            statFile.close();
-            // ppid is field 4 (1-indexed); skip past comm "(name)" which may contain spaces
-            int closeParenIdx = statLine.lastIndexOf(QLatin1Char(')'));
-            if (closeParenIdx < 0) {
-                continue;
-            }
-            QStringList fields = statLine.mid(closeParenIdx + 2).split(QLatin1Char(' '), Qt::SkipEmptyParts);
-            // fields[0]=state, fields[1]=ppid
-            if (fields.size() > 1 && fields[1].toLongLong() == panePid) {
-                childPids.append(entry);
-            }
-        }
-    }
+    // /proc/{pid}/task/{pid}/children is available on all modern kernels (3.2+).
+    // No fallback scan of all /proc entries — that costs 20-100ms on the main thread.
 
     for (const QString &childPidStr : childPids) {
         qint64 childPid = childPidStr.toLongLong();

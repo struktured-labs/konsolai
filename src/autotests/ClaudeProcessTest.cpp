@@ -68,16 +68,16 @@ void ClaudeProcessTest::testIsRunning()
 void ClaudeProcessTest::testModelName()
 {
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Default), QString());
-    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-4-5"));
-    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Sonnet), QStringLiteral("claude-sonnet-4"));
-    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Haiku), QStringLiteral("claude-haiku"));
+    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-4-6"));
+    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Sonnet), QStringLiteral("claude-sonnet-4-6"));
+    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Haiku), QStringLiteral("claude-haiku-4-5-20251001"));
 }
 
 void ClaudeProcessTest::testParseModel()
 {
-    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-4-5")), ClaudeProcess::Model::Opus);
-    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-sonnet-4")), ClaudeProcess::Model::Sonnet);
-    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-haiku")), ClaudeProcess::Model::Haiku);
+    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-4-6")), ClaudeProcess::Model::Opus);
+    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-sonnet-4-6")), ClaudeProcess::Model::Sonnet);
+    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-haiku-4-5-20251001")), ClaudeProcess::Model::Haiku);
 
     // Unknown models should return Default
     QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("unknown-model")), ClaudeProcess::Model::Default);

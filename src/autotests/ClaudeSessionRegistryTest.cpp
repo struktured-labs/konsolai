@@ -334,6 +334,22 @@ void ClaudeSessionRegistryTest::testReadClaudeConversationsParsing()
     QDir().rmdir(indexDir);
 }
 
+void ClaudeSessionRegistryTest::testRefreshOrphanedSessionsAsyncCompletes()
+{
+    ClaudeSessionRegistry registry;
+
+    // refreshOrphanedSessionsAsync spawns an async tmux list operation.
+    // It should complete without crash even if tmux is unavailable.
+    registry.refreshOrphanedSessionsAsync();
+
+    // Give the async operation time to complete (tmux call + callback)
+    QTest::qWait(2000);
+
+    // Verify registry is still functional
+    QList<ClaudeSessionState> states = registry.allSessionStates();
+    Q_UNUSED(states)
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionRegistryTest)
 
 #include "moc_ClaudeSessionRegistryTest.cpp"

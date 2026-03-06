@@ -45,9 +45,9 @@ public:
      */
     enum class Model {
         Default,        // Use default model
-        Opus,           // claude-opus-4-5
-        Sonnet,         // claude-sonnet-4
-        Haiku           // claude-haiku
+        Opus, // claude-opus-4-6
+        Sonnet, // claude-sonnet-4-6
+        Haiku // claude-haiku-4-5-20251001
     };
     Q_ENUM(Model)
 

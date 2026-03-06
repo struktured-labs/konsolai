@@ -105,6 +105,9 @@ private Q_SLOTS:
 
     // Timer pause/resume (window activation)
     void testPauseResumeIdempotent();
+    void testPauseSuppressesTreeUpdates();
+    void testPauseSuppressesMetadataSaves();
+    void testResumeFlushesDeferred();
 
     // Register fast-path (tab switch)
     void testRegisterSessionFastPath();

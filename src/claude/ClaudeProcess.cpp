@@ -74,11 +74,11 @@ QString ClaudeProcess::modelName(Model model)
 {
     switch (model) {
     case Model::Opus:
-        return QStringLiteral("claude-opus-4-5");
+        return QStringLiteral("claude-opus-4-6");
     case Model::Sonnet:
-        return QStringLiteral("claude-sonnet-4");
+        return QStringLiteral("claude-sonnet-4-6");
     case Model::Haiku:
-        return QStringLiteral("claude-haiku");
+        return QStringLiteral("claude-haiku-4-5-20251001");
     case Model::Default:
     default:
         return QString();

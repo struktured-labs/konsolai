@@ -63,6 +63,12 @@ private Q_SLOTS:
     void testListKonsolaiSessionsAsync();
     void testGetPanePidAsyncNonexistent();
 
+    // Async kill tests
+    void testKillSessionAsyncNonexistent();
+    void testKillSessionAsyncNullCallback();
+    void testRespawnPaneAsyncNonexistent();
+    void testGetPaneWorkingDirAsyncNonexistent();
+
     // Attach command passthrough
     void testBuildAttachCommandPassthrough();
 

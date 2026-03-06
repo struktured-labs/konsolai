@@ -6,16 +6,16 @@
 #ifndef CLAUDEMENU_H
 #define CLAUDEMENU_H
 
+#include "ClaudeSession.h"
 #include "NotificationManager.h"
 #include "konsoleprivate_export.h"
 
 #include <QAction>
 #include <QMenu>
+#include <QPointer>
 
 namespace Konsolai
 {
-
-class ClaudeSession;
 class ClaudeSessionRegistry;
 
 /**
@@ -190,7 +190,7 @@ private:
     void updateReattachMenu();
     void syncYoloModesFromSession();
 
-    ClaudeSession *m_activeSession = nullptr;
+    QPointer<ClaudeSession> m_activeSession;
     ClaudeSessionRegistry *m_registry = nullptr;
 
     // Actions

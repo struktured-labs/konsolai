@@ -32,6 +32,9 @@ private Q_SLOTS:
     // Conversation reader
     void testReadClaudeConversationsEmpty();
     void testReadClaudeConversationsParsing();
+
+    // Async operations
+    void testRefreshOrphanedSessionsAsyncCompletes();
 };
 
 }
