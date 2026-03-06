@@ -132,16 +132,6 @@ public:
     const ClaudeSessionState *sessionState(const QString &sessionName) const;
 
     /**
-     * Check if a session exists (in tmux)
-     */
-    bool sessionExists(const QString &sessionName) const;
-
-    /**
-     * Refresh the list of orphaned sessions from tmux (synchronous — blocks GUI thread)
-     */
-    void refreshOrphanedSessions();
-
-    /**
      * Refresh the list of orphaned sessions using pre-fetched tmux data (non-blocking)
      */
     void refreshOrphanedSessions(const QList<TmuxManager::SessionInfo> &tmuxSessions);

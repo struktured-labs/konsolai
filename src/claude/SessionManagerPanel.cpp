@@ -4050,9 +4050,17 @@ void SessionManagerPanel::showSubagentTranscript(const SubagentInfo &info)
     }
 
     // Parse JSONL and extract readable content
+    // Cap at 5000 lines to prevent UI freeze on large transcripts
+    static constexpr int MAX_LINES = 5000;
     QString readable;
+    int lineCount = 0;
+
     QTextStream stream(&file);
     while (!stream.atEnd()) {
+        if (++lineCount > MAX_LINES) {
+            readable += i18n("\n\n(Truncated at %1 lines — open externally for full transcript)\n", MAX_LINES);
+            break;
+        }
         QString line = stream.readLine().trimmed();
         if (line.isEmpty()) {
             continue;
@@ -4105,10 +4113,18 @@ void SessionManagerPanel::showSubagentTranscript(const SubagentInfo &info)
     file.close();
 
     if (readable.isEmpty()) {
-        // Fallback: show raw JSONL
+        // Fallback: show first 5000 lines of raw JSONL (capped to avoid UI freeze)
         QFile raw(info.transcriptPath);
         if (raw.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            readable = QString::fromUtf8(raw.readAll());
+            QTextStream rawStream(&raw);
+            int rawLines = 0;
+            while (!rawStream.atEnd() && rawLines < MAX_LINES) {
+                readable += rawStream.readLine() + QStringLiteral("\n");
+                rawLines++;
+            }
+            if (!rawStream.atEnd()) {
+                readable += i18n("\n(Truncated at %1 lines)\n", MAX_LINES);
+            }
             raw.close();
         }
     }
@@ -4155,13 +4171,21 @@ void SessionManagerPanel::showSessionActivity(const QString &jsonlPath, const QS
     }
 
     // Parse JSONL: build structured activity and collect file paths from tool_use
+    // Cap at 5000 lines to prevent UI freeze on large conversations (10K+ lines → 500ms+)
+    static constexpr int MAX_LINES = 5000;
     QString readable;
     QSet<QString> filesModified; // unique file paths from Write/Edit tool calls
     int toolCallCount = 0;
     int userMessageCount = 0;
+    int lineCount = 0;
+    bool truncated = false;
 
     QTextStream stream(&file);
     while (!stream.atEnd()) {
+        if (++lineCount > MAX_LINES) {
+            truncated = true;
+            break;
+        }
         QString line = stream.readLine().trimmed();
         if (line.isEmpty()) {
             continue;
@@ -4230,6 +4254,9 @@ void SessionManagerPanel::showSessionActivity(const QString &jsonlPath, const QS
     QString summary;
     summary += i18n("Project: %1\n", QDir(workDir).dirName());
     summary += i18n("Messages: %1 user, Tool calls: %2\n", userMessageCount, toolCallCount);
+    if (truncated) {
+        summary += i18n("(Showing first %1 lines — open externally for full transcript)\n", MAX_LINES);
+    }
     if (!filesModified.isEmpty()) {
         QStringList sortedFiles = filesModified.values();
         sortedFiles.sort();

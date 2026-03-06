@@ -268,18 +268,6 @@ const ClaudeSessionState *ClaudeSessionRegistry::sessionState(const QString &ses
     return nullptr;
 }
 
-bool ClaudeSessionRegistry::sessionExists(const QString &sessionName) const
-{
-    return m_tmuxManager->sessionExists(sessionName);
-}
-
-void ClaudeSessionRegistry::refreshOrphanedSessions()
-{
-    // Synchronous variant — blocks the GUI thread
-    QList<TmuxManager::SessionInfo> tmuxSessions = m_tmuxManager->listKonsolaiSessions();
-    refreshOrphanedSessions(tmuxSessions);
-}
-
 void ClaudeSessionRegistry::refreshOrphanedSessions(const QList<TmuxManager::SessionInfo> &tmuxSessions)
 {
     bool changed = false;
@@ -746,18 +734,20 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
         process->deleteLater();
     });
 
-    process->start(QStringLiteral("ssh"), args);
-    if (process->waitForStarted(5000)) {
+    connect(process, &QProcess::started, this, [process, pyScript, timeout]() {
         process->write(pyScript);
         process->closeWriteChannel();
         timeout->start(15000);
-    } else {
-        qDebug() << "readRemoteConversationsAsync: SSH process failed to start";
+    });
+    connect(process, &QProcess::errorOccurred, this, [process, callback](QProcess::ProcessError) {
+        qDebug() << "readRemoteConversationsAsync: SSH process error:" << process->errorString();
         if (callback) {
             callback({});
         }
         process->deleteLater();
-    }
+    });
+
+    process->start(QStringLiteral("ssh"), args);
 }
 
 void ClaudeSessionRegistry::discoverAllRemoteConversationsAsync(
@@ -905,18 +895,20 @@ void ClaudeSessionRegistry::discoverAllRemoteConversationsAsync(
         process->deleteLater();
     });
 
-    process->start(QStringLiteral("ssh"), args);
-    if (process->waitForStarted(5000)) {
+    connect(process, &QProcess::started, this, [process, pyScript, timeout]() {
         process->write(pyScript);
         process->closeWriteChannel();
         timeout->start(30000);
-    } else {
-        qDebug() << "discoverAllRemoteConversationsAsync: SSH process failed to start";
+    });
+    connect(process, &QProcess::errorOccurred, this, [process, callback](QProcess::ProcessError) {
+        qDebug() << "discoverAllRemoteConversationsAsync: SSH process error:" << process->errorString();
         if (callback) {
             callback({});
         }
         process->deleteLater();
-    }
+    });
+
+    process->start(QStringLiteral("ssh"), args);
 }
 
 void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
@@ -980,14 +972,15 @@ void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
         process->deleteLater();
     });
 
-    process->start(QStringLiteral("ssh"), args);
-    if (!process->waitForStarted(5000)) {
-        qDebug() << "discoverRemoteTmuxSessionsAsync: SSH process failed to start";
+    connect(process, &QProcess::errorOccurred, this, [process, callback](QProcess::ProcessError) {
+        qDebug() << "discoverRemoteTmuxSessionsAsync: SSH process error:" << process->errorString();
         if (callback) {
             callback({});
         }
         process->deleteLater();
-    }
+    });
+
+    process->start(QStringLiteral("ssh"), args);
 }
 
 QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString &searchRoot) const
