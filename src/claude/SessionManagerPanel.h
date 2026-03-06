@@ -317,6 +317,7 @@ private:
     void showSubagentDetails(const SubagentInfo &info);
     void showSubprocessOutput(const SubprocessInfo &info);
     void editSessionDescription(const QString &sessionId);
+    void editSessionBudget(ClaudeSession *session, const QString &sessionId);
     void cleanupStaleSockets();
     void ensureHooksConfigured(ClaudeSession *session);
     SessionMetadata *findMetadata(const QString &sessionId);

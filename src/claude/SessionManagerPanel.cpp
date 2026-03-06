@@ -19,13 +19,17 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QColor>
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFont>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
@@ -42,6 +46,7 @@
 #include <QScrollBar>
 #include <QSet>
 #include <QSlider>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QToolBar>
@@ -2179,6 +2184,16 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             connect(tripleYoloAction, &QAction::triggered, this, [activeSession](bool checked) {
                 if (activeSession) {
                     activeSession->setTripleYoloMode(checked);
+                }
+            });
+        }
+
+        // Edit budget controls for active sessions
+        if (isActive && activeSession) {
+            QAction *budgetAction = menu.addAction(QIcon::fromTheme(QStringLiteral("budget")), i18n("Edit Budget..."));
+            connect(budgetAction, &QAction::triggered, this, [this, activeSession, sessionId]() {
+                if (activeSession) {
+                    editSessionBudget(activeSession, sessionId);
                 }
             });
         }
@@ -4374,6 +4389,156 @@ void SessionManagerPanel::editSessionDescription(const QString &sessionId)
 
     // Refresh display
     scheduleTreeUpdate();
+}
+
+void SessionManagerPanel::editSessionBudget(ClaudeSession *session, const QString &sessionId)
+{
+    auto *bc = session->budgetController();
+    if (!bc) {
+        return;
+    }
+
+    auto &budget = bc->budget();
+    auto &gate = bc->resourceGate();
+
+    auto *dlg = new QDialog(this);
+    dlg->setWindowTitle(i18n("Edit Budget — %1", session->sessionName()));
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    auto *mainLayout = new QVBoxLayout(dlg);
+
+    // --- Budget limits ---
+    auto *budgetGroup = new QGroupBox(i18n("Budget Limits"), dlg);
+    auto *grid = new QGridLayout(budgetGroup);
+
+    grid->addWidget(new QLabel(i18n("Time limit (min):"), dlg), 0, 0);
+    auto *timeSpin = new QSpinBox(dlg);
+    timeSpin->setRange(0, 1440);
+    timeSpin->setSpecialValueText(i18n("Unlimited"));
+    timeSpin->setSuffix(i18n(" min"));
+    timeSpin->setValue(budget.timeLimitMinutes);
+    grid->addWidget(timeSpin, 0, 1);
+
+    grid->addWidget(new QLabel(i18n("Cost ceiling ($):"), dlg), 1, 0);
+    auto *costSpin = new QDoubleSpinBox(dlg);
+    costSpin->setRange(0.0, 1000.0);
+    costSpin->setDecimals(2);
+    costSpin->setSingleStep(0.50);
+    costSpin->setSpecialValueText(i18n("Unlimited"));
+    costSpin->setPrefix(QStringLiteral("$"));
+    costSpin->setValue(budget.costCeilingUSD);
+    grid->addWidget(costSpin, 1, 1);
+
+    grid->addWidget(new QLabel(i18n("Token ceiling (K):"), dlg), 2, 0);
+    auto *tokenSpin = new QSpinBox(dlg);
+    tokenSpin->setRange(0, 100000);
+    tokenSpin->setSingleStep(100);
+    tokenSpin->setSpecialValueText(i18n("Unlimited"));
+    tokenSpin->setSuffix(QStringLiteral("K"));
+    tokenSpin->setValue(static_cast<int>(budget.tokenCeiling / 1000));
+    grid->addWidget(tokenSpin, 2, 1);
+
+    mainLayout->addWidget(budgetGroup);
+
+    // --- Resource gate ---
+    auto *gateGroup = new QGroupBox(i18n("Resource Gate"), dlg);
+    auto *gateGrid = new QGridLayout(gateGroup);
+
+    gateGrid->addWidget(new QLabel(i18n("CPU threshold (%):"), dlg), 0, 0);
+    auto *cpuSpin = new QDoubleSpinBox(dlg);
+    cpuSpin->setRange(50.0, 100.0);
+    cpuSpin->setDecimals(0);
+    cpuSpin->setSingleStep(5.0);
+    cpuSpin->setSuffix(QStringLiteral("%"));
+    cpuSpin->setValue(gate.cpuThresholdPercent);
+    gateGrid->addWidget(cpuSpin, 0, 1);
+
+    gateGrid->addWidget(new QLabel(i18n("RAM threshold (GB):"), dlg), 1, 0);
+    auto *ramSpin = new QDoubleSpinBox(dlg);
+    ramSpin->setRange(0.0, 128.0);
+    ramSpin->setDecimals(1);
+    ramSpin->setSingleStep(1.0);
+    ramSpin->setSpecialValueText(i18n("Auto (80%%)"));
+    double ramGB = gate.rssThresholdBytes > 0 ? static_cast<double>(gate.rssThresholdBytes) / (1024.0 * 1024.0 * 1024.0) : 0.0;
+    ramSpin->setValue(ramGB);
+    gateGrid->addWidget(ramSpin, 1, 1);
+
+    gateGrid->addWidget(new QLabel(i18n("Gate action:"), dlg), 2, 0);
+    auto *actionCombo = new QComboBox(dlg);
+    actionCombo->addItem(i18n("Pause Yolo"));
+    actionCombo->addItem(i18n("Reduce Yolo"));
+    actionCombo->addItem(i18n("Notify Only"));
+    actionCombo->setCurrentIndex(static_cast<int>(gate.action));
+    gateGrid->addWidget(actionCombo, 2, 1);
+
+    mainLayout->addWidget(gateGroup);
+
+    // --- Current usage summary ---
+    const auto &usage = session->tokenUsage();
+    QString usageSummary = QStringLiteral("Current: %1 tokens, $%2").arg(usage.formatCompact()).arg(usage.estimatedCostUSD(), 0, 'f', 2);
+    if (budget.startedAt.isValid()) {
+        usageSummary += QStringLiteral(", %1 min elapsed").arg(budget.elapsedMinutes());
+    }
+    auto *usageLabel = new QLabel(usageSummary, dlg);
+    usageLabel->setStyleSheet(QStringLiteral("color: gray; font-style: italic;"));
+    mainLayout->addWidget(usageLabel);
+
+    // --- Buttons ---
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
+    connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+
+    QPointer<ClaudeSession> safeSession(session);
+    connect(buttons, &QDialogButtonBox::accepted, dlg, [=, this]() {
+        if (!safeSession) {
+            dlg->reject();
+            return;
+        }
+        auto *ctrl = safeSession->budgetController();
+
+        // Apply budget limits
+        SessionBudget newBudget = ctrl->budget();
+        newBudget.timeLimitMinutes = timeSpin->value();
+        newBudget.costCeilingUSD = costSpin->value();
+        newBudget.tokenCeiling = static_cast<quint64>(tokenSpin->value()) * 1000;
+
+        // Start the clock if a time limit is newly set
+        if (newBudget.timeLimitMinutes > 0 && !newBudget.startedAt.isValid()) {
+            newBudget.startedAt = QDateTime::currentDateTime();
+        }
+
+        // Clear exceeded flags when limits are raised/removed
+        if (newBudget.costCeilingUSD == 0.0 || newBudget.costCeilingUSD > ctrl->budget().costCeilingUSD) {
+            newBudget.costExceeded = false;
+        }
+        if (newBudget.tokenCeiling == 0 || newBudget.tokenCeiling > ctrl->budget().tokenCeiling) {
+            newBudget.tokenExceeded = false;
+        }
+        if (newBudget.timeLimitMinutes == 0 || newBudget.timeLimitMinutes > ctrl->budget().timeLimitMinutes) {
+            newBudget.timeExceeded = false;
+        }
+
+        ctrl->setBudget(newBudget);
+
+        // Apply resource gate
+        auto &g = ctrl->resourceGate();
+        g.cpuThresholdPercent = cpuSpin->value();
+        g.rssThresholdBytes = ramSpin->value() > 0.0 ? static_cast<quint64>(ramSpin->value() * 1024.0 * 1024.0 * 1024.0) : 0;
+        g.action = static_cast<ResourceGate::Action>(actionCombo->currentIndex());
+
+        // Persist budget limits in metadata
+        if (m_metadata.contains(sessionId)) {
+            m_metadata[sessionId].budgetTimeLimitMinutes = newBudget.timeLimitMinutes;
+            m_metadata[sessionId].budgetCostCeilingUSD = newBudget.costCeilingUSD;
+            m_metadata[sessionId].budgetTokenCeiling = newBudget.tokenCeiling;
+            scheduleMetadataSave();
+        }
+
+        scheduleTreeUpdate();
+        dlg->accept();
+    });
+
+    mainLayout->addWidget(buttons);
+    dlg->resize(380, 360);
+    dlg->show();
 }
 
 void SessionManagerPanel::updateSessionDescription(const QString &sessionId, const QString &desc)
