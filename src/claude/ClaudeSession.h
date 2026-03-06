@@ -1011,6 +1011,9 @@ private:
     // Approval log
     QVector<ApprovalLogEntry> m_approvalLog;
 
+    // Display timer pause state (window activation)
+    bool m_displayTimersPaused = false;
+
     // Token usage tracking
     TokenUsage m_tokenUsage;
     QTimer *m_tokenRefreshTimer = nullptr;

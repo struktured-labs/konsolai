@@ -143,7 +143,7 @@ void ClaudeSessionRegistry::registerSession(ClaudeSession *session)
     m_sessionStates.insert(name, state);
 
     Q_EMIT sessionRegistered(session);
-    saveState();
+    scheduleSaveState();
 }
 
 void ClaudeSessionRegistry::unregisterSession(ClaudeSession *session)
@@ -167,7 +167,7 @@ void ClaudeSessionRegistry::unregisterSession(ClaudeSession *session)
     }
 
     Q_EMIT sessionUnregistered(name);
-    saveState();
+    scheduleSaveState();
 }
 
 void ClaudeSessionRegistry::markAttached(const QString &sessionName)
@@ -175,7 +175,7 @@ void ClaudeSessionRegistry::markAttached(const QString &sessionName)
     if (m_sessionStates.contains(sessionName)) {
         m_sessionStates[sessionName].isAttached = true;
         m_sessionStates[sessionName].lastAccessed = QDateTime::currentDateTime();
-        saveState();
+        scheduleSaveState();
     }
 }
 
@@ -184,7 +184,7 @@ void ClaudeSessionRegistry::markDetached(const QString &sessionName)
     if (m_sessionStates.contains(sessionName)) {
         m_sessionStates[sessionName].isAttached = false;
         m_sessionStates[sessionName].lastAccessed = QDateTime::currentDateTime();
-        saveState();
+        scheduleSaveState();
     }
 }
 
@@ -238,7 +238,7 @@ void ClaudeSessionRegistry::updateSessionPrompt(const QString &sessionName, cons
 {
     if (m_sessionStates.contains(sessionName)) {
         m_sessionStates[sessionName].autoContinuePrompt = prompt;
-        saveState();
+        scheduleSaveState();
     }
 }
 
@@ -324,7 +324,7 @@ void ClaudeSessionRegistry::refreshOrphanedSessions(const QList<TmuxManager::Ses
 
     if (changed) {
         Q_EMIT orphanedSessionsChanged();
-        saveState();
+        scheduleSaveState();
     }
 }
 
@@ -399,10 +399,20 @@ void ClaudeSessionRegistry::saveState()
     file.close();
 }
 
+void ClaudeSessionRegistry::scheduleSaveState()
+{
+    if (!m_saveDebounce) {
+        m_saveDebounce = new QTimer(this);
+        m_saveDebounce->setSingleShot(true);
+        connect(m_saveDebounce, &QTimer::timeout, this, &ClaudeSessionRegistry::saveState);
+    }
+    m_saveDebounce->start(500);
+}
+
 void ClaudeSessionRegistry::removeSessionState(const QString &sessionName)
 {
     if (m_sessionStates.remove(sessionName) > 0) {
-        saveState();
+        scheduleSaveState();
         qDebug() << "ClaudeSessionRegistry: Removed session state for:" << sessionName;
     }
 }

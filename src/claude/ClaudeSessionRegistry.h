@@ -298,7 +298,11 @@ private:
 
     // Timer for periodic orphan detection
     QTimer *m_refreshTimer = nullptr;
-    static constexpr int REFRESH_INTERVAL_MS = 30000;  // 30 seconds
+    static constexpr int REFRESH_INTERVAL_MS = 30000; // 30 seconds
+
+    // Debounced state save — coalesces rapid saveState() calls
+    void scheduleSaveState();
+    QTimer *m_saveDebounce = nullptr;
 };
 
 } // namespace Konsolai

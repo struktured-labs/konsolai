@@ -1982,6 +1982,10 @@ void ClaudeSession::setTripleYoloMode(bool enabled)
 
 void ClaudeSession::pauseDisplayTimers()
 {
+    if (m_displayTimersPaused) {
+        return;
+    }
+    m_displayTimersPaused = true;
     if (m_tokenRefreshTimer && m_tokenRefreshTimer->isActive()) {
         m_tokenRefreshTimer->stop();
     }
@@ -1992,6 +1996,10 @@ void ClaudeSession::pauseDisplayTimers()
 
 void ClaudeSession::resumeDisplayTimers()
 {
+    if (!m_displayTimersPaused) {
+        return;
+    }
+    m_displayTimersPaused = false;
     if (m_tokenRefreshTimer) {
         m_tokenRefreshTimer->start(30000);
     }

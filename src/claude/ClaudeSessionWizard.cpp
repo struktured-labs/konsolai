@@ -671,14 +671,8 @@ void ClaudeSessionWizard::debouncedDetectGitAndConversations()
         connect(m_gitDebounce, &QTimer::timeout, this, [this]() {
             QString dir = selectedDirectory();
             if (!dir.isEmpty() && QDir(dir).exists()) {
+                // detectGitState is async — onGitStateDetected() handles the result
                 detectGitState(dir);
-                if (m_isGitRepo) {
-                    m_gitModeCombo->setCurrentIndex(GitWorktree);
-                    m_sourceRepoEdit->setText(m_repoRoot);
-                } else {
-                    m_gitModeCombo->setCurrentIndex(GitInit);
-                    m_sourceRepoEdit->clear();
-                }
                 checkForConversations(dir);
             } else {
                 m_resumeButton->setEnabled(false);
@@ -896,20 +890,40 @@ void ClaudeSessionWizard::detectGitState(const QString &path)
     if (path.isEmpty() || !QDir(path).exists()) {
         m_isGitRepo = false;
         m_repoRoot.clear();
+        onGitStateDetected();
         return;
     }
 
-    QProcess git;
-    git.setWorkingDirectory(path);
-    git.start(QStringLiteral("git"), {QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel")});
-    git.waitForFinished(3000);
-
-    if (git.exitCode() == 0) {
-        m_isGitRepo = true;
-        m_repoRoot = QString::fromUtf8(git.readAllStandardOutput()).trimmed();
-    } else {
+    auto *git = new QProcess(this);
+    git->setWorkingDirectory(path);
+    connect(git, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, git](int exitCode, QProcess::ExitStatus) {
+        if (exitCode == 0) {
+            m_isGitRepo = true;
+            m_repoRoot = QString::fromUtf8(git->readAllStandardOutput()).trimmed();
+        } else {
+            m_isGitRepo = false;
+            m_repoRoot.clear();
+        }
+        git->deleteLater();
+        onGitStateDetected();
+    });
+    connect(git, &QProcess::errorOccurred, this, [this, git](QProcess::ProcessError) {
         m_isGitRepo = false;
         m_repoRoot.clear();
+        git->deleteLater();
+        onGitStateDetected();
+    });
+    git->start(QStringLiteral("git"), {QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel")});
+}
+
+void ClaudeSessionWizard::onGitStateDetected()
+{
+    if (m_isGitRepo) {
+        m_gitModeCombo->setCurrentIndex(GitWorktree);
+        m_sourceRepoEdit->setText(m_repoRoot);
+    } else {
+        m_gitModeCombo->setCurrentIndex(GitInit);
+        m_sourceRepoEdit->clear();
     }
 }
 

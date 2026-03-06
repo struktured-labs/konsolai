@@ -101,6 +101,7 @@ private:
     QString generateFolderName(const QString &prompt) const;
     QString generateWorktreeName(const QString &prompt) const;
     void detectGitState(const QString &path);
+    void onGitStateDetected();
     QStringList getWorktrees(const QString &repoRoot);
     void updatePreview();
     void updateSshVisibility();
