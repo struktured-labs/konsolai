@@ -615,14 +615,30 @@ void ClaudeMenu::onArchiveAll()
         return;
     }
 
-    // Kill all orphaned sessions
-    TmuxManager tmux;
+    // Kill all orphaned sessions asynchronously — chain kills sequentially,
+    // then refresh the registry when all are done.
+    auto remaining = std::make_shared<QStringList>();
     for (const ClaudeSessionState &state : orphans) {
-        tmux.killSession(state.sessionName);
+        remaining->append(state.sessionName);
     }
+    auto *tmux = new TmuxManager(nullptr);
+    auto registry = m_registry;
 
-    // Refresh the registry
-    m_registry->refreshOrphanedSessions();
+    std::function<void()> killNext;
+    killNext = [tmux, remaining, registry, killNext]() {
+        if (remaining->isEmpty()) {
+            tmux->deleteLater();
+            if (registry) {
+                registry->refreshOrphanedSessionsAsync();
+            }
+            return;
+        }
+        QString name = remaining->takeFirst();
+        tmux->killSessionAsync(name, [killNext](bool) {
+            killNext();
+        });
+    };
+    killNext();
 }
 
 void ClaudeMenu::onArchiveSession()
@@ -637,14 +653,15 @@ void ClaudeMenu::onArchiveSession()
         return;
     }
 
-    // Kill the tmux session
-    TmuxManager tmux;
-    tmux.killSession(sessionName);
-
-    // Refresh the registry
-    if (m_registry) {
-        m_registry->refreshOrphanedSessions();
-    }
+    // Kill the tmux session asynchronously, then refresh registry
+    auto *tmux = new TmuxManager(nullptr);
+    auto registry = m_registry;
+    tmux->killSessionAsync(sessionName, [tmux, registry](bool) {
+        tmux->deleteLater();
+        if (registry) {
+            registry->refreshOrphanedSessionsAsync();
+        }
+    });
 }
 
 void ClaudeMenu::createNotificationMenu()

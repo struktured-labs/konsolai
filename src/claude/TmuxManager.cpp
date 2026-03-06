@@ -181,6 +181,15 @@ bool TmuxManager::killSession(const QString &sessionName)
     return ok;
 }
 
+void TmuxManager::killSessionAsync(const QString &sessionName, std::function<void(bool)> callback)
+{
+    executeCommandAsync({QStringLiteral("kill-session"), QStringLiteral("-t"), sessionName}, [callback](bool ok, const QString &) {
+        if (callback) {
+            callback(ok);
+        }
+    });
+}
+
 bool TmuxManager::detachSession(const QString &sessionName)
 {
     bool ok = false;

@@ -464,9 +464,9 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
                 conv.modified = QDateTime::fromString(obj.value(QStringLiteral("modified")).toString(), Qt::ISODate);
 
                 if (!conv.sessionId.isEmpty()) {
-                    // Count files modified from the .jsonl
-                    QString jsonlPath = projectDir + QStringLiteral("/") + conv.sessionId + QStringLiteral(".jsonl");
-                    conv.filesModifiedCount = countFilesModified(jsonlPath);
+                    // Skip countFilesModified() — it reads the entire JSONL file
+                    // line by line which blocks the main thread for large files.
+                    // The file count is cosmetic and not worth the I/O cost.
                     conversations.append(conv);
                     indexedIds.insert(conv.sessionId);
                 }
@@ -542,18 +542,15 @@ QList<ClaudeConversation> ClaudeSessionRegistry::readClaudeConversations(const Q
                 continue;
             }
 
-            // Count remaining messages
-            while (!jsonlFile.atEnd()) {
-                jsonlFile.readLine();
-                messageCount++;
-            }
+            // Skip full message count — reading every line of the JSONL
+            // just for a display count blocks the main thread on large files.
             jsonlFile.close();
 
             ClaudeConversation conv;
             conv.sessionId = sessionId;
             conv.firstPrompt = firstPrompt;
             conv.messageCount = messageCount;
-            conv.filesModifiedCount = countFilesModified(fi.absoluteFilePath());
+            // Skip countFilesModified() — reads entire JSONL, blocks main thread
             conv.modified = fi.lastModified();
             conv.created = fi.birthTime().isValid() ? fi.birthTime() : fi.lastModified();
 

@@ -1139,7 +1139,7 @@ void ClaudeSession::detach()
 void ClaudeSession::kill()
 {
     if (m_tmuxManager) {
-        m_tmuxManager->killSession(m_sessionName);
+        m_tmuxManager->killSessionAsync(m_sessionName);
     }
     Q_EMIT killed();
 }
@@ -2283,32 +2283,9 @@ QList<qint64> ClaudeSession::getChildPids(qint64 parentPid)
         }
     }
 
-    // Fallback: scan /proc for processes whose ppid matches parentPid
-    if (result.isEmpty()) {
-        QDir procDir(QStringLiteral("/proc"));
-        const QStringList entries = procDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QString &entry : entries) {
-            bool isNum = false;
-            qint64 pid = entry.toLongLong(&isNum);
-            if (!isNum || pid <= 0) {
-                continue;
-            }
-            QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
-            if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                continue;
-            }
-            QString statLine = QString::fromUtf8(statFile.readAll()).trimmed();
-            statFile.close();
-            int closeParenIdx = statLine.lastIndexOf(QLatin1Char(')'));
-            if (closeParenIdx < 0) {
-                continue;
-            }
-            QStringList fields = statLine.mid(closeParenIdx + 2).split(QLatin1Char(' '), Qt::SkipEmptyParts);
-            if (fields.size() > 1 && fields[1].toLongLong() == parentPid) {
-                result.append(pid);
-            }
-        }
-    }
+    // Previous fallback scanned ALL of /proc (hundreds of stat reads, 20-100ms).
+    // Removed: the children file is available on all modern kernels (3.2+).
+    // If it fails, we simply return empty — the caller handles missing PIDs gracefully.
 #else
     Q_UNUSED(parentPid)
 #endif

@@ -147,6 +147,11 @@ public:
     void refreshOrphanedSessions(const QList<TmuxManager::SessionInfo> &tmuxSessions);
 
     /**
+     * Refresh orphaned sessions asynchronously (non-blocking, fetches tmux data in background)
+     */
+    void refreshOrphanedSessionsAsync();
+
+    /**
      * Discover Claude sessions by scanning directories for .claude footprints.
      * Finds any project that has been used with Claude (not just konsolai sessions).
      *
@@ -293,8 +298,6 @@ private Q_SLOTS:
     void onPeriodicRefresh();
 
 private:
-    void refreshOrphanedSessionsAsync();
-
     TmuxManager *m_tmuxManager = nullptr;
 
     // Active sessions (attached to Konsolai windows)

@@ -170,6 +170,12 @@ public:
     void listKonsolaiSessionsAsync(std::function<void(const QList<SessionInfo> &)> callback);
 
     /**
+     * Kill a session asynchronously (non-blocking).
+     * The callback receives (bool success).
+     */
+    void killSessionAsync(const QString &sessionName, std::function<void(bool)> callback = nullptr);
+
+    /**
      * Send keys asynchronously (non-blocking, fire-and-forget).
      */
     void sendKeysAsync(const QString &sessionName, const QString &keys);

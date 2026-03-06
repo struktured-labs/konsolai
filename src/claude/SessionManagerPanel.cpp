@@ -630,7 +630,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         // Re-run hook setup now that we have a valid working directory
         // (hooks require workDir and skip if empty at registerSession time)
         ensureHooksConfigured(safeSession);
-        saveMetadata();
+        scheduleMetadataSave();
         updateTreeWidget();
         qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;
     });
@@ -664,21 +664,21 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
     connect(session, &ClaudeSession::yoloModeChanged, this, [this, sessionId](bool enabled) {
         if (m_metadata.contains(sessionId)) {
             m_metadata[sessionId].yoloMode = enabled;
-            saveMetadata();
+            scheduleMetadataSave();
         }
         scheduleTreeUpdate();
     });
     connect(session, &ClaudeSession::doubleYoloModeChanged, this, [this, sessionId](bool enabled) {
         if (m_metadata.contains(sessionId)) {
             m_metadata[sessionId].doubleYoloMode = enabled;
-            saveMetadata();
+            scheduleMetadataSave();
         }
         scheduleTreeUpdate();
     });
     connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this, sessionId](bool enabled) {
         if (m_metadata.contains(sessionId)) {
             m_metadata[sessionId].tripleYoloMode = enabled;
-            saveMetadata();
+            scheduleMetadataSave();
         }
         scheduleTreeUpdate();
     });
@@ -747,7 +747,7 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
         m_metadata[sessionId].promptGroupLabels = session->promptGroupLabels();
         m_metadata[sessionId].currentPromptRound = session->currentPromptRound();
         m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-        saveMetadata();
+        scheduleMetadataSave();
     }
 
     m_activeSessions.remove(sessionId);
@@ -969,7 +969,7 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
     // Mark as archived
     m_metadata[sessionId].isArchived = true;
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-    saveMetadata();
+    scheduleMetadataSave();
 
     // Clean up stale socket, yolo, and yolo-team files
     QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
@@ -997,16 +997,27 @@ void SessionManagerPanel::archiveSession(const QString &sessionId)
         QPointer<SessionManagerPanel> guard(this);
         tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
             if (exists) {
-                tmux->killSession(sessionName);
-            }
-            tmux->deleteLater();
-            if (guard) {
-                if (--guard->m_pendingAsyncKills == 0) {
+                tmux->killSessionAsync(sessionName, [tmux, guard](bool) {
+                    tmux->deleteLater();
+                    if (guard) {
+                        if (--guard->m_pendingAsyncKills == 0) {
+                            QApplication::restoreOverrideCursor();
+                        }
+                        guard->updateTreeWidget();
+                    } else {
+                        QApplication::restoreOverrideCursor();
+                    }
+                });
+            } else {
+                tmux->deleteLater();
+                if (guard) {
+                    if (--guard->m_pendingAsyncKills == 0) {
+                        QApplication::restoreOverrideCursor();
+                    }
+                    guard->updateTreeWidget();
+                } else {
                     QApplication::restoreOverrideCursor();
                 }
-                guard->updateTreeWidget();
-            } else {
-                QApplication::restoreOverrideCursor();
             }
         });
     }
@@ -1044,7 +1055,7 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
 
     // Update last accessed but do NOT mark as archived — it will appear in Closed
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-    saveMetadata();
+    scheduleMetadataSave();
 
     // Clean up stale socket, yolo, and yolo-team files
     QString socketPath = ClaudeHookHandler::sessionDataDir() + QStringLiteral("/sessions/") + sessionId + QStringLiteral(".sock");
@@ -1074,16 +1085,27 @@ void SessionManagerPanel::closeSession(const QString &sessionId)
         QPointer<SessionManagerPanel> guard(this);
         tmux->sessionExistsAsync(sessionName, [tmux, sessionName, guard](bool exists) {
             if (exists) {
-                tmux->killSession(sessionName);
-            }
-            tmux->deleteLater();
-            if (guard) {
-                if (--guard->m_pendingAsyncKills == 0) {
+                tmux->killSessionAsync(sessionName, [tmux, guard](bool) {
+                    tmux->deleteLater();
+                    if (guard) {
+                        if (--guard->m_pendingAsyncKills == 0) {
+                            QApplication::restoreOverrideCursor();
+                        }
+                        guard->updateTreeWidget();
+                    } else {
+                        QApplication::restoreOverrideCursor();
+                    }
+                });
+            } else {
+                tmux->deleteLater();
+                if (guard) {
+                    if (--guard->m_pendingAsyncKills == 0) {
+                        QApplication::restoreOverrideCursor();
+                    }
+                    guard->updateTreeWidget();
+                } else {
                     QApplication::restoreOverrideCursor();
                 }
-                guard->updateTreeWidget();
-            } else {
-                QApplication::restoreOverrideCursor();
             }
         });
     }
@@ -1125,7 +1147,7 @@ void SessionManagerPanel::markExpired(const QString &sessionName)
         it->isExpired = true;
         it->lastAccessed = QDateTime::currentDateTime();
         m_activeSessions.remove(it->sessionId);
-        saveMetadata();
+        scheduleMetadataSave();
         updateTreeWidget();
         qDebug() << "SessionManagerPanel: Marked session as expired (tmux dead):" << sessionName;
     } else {
@@ -1156,7 +1178,7 @@ void SessionManagerPanel::dismissSession(const QString &sessionId)
 
     m_metadata[sessionId].isDismissed = true;
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-    saveMetadata();
+    scheduleMetadataSave();
     updateTreeWidget();
     qDebug() << "SessionManagerPanel: Dismissed session:" << sessionId;
 }
@@ -1170,7 +1192,7 @@ void SessionManagerPanel::restoreSession(const QString &sessionId)
     m_metadata[sessionId].isDismissed = false;
     m_metadata[sessionId].isArchived = true; // Restore to Archived state
     m_metadata[sessionId].lastAccessed = QDateTime::currentDateTime();
-    saveMetadata();
+    scheduleMetadataSave();
     updateTreeWidget();
     qDebug() << "SessionManagerPanel: Restored dismissed session:" << sessionId;
 }
@@ -1188,7 +1210,7 @@ void SessionManagerPanel::purgeSession(const QString &sessionId)
     }
 
     m_metadata.remove(sessionId);
-    saveMetadata();
+    scheduleMetadataSave();
     updateTreeWidget();
     qDebug() << "SessionManagerPanel: Purged session metadata:" << sessionId;
 }
@@ -1211,7 +1233,7 @@ void SessionManagerPanel::purgeDismissed()
     }
 
     if (!toRemove.isEmpty()) {
-        saveMetadata();
+        scheduleMetadataSave();
         updateTreeWidget();
         qDebug() << "SessionManagerPanel: Purged" << toRemove.size() << "dismissed sessions";
     }
@@ -1289,7 +1311,7 @@ void SessionManagerPanel::resumeBackgroundTimers()
     // Flush deferred metadata save first (so tree sees current data)
     if (m_pendingSave) {
         m_pendingSave = false;
-        saveMetadata();
+        scheduleMetadataSave();
     }
 
     // Schedule a gentle tree refresh to pick up changes that occurred while paused
@@ -2032,7 +2054,7 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                         QFile dir(meta.workingDirectory);
                         if (dir.moveToTrash()) {
                             m_metadata.remove(sessionId);
-                            saveMetadata();
+                            scheduleMetadataSave();
                             updateTreeWidget();
                         } else {
                             QMessageBox::warning(this, i18n("Trash Failed"), i18n("Could not move folder to trash:\n%1", meta.workingDirectory));
