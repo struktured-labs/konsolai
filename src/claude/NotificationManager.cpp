@@ -70,6 +70,13 @@ void NotificationManager::notify(NotificationType type, const QString &title, co
     qDebug() << "NotificationManager::notify:" << static_cast<int>(type) << title << "channels:" << static_cast<int>(channels)
              << "enabled:" << static_cast<int>(m_enabledChannels);
 
+    // YoloApproval: skip all channels when yolo notifications are disabled.
+    // Must gate here (not just in playSound) because KNotification desktop
+    // popups can play their own sound via KDE notification settings.
+    if (type == NotificationType::YoloApproval && !m_yoloNotificationsEnabled) {
+        return;
+    }
+
     // Apply enabled channel filter
     channels &= m_enabledChannels;
 

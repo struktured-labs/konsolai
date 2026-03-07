@@ -195,9 +195,9 @@ void ClaudeNotificationWidget::updatePosition()
     // Calculate size based on content
     adjustSize();
 
-    // Position at top center of parent, with margin
-    int x = (parentWidget()->width() - width()) / 2;
-    int y = MARGIN;
+    // Position at bottom-right of parent, with margin
+    int x = parentWidget()->width() - width() - MARGIN;
+    int y = parentWidget()->height() - height() - MARGIN;
 
     move(x, y);
 }
