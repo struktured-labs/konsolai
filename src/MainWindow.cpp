@@ -654,11 +654,18 @@ void MainWindow::setupActions()
                 qDebug() << "Configure hooks requested";
             });
 
-    // Add Claude menu actions to collection for shortcuts
+    // Add Claude menu actions to collection with proper KDE shortcut registration.
+    // Using setDefaultShortcut (not QAction::setShortcut) integrates with KDE's
+    // shortcut config dialog, avoids "set with QAction::setShortcut!" warnings,
+    // and lets KDE detect conflicts at registration time.
     collection->addAction(QStringLiteral("claude-approve"), _claudeMenu->approveAction());
+    collection->setDefaultShortcut(_claudeMenu->approveAction(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
     collection->addAction(QStringLiteral("claude-deny"), _claudeMenu->denyAction());
+    collection->setDefaultShortcut(_claudeMenu->denyAction(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
     collection->addAction(QStringLiteral("claude-stop"), _claudeMenu->stopAction());
+    collection->setDefaultShortcut(_claudeMenu->stopAction(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_X));
     collection->addAction(QStringLiteral("claude-restart"), _claudeMenu->restartAction());
+    collection->setDefaultShortcut(_claudeMenu->restartAction(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_R));
     collection->addAction(QStringLiteral("claude-yolo-mode"), _claudeMenu->yoloModeAction());
     collection->addAction(QStringLiteral("claude-double-yolo-mode"), _claudeMenu->doubleYoloModeAction());
     collection->addAction(QStringLiteral("claude-triple-yolo-mode"), _claudeMenu->tripleYoloModeAction());

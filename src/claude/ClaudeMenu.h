@@ -22,10 +22,10 @@ class ClaudeSessionRegistry;
  * ClaudeMenu provides the "Claude" menu for the menu bar.
  *
  * Menu structure:
- * - Approve Permission (Ctrl+Shift+A)
- * - Deny Permission (Ctrl+Shift+D)
- * - Stop Claude (Ctrl+Shift+S)
- * - Restart Claude (Ctrl+Shift+R)
+ * - Approve Permission (Ctrl+Alt+A)
+ * - Deny Permission (Ctrl+Alt+D)
+ * - Stop Claude (Ctrl+Alt+X)
+ * - Restart Claude (Ctrl+Alt+R)
  * - ---
  * - Yolo Mode (auto-approve all permissions)
  * - Double Yolo Mode (auto-accept completions)

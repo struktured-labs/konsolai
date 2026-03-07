@@ -80,15 +80,13 @@ ClaudeMenu::~ClaudeMenu() = default;
 
 void ClaudeMenu::createActions()
 {
-    // Approve Permission
+    // Approve Permission (shortcut set via KActionCollection in MainWindow)
     m_approveAction = addAction(i18n("&Approve Permission"));
-    m_approveAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
     m_approveAction->setToolTip(i18n("Approve the pending permission request"));
     connect(m_approveAction, &QAction::triggered, this, &ClaudeMenu::onApprove);
 
     // Deny Permission
     m_denyAction = addAction(i18n("&Deny Permission"));
-    m_denyAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
     m_denyAction->setToolTip(i18n("Deny the pending permission request"));
     connect(m_denyAction, &QAction::triggered, this, &ClaudeMenu::onDeny);
 
@@ -96,14 +94,12 @@ void ClaudeMenu::createActions()
 
     // Stop Claude
     m_stopAction = addAction(i18n("&Stop Claude"));
-    m_stopAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
     m_stopAction->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     m_stopAction->setToolTip(i18n("Stop the current Claude operation"));
     connect(m_stopAction, &QAction::triggered, this, &ClaudeMenu::onStop);
 
     // Restart Claude
     m_restartAction = addAction(i18n("&Restart Claude"));
-    m_restartAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_R));
     m_restartAction->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     m_restartAction->setToolTip(i18n("Restart the Claude session"));
     connect(m_restartAction, &QAction::triggered, this, &ClaudeMenu::onRestart);
