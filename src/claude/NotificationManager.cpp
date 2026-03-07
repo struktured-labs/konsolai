@@ -16,6 +16,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QPointer>
 #include <QSoundEffect>
 #include <QStandardPaths>
 
@@ -85,7 +86,7 @@ void NotificationManager::notify(NotificationType type, const QString &title, co
     }
 
     if (channels.testFlag(Channel::Desktop)) {
-        showDesktopNotification(type, title, message);
+        showDesktopNotification(type, title, message, session);
     }
 
     // Always play sound via QSoundEffect — KNotification Sound= is unreliable
@@ -138,7 +139,7 @@ void NotificationManager::updateSystemTray(NotificationType type, const QString 
     Q_EMIT systemTrayStatusChanged(type, statusMessage);
 }
 
-void NotificationManager::showDesktopNotification(NotificationType type, const QString &title, const QString &message)
+void NotificationManager::showDesktopNotification(NotificationType type, const QString &title, const QString &message, ClaudeSession *session)
 {
     // Map type to KNotification urgency
     QString eventName;
@@ -169,6 +170,17 @@ void NotificationManager::showDesktopNotification(NotificationType type, const Q
     notification->setText(message);
     notification->setIconName(iconName(type));
     notification->setComponentName(QStringLiteral("konsolai"));
+
+    // Make notification clickable — clicking focuses the session's tab
+    if (session) {
+        auto *action = notification->addDefaultAction(i18n("Show Session"));
+        QPointer<ClaudeSession> safeSession = session;
+        connect(action, &KNotificationAction::activated, this, [this, safeSession]() {
+            if (safeSession) {
+                Q_EMIT focusSessionRequested(safeSession);
+            }
+        });
+    }
 
     notification->sendEvent();
 }

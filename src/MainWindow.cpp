@@ -172,6 +172,18 @@ MainWindow::MainWindow()
                 [this](Konsolai::NotificationManager::NotificationType type, const QString &title, const QString &message, Konsolai::ClaudeSession *) {
                     _notificationWidget->show(type, title, message);
                 });
+
+        // Click a desktop notification → focus + raise the session's tab
+        connect(notifyMgr, &Konsolai::NotificationManager::focusSessionRequested, this, [this](Konsolai::ClaudeSession *session) {
+            if (!session)
+                return;
+            if (_sessionPanel) {
+                Q_EMIT _sessionPanel->focusSessionRequested(session);
+            }
+            // Also raise/activate the window itself in case it's behind other windows
+            raise();
+            activateWindow();
+        });
     }
 
     // disable automatically generated accelerators in top-level
@@ -935,72 +947,97 @@ void MainWindow::connectClaudeNotifications(Konsolai::ClaudeSession *claudeSessi
     // queued signals (stateChanged → taskComplete) are still pending.
     QPointer<Konsolai::ClaudeSession> safeSession = claudeSession;
 
+    // Helper: extract project folder name from session working directory for notification titles
+    auto sessionLabel = [](const QPointer<Konsolai::ClaudeSession> &s) -> QString {
+        if (!s)
+            return QString();
+        QString dir = s->workingDirectory();
+        if (dir.isEmpty())
+            return QString();
+        return QDir(dir).dirName();
+    };
+
     // Permission requested - notify and maybe auto-approve
-    connect(claudeSession, &Konsolai::ClaudeSession::permissionRequested, this, [this, safeSession, notifyMgr](const QString &action, const QString &details) {
-        Q_UNUSED(details)
-        if (!safeSession)
-            return;
-        if (safeSession->yoloMode()) {
-            qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
-            safeSession->approvePermission();
-            safeSession->logApproval(action, QStringLiteral("auto-approved"), 1);
-            // Still notify so user hears the permission sound
-            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
-                              i18n("Permission Auto-Approved"),
-                              i18n("Yolo approved: %1", action),
-                              safeSession);
-        } else {
-            notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
-                              i18n("Permission Required"),
-                              i18n("Claude needs permission to: %1", action),
-                              safeSession);
-        }
-    });
+    connect(claudeSession,
+            &Konsolai::ClaudeSession::permissionRequested,
+            this,
+            [this, safeSession, notifyMgr, sessionLabel](const QString &action, const QString &details) {
+                Q_UNUSED(details)
+                if (!safeSession)
+                    return;
+                QString label = sessionLabel(safeSession);
+                if (safeSession->yoloMode()) {
+                    qDebug() << "Yolo Mode: Auto-approving permission for:" << action;
+                    safeSession->approvePermission();
+                    safeSession->logApproval(action, QStringLiteral("auto-approved"), 1);
+                    // Still notify so user hears the permission sound
+                    notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                                      label.isEmpty() ? i18n("Permission Auto-Approved") : i18n("[%1] Permission Auto-Approved", label),
+                                      i18n("Yolo approved: %1", action),
+                                      safeSession);
+                } else {
+                    notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Permission,
+                                      label.isEmpty() ? i18n("Permission Required") : i18n("[%1] Permission Required", label),
+                                      i18n("Claude needs permission to: %1", action),
+                                      safeSession);
+                }
+            });
 
     // Task complete notification
-    connect(claudeSession, &Konsolai::ClaudeSession::taskComplete, this, [safeSession, notifyMgr](const QString &summary) {
+    connect(claudeSession, &Konsolai::ClaudeSession::taskComplete, this, [safeSession, notifyMgr, sessionLabel](const QString &summary) {
         if (!safeSession)
             return;
+        QString label = sessionLabel(safeSession);
         notifyMgr->notify(Konsolai::NotificationManager::NotificationType::TaskComplete,
-                          i18n("Task Complete"),
+                          label.isEmpty() ? i18n("Task Complete") : i18n("[%1] Task Complete", label),
                           summary.isEmpty() ? i18n("Claude has finished the task") : summary,
                           safeSession);
     });
 
     // Waiting for input notification
-    connect(claudeSession, &Konsolai::ClaudeSession::waitingForInput, this, [safeSession, notifyMgr](const QString &prompt) {
+    connect(claudeSession, &Konsolai::ClaudeSession::waitingForInput, this, [safeSession, notifyMgr, sessionLabel](const QString &prompt) {
         if (!safeSession)
             return;
+        QString label = sessionLabel(safeSession);
         notifyMgr->notify(Konsolai::NotificationManager::NotificationType::WaitingInput,
-                          i18n("Input Required"),
+                          label.isEmpty() ? i18n("Input Required") : i18n("[%1] Input Required", label),
                           prompt.isEmpty() ? i18n("Claude is waiting for your input") : prompt,
                           safeSession);
     });
 
     // Error notification
-    connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, this, [safeSession, notifyMgr](const QString &error) {
+    connect(claudeSession, &Konsolai::ClaudeSession::errorOccurred, this, [safeSession, notifyMgr, sessionLabel](const QString &error) {
         if (!safeSession)
             return;
-        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Error"), error, safeSession);
+        QString label = sessionLabel(safeSession);
+        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error,
+                          label.isEmpty() ? i18n("Error") : i18n("[%1] Error", label),
+                          error,
+                          safeSession);
     });
 
     // Yolo approval notification (only fires when yolo mode is active)
-    connect(claudeSession, &Konsolai::ClaudeSession::approvalLogged, this, [safeSession, notifyMgr](const Konsolai::ApprovalLogEntry &entry) {
+    connect(claudeSession, &Konsolai::ClaudeSession::approvalLogged, this, [safeSession, notifyMgr, sessionLabel](const Konsolai::ApprovalLogEntry &entry) {
         if (!safeSession)
             return;
         if (entry.yoloLevel == 1) {
+            QString label = sessionLabel(safeSession);
             notifyMgr->notify(Konsolai::NotificationManager::NotificationType::YoloApproval,
-                              i18n("Auto-Approved"),
+                              label.isEmpty() ? i18n("Auto-Approved") : i18n("[%1] Auto-Approved", label),
                               i18n("Yolo approved: %1", entry.toolName),
                               safeSession);
         }
     });
 
     // Budget gate notification — fires when cost, tokens, time, or resources exceed limits
-    connect(claudeSession, &Konsolai::ClaudeSession::budgetBlocked, this, [safeSession, notifyMgr](const QString &reason) {
+    connect(claudeSession, &Konsolai::ClaudeSession::budgetBlocked, this, [safeSession, notifyMgr, sessionLabel](const QString &reason) {
         if (!safeSession)
             return;
-        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error, i18n("Budget Gate Active"), reason, safeSession);
+        QString label = sessionLabel(safeSession);
+        notifyMgr->notify(Konsolai::NotificationManager::NotificationType::Error,
+                          label.isEmpty() ? i18n("Budget Gate Active") : i18n("[%1] Budget Gate Active", label),
+                          reason,
+                          safeSession);
     });
 }
 

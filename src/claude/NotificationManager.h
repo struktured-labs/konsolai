@@ -107,9 +107,7 @@ public:
     /**
      * Show desktop notification
      */
-    void showDesktopNotification(NotificationType type,
-                                  const QString &title,
-                                  const QString &message);
+    void showDesktopNotification(NotificationType type, const QString &title, const QString &message, ClaudeSession *session = nullptr);
 
     /**
      * Play audio alert for notification type
@@ -176,6 +174,11 @@ Q_SIGNALS:
      * Emitted when system tray status changes
      */
     void systemTrayStatusChanged(NotificationType type, const QString &message);
+
+    /**
+     * Emitted when the user clicks a desktop notification to focus a session
+     */
+    void focusSessionRequested(ClaudeSession *session);
 
 private:
     void initSystemTray();
