@@ -84,11 +84,13 @@ void ClaudeMenu::createActions()
 {
     // Approve Permission (shortcut set via KActionCollection in MainWindow)
     m_approveAction = addAction(i18n("&Approve Permission"));
+    m_approveAction->setObjectName(QStringLiteral("claudeApprove"));
     m_approveAction->setToolTip(i18n("Approve the pending permission request"));
     connect(m_approveAction, &QAction::triggered, this, &ClaudeMenu::onApprove);
 
     // Deny Permission
     m_denyAction = addAction(i18n("&Deny Permission"));
+    m_denyAction->setObjectName(QStringLiteral("claudeDeny"));
     m_denyAction->setToolTip(i18n("Deny the pending permission request"));
     connect(m_denyAction, &QAction::triggered, this, &ClaudeMenu::onDeny);
 
@@ -96,12 +98,14 @@ void ClaudeMenu::createActions()
 
     // Stop Claude
     m_stopAction = addAction(i18n("&Stop Claude"));
+    m_stopAction->setObjectName(QStringLiteral("claudeStop"));
     m_stopAction->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     m_stopAction->setToolTip(i18n("Stop the current Claude operation"));
     connect(m_stopAction, &QAction::triggered, this, &ClaudeMenu::onStop);
 
     // Restart Claude
     m_restartAction = addAction(i18n("&Restart Claude"));
+    m_restartAction->setObjectName(QStringLiteral("claudeRestart"));
     m_restartAction->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     m_restartAction->setToolTip(i18n("Restart the Claude session"));
     connect(m_restartAction, &QAction::triggered, this, &ClaudeMenu::onRestart);
@@ -110,6 +114,7 @@ void ClaudeMenu::createActions()
 
     // Yolo Mode - auto-approve all permissions (gold)
     m_yoloModeAction = addAction(coloredBoltIcon(QColor(0xFF, 0xB3, 0x00), 1), i18n("&Yolo Mode (Auto-Approve)"));
+    m_yoloModeAction->setObjectName(QStringLiteral("claudeYolo"));
     m_yoloModeAction->setCheckable(true);
     m_yoloModeAction->setChecked(m_yoloMode);
     m_yoloModeAction->setToolTip(i18n("Automatically approve all permission requests"));
@@ -117,6 +122,7 @@ void ClaudeMenu::createActions()
 
     // Double Yolo Mode - auto-accept completions (light blue)
     m_doubleYoloModeAction = addAction(coloredBoltIcon(QColor(0x42, 0xA5, 0xF5), 1), i18n("Double &Yolo Mode (Auto-Complete)"));
+    m_doubleYoloModeAction->setObjectName(QStringLiteral("claudeDoubleYolo"));
     m_doubleYoloModeAction->setCheckable(true);
     m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
     m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
@@ -124,6 +130,7 @@ void ClaudeMenu::createActions()
 
     // Triple Yolo Mode - auto-continue with prompt (purple)
     m_tripleYoloModeAction = addAction(coloredBoltIcon(QColor(0xAB, 0x47, 0xBC), 1), i18n("&Triple Yolo Mode (Auto-Continue)"));
+    m_tripleYoloModeAction->setObjectName(QStringLiteral("claudeTripleYolo"));
     m_tripleYoloModeAction->setCheckable(true);
     m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
     m_tripleYoloModeAction->setToolTip(i18n("Automatically send continue prompt when Claude becomes idle"));

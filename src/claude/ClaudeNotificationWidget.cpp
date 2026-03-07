@@ -22,6 +22,7 @@ ClaudeNotificationWidget::ClaudeNotificationWidget(QWidget *parent)
     , m_autoHideTimer(new QTimer(this))
     , m_fadeAnimation(new QPropertyAnimation(this, "opacity", this))
 {
+    setObjectName(QStringLiteral("claudeNotificationOverlay"));
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setAutoFillBackground(false);
