@@ -85,7 +85,8 @@ QString TmuxManager::buildSessionName(const QString &profileName,
     QString sanitized;
     sanitized.reserve(result.size());
     for (const QChar &ch : std::as_const(result)) {
-        if (ch.isLetterOrNumber() || ch == QLatin1Char('-') || ch == QLatin1Char('_')) {
+        if ((ch >= QLatin1Char('a') && ch <= QLatin1Char('z')) || (ch >= QLatin1Char('A') && ch <= QLatin1Char('Z'))
+            || (ch >= QLatin1Char('0') && ch <= QLatin1Char('9')) || ch == QLatin1Char('-') || ch == QLatin1Char('_')) {
             sanitized.append(ch);
         }
     }

@@ -1789,6 +1789,10 @@ TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
         usage = TokenUsage();
     }
 
+    auto safeU64 = [](qint64 v) -> quint64 {
+        return v > 0 ? static_cast<quint64>(v) : 0;
+    };
+
     while (!file.atEnd()) {
         QByteArray line = file.readLine().trimmed();
         if (line.isEmpty()) {
@@ -1814,9 +1818,6 @@ TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
             continue;
         }
 
-        auto safeU64 = [](qint64 v) -> quint64 {
-            return v > 0 ? static_cast<quint64>(v) : 0;
-        };
         quint64 inp = safeU64(usageObj.value(QStringLiteral("input_tokens")).toInteger());
         quint64 out = safeU64(usageObj.value(QStringLiteral("output_tokens")).toInteger());
         quint64 cr = safeU64(usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger());

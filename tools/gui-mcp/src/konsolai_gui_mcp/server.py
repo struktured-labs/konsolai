@@ -60,8 +60,11 @@ def list_apps() -> str:
     Use the app name in other tools to target a specific application.
     """
     backend = _get_backend()
-    apps = backend.list_applications()
-    return json.dumps([{"name": a.name, "pid": a.pid, "toolkit": a.toolkit} for a in apps], indent=2)
+    try:
+        apps = backend.list_applications()
+        return json.dumps([{"name": a.name, "pid": a.pid, "toolkit": a.toolkit} for a in apps], indent=2)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -76,8 +79,11 @@ def widget_tree(
     Widget paths from this output can be used in other tools.
     """
     backend = _get_backend()
-    tree = backend.get_widget_tree(app_name, max_depth=max_depth)
-    return json.dumps(tree.to_dict(), indent=2)
+    try:
+        tree = backend.get_widget_tree(app_name, max_depth=max_depth)
+        return json.dumps(tree.to_dict(), indent=2)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -96,8 +102,11 @@ def find_widget(
     menu_item, text_field, label, combo_box, window, panel
     """
     backend = _get_backend()
-    results = backend.find_widget(app_name, role=role, name=name, auto_id=auto_id)
-    return json.dumps([w.to_dict() for w in results], indent=2)
+    try:
+        results = backend.find_widget(app_name, role=role, name=name, auto_id=auto_id)
+        return json.dumps([w.to_dict() for w in results], indent=2)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -110,8 +119,11 @@ def click(
     Works for buttons, menu items, checkboxes, tree nodes, etc.
     """
     backend = _get_backend()
-    result = backend.click_widget(widget_path)
-    return json.dumps({"success": result.success, "widget": result.widget_name, "message": result.message})
+    try:
+        result = backend.click_widget(widget_path)
+        return json.dumps({"success": result.success, "widget": result.widget_name, "message": result.message})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -140,8 +152,11 @@ def read_text(
     Works for text fields, labels, and any widget with readable text.
     """
     backend = _get_backend()
-    text = backend.read_text(widget_path)
-    return json.dumps({"text": text})
+    try:
+        text = backend.read_text(widget_path)
+        return json.dumps({"text": text})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -154,8 +169,11 @@ def widget_state(
     expanded (for tree nodes), selected, editable.
     """
     backend = _get_backend()
-    state = backend.get_widget_state(widget_path)
-    return json.dumps(state.to_dict())
+    try:
+        state = backend.get_widget_state(widget_path)
+        return json.dumps(state.to_dict())
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -168,8 +186,11 @@ def widget_properties(
     Useful for debugging widget identity and state.
     """
     backend = _get_backend()
-    props = backend.get_widget_properties(widget_path)
-    return json.dumps(props, indent=2)
+    try:
+        props = backend.get_widget_properties(widget_path)
+        return json.dumps(props, indent=2)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
