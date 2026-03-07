@@ -10,7 +10,6 @@ Prerequisites:
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING
 
 import gi
 
@@ -26,9 +25,6 @@ from .types import (
     WidgetState,
     normalize_role,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class AtspiBackend(GuiBackend):
@@ -361,7 +357,6 @@ class AtspiBackend(GuiBackend):
         if not action_iface:
             raise ValueError(f"Tree node at '{node_path}' has no Action interface")
 
-        target_action = "expand or contract" if expand else "expand or contract"
         n_actions = action_iface.get_n_actions()
         for i in range(n_actions):
             action_name = action_iface.get_action_name(i).lower()
