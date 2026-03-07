@@ -1692,9 +1692,12 @@ bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
         }
     }
 
-    // Check last non-empty line for the input prompt indicator
+    // Check last non-empty line for the Claude Code input prompt indicator.
+    // After trimming, the idle prompt is ">" or "project-name >" (project-prefixed).
+    // Match: bare ">", or lines ending with " >" (space before >).
+    // Reject: HTML like "</div>", git branches "main>develop", markdown "> quote".
     if (!lastNonEmpty.isEmpty()) {
-        if (lastNonEmpty == QStringLiteral(">") || lastNonEmpty.endsWith(QLatin1Char('>')) || lastNonEmpty.startsWith(QLatin1Char('>'))) {
+        if (lastNonEmpty == QStringLiteral(">") || lastNonEmpty.endsWith(QStringLiteral(" >"))) {
             return true;
         }
     }
@@ -1807,10 +1810,13 @@ TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
             continue;
         }
 
-        quint64 inp = usageObj.value(QStringLiteral("input_tokens")).toInteger();
-        quint64 out = usageObj.value(QStringLiteral("output_tokens")).toInteger();
-        quint64 cr = usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger();
-        quint64 cc = usageObj.value(QStringLiteral("cache_creation_input_tokens")).toInteger();
+        auto safeU64 = [](qint64 v) -> quint64 {
+            return v > 0 ? static_cast<quint64>(v) : 0;
+        };
+        quint64 inp = safeU64(usageObj.value(QStringLiteral("input_tokens")).toInteger());
+        quint64 out = safeU64(usageObj.value(QStringLiteral("output_tokens")).toInteger());
+        quint64 cr = safeU64(usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger());
+        quint64 cc = safeU64(usageObj.value(QStringLiteral("cache_creation_input_tokens")).toInteger());
 
         usage.inputTokens += inp;
         usage.outputTokens += out;
