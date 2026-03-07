@@ -18,6 +18,7 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QTimer>
 
 #ifdef Q_OS_LINUX
@@ -493,13 +494,16 @@ void ClaudeSession::run()
                         }
                     }
 
-                    // Write merged settings
-                    QFile settingsFile(settingsPath);
+                    // Write merged settings atomically (QSaveFile writes to temp then renames)
+                    QSaveFile settingsFile(settingsPath);
                     if (settingsFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
                         QJsonDocument outDoc(settings);
                         settingsFile.write(outDoc.toJson(QJsonDocument::Indented));
-                        settingsFile.close();
-                        qDebug() << "ClaudeSession::run() - Wrote hooks to:" << settingsPath;
+                        if (settingsFile.commit()) {
+                            qDebug() << "ClaudeSession::run() - Wrote hooks to:" << settingsPath;
+                        } else {
+                            qWarning() << "ClaudeSession::run() - Failed to commit settings to:" << settingsPath;
+                        }
                     } else {
                         qWarning() << "ClaudeSession::run() - Failed to write settings to:" << settingsPath;
                     }
@@ -2500,12 +2504,13 @@ void ClaudeSession::removeHooksFromProjectSettings()
         settings.remove(QStringLiteral("hooks"));
     }
 
-    QFile outFile(settingsPath);
+    QSaveFile outFile(settingsPath);
     if (outFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QJsonDocument outDoc(settings);
         outFile.write(outDoc.toJson(QJsonDocument::Indented));
-        outFile.close();
-        qDebug() << "ClaudeSession: Removed this session's hooks from" << settingsPath;
+        if (outFile.commit()) {
+            qDebug() << "ClaudeSession: Removed this session's hooks from" << settingsPath;
+        }
     }
 }
 
