@@ -26,6 +26,7 @@ QString ClaudeProcess::buildCommand(Model model,
                                      const QString &workingDir,
                                      const QStringList &additionalArgs)
 {
+    Q_UNUSED(workingDir)
     QStringList args;
     args << QStringLiteral("claude");
 

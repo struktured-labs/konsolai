@@ -637,7 +637,7 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
     args << sshTarget << remoteCmd;
 
     // Python script to scan conversations — sent via stdin to avoid quoting
-    static const QByteArray pyScript = QByteArrayLiteral(
+    const QByteArray pyScript = QByteArrayLiteral(
         "import json, os, glob, sys\n"
         "d = os.path.join(os.path.expanduser('~'), '.claude/projects/' + sys.argv[1])\n"
         "if not os.path.isdir(d): print('[]'); exit()\n"
@@ -680,8 +680,7 @@ void ClaudeSessionRegistry::readRemoteConversationsAsync(
         "                    'messageCount': ie.get('messageCount', mc), 'modified': mod,\n"
         "                    'created': ie.get('created', mod)})\n"
         "results.sort(key=lambda x: x['modified'], reverse=True)\n"
-        "print(json.dumps(results))\n"
-    );
+        "print(json.dumps(results))\n");
 
     auto *process = new QProcess(this);
     ensureSshAuthSock(process);
@@ -783,7 +782,7 @@ void ClaudeSessionRegistry::discoverAllRemoteConversationsAsync(
     }
     args << sshTarget << remoteCmd;
 
-    static const QByteArray pyScript = QByteArrayLiteral(
+    const QByteArray pyScript = QByteArrayLiteral(
         "import json, os, glob, sys\n"
         "from datetime import datetime, timezone\n"
         "def rpath(h):\n"
@@ -848,8 +847,7 @@ void ClaudeSessionRegistry::discoverAllRemoteConversationsAsync(
         "                        'created': ie.get('created', mod),\n"
         "                        'projectDir': proj, 'projectPath': orig})\n"
         "results.sort(key=lambda x: x['modified'], reverse=True)\n"
-        "print(json.dumps(results))\n"
-    );
+        "print(json.dumps(results))\n");
 
     auto *process = new QProcess(this);
     ensureSshAuthSock(process);

@@ -132,10 +132,8 @@ int main(int argc, char *argv[])
     }
 
     // For PermissionRequest events, check yolo mode and auto-approve if enabled
-    bool yoloApproved = false;
     if (eventType == QStringLiteral("PermissionRequest") && isYoloEnabled(socketPath)) {
         outputApprovalJson();
-        yoloApproved = true;
         // Mark in event data that we auto-approved
         eventData[QStringLiteral("yolo_approved")] = true;
     }

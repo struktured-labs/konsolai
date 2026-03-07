@@ -839,19 +839,19 @@ void SessionManagerPanel::cleanupStaleSockets()
         }
 
         // Clean up socket and yolo files for dead sessions
-        QDir dir(sessionsDir);
+        QDir sessDir(sessionsDir);
         int cleaned = 0;
         for (const QString &sockFile : sockFiles) {
             QString id = sockFile.left(sockFile.length() - 5); // Remove .sock
             if (!liveIds.contains(id)) {
-                QFile::remove(dir.filePath(sockFile));
+                QFile::remove(sessDir.filePath(sockFile));
                 QString yoloFile = id + QStringLiteral(".yolo");
-                if (dir.exists(yoloFile)) {
-                    QFile::remove(dir.filePath(yoloFile));
+                if (sessDir.exists(yoloFile)) {
+                    QFile::remove(sessDir.filePath(yoloFile));
                 }
                 QString teamYoloFile = id + QStringLiteral(".yolo-team");
-                if (dir.exists(teamYoloFile)) {
-                    QFile::remove(dir.filePath(teamYoloFile));
+                if (sessDir.exists(teamYoloFile)) {
+                    QFile::remove(sessDir.filePath(teamYoloFile));
                 }
                 cleaned++;
             }
@@ -3409,20 +3409,20 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 }
 
                 // Tooltip
-                QString tooltip = QStringLiteral("Command: %1").arg(info.fullCommand);
+                QString procTip = QStringLiteral("Command: %1").arg(info.fullCommand);
                 if (info.pid > 0) {
-                    tooltip += QStringLiteral("\nPID: %1").arg(info.pid);
+                    procTip += QStringLiteral("\nPID: %1").arg(info.pid);
                 }
                 if (info.startedAt.isValid()) {
-                    tooltip += QStringLiteral("\nStarted: %1").arg(info.startedAt.toString(Qt::ISODate));
+                    procTip += QStringLiteral("\nStarted: %1").arg(info.startedAt.toString(Qt::ISODate));
                 }
                 if (info.finishedAt.isValid()) {
-                    tooltip += QStringLiteral("\nFinished: %1").arg(info.finishedAt.toString(Qt::ISODate));
+                    procTip += QStringLiteral("\nFinished: %1").arg(info.finishedAt.toString(Qt::ISODate));
                 }
                 if (info.exitCode >= 0 && info.status != SubprocessInfo::Running) {
-                    tooltip += QStringLiteral("\nExit code: %1").arg(info.exitCode);
+                    procTip += QStringLiteral("\nExit code: %1").arg(info.exitCode);
                 }
-                childItem->setToolTip(0, tooltip);
+                childItem->setToolTip(0, procTip);
                 childItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                 return childItem;
             };
@@ -3933,7 +3933,7 @@ void SessionManagerPanel::saveMetadata(bool sync)
     if (sync) {
         writeFile();
     } else {
-        QtConcurrent::run(writeFile);
+        (void)QtConcurrent::run(writeFile);
     }
 
     Q_EMIT usageAggregateChanged();
@@ -4659,7 +4659,7 @@ void SessionManagerPanel::editSessionBudget(ClaudeSession *session, const QStrin
     connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
 
     QPointer<ClaudeSession> safeSession(session);
-    connect(buttons, &QDialogButtonBox::accepted, dlg, [=, this]() {
+    connect(buttons, &QDialogButtonBox::accepted, dlg, [=]() {
         if (!safeSession) {
             dlg->reject();
             return;
