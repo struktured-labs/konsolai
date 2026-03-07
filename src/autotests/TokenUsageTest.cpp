@@ -94,6 +94,57 @@ void TokenUsageTest::testFormatCompactMillions()
     QVERIFY(formatted.contains(QStringLiteral("1.2M")));
 }
 
+void TokenUsageTest::testContextWindowSizeOpus()
+{
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-opus-4-6");
+    QCOMPARE(usage.contextWindowSize(), quint64(1000000));
+}
+
+void TokenUsageTest::testContextWindowSizeSonnet()
+{
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-sonnet-4-6");
+    QCOMPARE(usage.contextWindowSize(), quint64(1000000));
+}
+
+void TokenUsageTest::testContextWindowSizeHaiku()
+{
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-haiku-4-5-20251001");
+    QCOMPARE(usage.contextWindowSize(), quint64(200000));
+}
+
+void TokenUsageTest::testContextWindowSizeDefault()
+{
+    TokenUsage usage;
+    // No model detected — default to 200K
+    QCOMPARE(usage.contextWindowSize(), quint64(200000));
+}
+
+void TokenUsageTest::testContextPercentBasic()
+{
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-opus-4-6");
+    usage.lastContextTokens = 100000; // 10% of 1M
+    QVERIFY(qAbs(usage.contextPercent() - 10.0) < 0.01);
+}
+
+void TokenUsageTest::testContextPercentNoData()
+{
+    TokenUsage usage;
+    // No context tokens tracked yet
+    QCOMPARE(usage.contextPercent(), -1.0);
+}
+
+void TokenUsageTest::testContextPercentHigh()
+{
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-haiku-4-5-20251001");
+    usage.lastContextTokens = 180000; // 90% of 200K
+    QVERIFY(qAbs(usage.contextPercent() - 90.0) < 0.01);
+}
+
 QTEST_GUILESS_MAIN(TokenUsageTest)
 
 #include "moc_TokenUsageTest.cpp"

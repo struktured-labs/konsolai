@@ -24,6 +24,13 @@ private Q_SLOTS:
     void testFormatCompactSmall();
     void testFormatCompactThousands();
     void testFormatCompactMillions();
+    void testContextWindowSizeOpus();
+    void testContextWindowSizeSonnet();
+    void testContextWindowSizeHaiku();
+    void testContextWindowSizeDefault();
+    void testContextPercentBasic();
+    void testContextPercentNoData();
+    void testContextPercentHigh();
 };
 
 }
