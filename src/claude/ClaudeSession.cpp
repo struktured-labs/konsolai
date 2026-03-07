@@ -1318,13 +1318,34 @@ void ClaudeSession::restart()
         m_claudeProcess->reset();
     }
 
-    // Detect current conversation ID from the JSONL file being tracked,
-    // so restart always resumes the conversation (even if session was started fresh).
-    if (m_resumeSessionId.isEmpty() && !m_lastTokenFile.isEmpty()) {
-        QString basename = QFileInfo(m_lastTokenFile).completeBaseName();
-        if (!basename.isEmpty()) {
-            m_resumeSessionId = basename;
-            qDebug() << "ClaudeSession::restart() - detected conversation ID from JSONL:" << m_resumeSessionId;
+    // Detect current conversation ID so restart resumes the conversation.
+    // Try m_lastTokenFile first (already tracked), then scan the project dir.
+    if (m_resumeSessionId.isEmpty()) {
+        QString convFile = m_lastTokenFile;
+
+        // If token tracking hasn't populated m_lastTokenFile yet, find the newest JSONL now
+        if (convFile.isEmpty() && !m_workingDir.isEmpty()) {
+            QString hashedName = m_workingDir;
+            hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
+            QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+            QDateTime newestTime;
+            QDirIterator it(projectDir, {QStringLiteral("*.jsonl")}, QDir::Files);
+            while (it.hasNext()) {
+                it.next();
+                QDateTime mtime = it.fileInfo().lastModified();
+                if (!newestTime.isValid() || mtime > newestTime) {
+                    newestTime = mtime;
+                    convFile = it.filePath();
+                }
+            }
+        }
+
+        if (!convFile.isEmpty()) {
+            QString basename = QFileInfo(convFile).completeBaseName();
+            if (!basename.isEmpty()) {
+                m_resumeSessionId = basename;
+                qDebug() << "ClaudeSession::restart() - detected conversation ID:" << m_resumeSessionId;
+            }
         }
     }
 
