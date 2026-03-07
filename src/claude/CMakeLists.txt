@@ -49,6 +49,7 @@ target_compile_definitions(konsolai_claude PRIVATE konsoleprivate_EXPORTS)
 target_link_libraries(konsolai_claude
     PUBLIC
     Qt::Core
+    Qt::Concurrent
     Qt::Network
     Qt::Widgets
     Qt::Multimedia

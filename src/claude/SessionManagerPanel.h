@@ -305,7 +305,7 @@ private:
     void showLoadingState();
     void showReadyState();
     void loadMetadata();
-    void saveMetadata();
+    void saveMetadata(bool sync = false);
     void scheduleTreeUpdate(); // debounced — coalesces rapid-fire calls
     void scheduleMetadataSave(); // debounced — coalesces rapid-fire saves
     void updateTreeWidget();
@@ -375,6 +375,7 @@ private:
     QSet<QString> m_cachedRemoteLiveNames;
     QTimer *m_remoteTmuxTimer = nullptr;
     void refreshRemoteTmuxSessions();
+    void refreshCachesAsync(); // background thread for discoverSessions + readClaudeConversations
 
     // Cache conversations per working directory to avoid disk I/O during tree rebuilds
     QHash<QString, QList<ClaudeConversation>> m_conversationCache; // workDir → conversations
@@ -430,6 +431,9 @@ private:
 
     // Whether background timers are paused (window inactive)
     bool m_timersPaused = false;
+
+    // Whether an async cache refresh is in flight (prevents overlapping refreshes)
+    bool m_cacheRefreshInFlight = false;
 
     // Whether a metadata save was deferred during timer pause
     bool m_pendingSave = false;

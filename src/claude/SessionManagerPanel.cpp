@@ -52,9 +52,16 @@
 #include <QToolBar>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QtConcurrent>
 
 namespace Konsolai
 {
+
+// Result of background cache refresh (discoverSessions + readClaudeConversations)
+struct CacheRefreshResult {
+    QList<ClaudeSessionState> discovered;
+    QHash<QString, QList<ClaudeConversation>> conversations;
+};
 
 static const QString SETTINGS_GROUP = QStringLiteral("SessionManager");
 
@@ -113,13 +120,15 @@ void SessionManagerPanel::deferredInit()
     m_gitCacheTimer->start();
 
     m_convCacheTimer = new QTimer(this);
-    m_convCacheTimer->setInterval(120000); // 120s TTL for conversation + discovered + GSD caches
+    m_convCacheTimer->setInterval(120000); // 120s — refresh caches in background (no UI freeze)
     connect(m_convCacheTimer, &QTimer::timeout, this, [this]() {
-        m_conversationCache.clear();
-        m_discoveredCacheValid = false;
-        m_gsdBadgeCache.clear();
+        m_gsdBadgeCache.clear(); // cheap, no I/O
+        refreshCachesAsync(); // heavy I/O runs on thread pool
     });
     m_convCacheTimer->start();
+
+    // Pre-populate caches on startup
+    refreshCachesAsync();
 
     // Process any sessions that registered before init completed
     m_initialized = true;
@@ -162,7 +171,7 @@ SessionManagerPanel::~SessionManagerPanel()
     // and connected slots in MainWindow may dereference already-destroyed sibling widgets
     // (e.g. ClaudeStatusWidget destroyed before SessionManagerPanel in deleteChildren()).
     blockSignals(true);
-    saveMetadata();
+    saveMetadata(/*sync=*/true);
 
     // Null out m_treeWidget before base QWidget destructor runs deleteChildren(),
     // which can trigger QProcess::finished → scheduleTreeUpdate → isTreeInteractionActive
@@ -578,7 +587,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
 
     scheduleMetadataSave();
 
-    // Invalidate caches for this session's working directory so fresh data is shown immediately
+    // Invalidate caches for this session's working directory and refresh in background
     const QString &workDir = session->workingDirectory();
     if (!workDir.isEmpty()) {
         m_conversationCache.remove(workDir);
@@ -586,6 +595,7 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         m_gsdBadgeCache.remove(workDir);
     }
     m_discoveredCacheValid = false;
+    refreshCachesAsync();
 
     scheduleTreeUpdate();
 
@@ -2441,7 +2451,9 @@ void SessionManagerPanel::scheduleMetadataSave()
     if (!m_saveDebounce) {
         m_saveDebounce = new QTimer(this);
         m_saveDebounce->setSingleShot(true);
-        connect(m_saveDebounce, &QTimer::timeout, this, &SessionManagerPanel::saveMetadata);
+        connect(m_saveDebounce, &QTimer::timeout, this, [this]() {
+            saveMetadata();
+        });
     }
     m_saveDebounce->start(1000);
 }
@@ -2573,6 +2585,121 @@ void SessionManagerPanel::refreshRemoteTmuxSessions()
     }
 }
 
+void SessionManagerPanel::refreshCachesAsync()
+{
+    if (m_cacheRefreshInFlight) {
+        return;
+    }
+    m_cacheRefreshInFlight = true;
+
+    // Snapshot search root
+    QString searchRoot;
+    auto *settings = KonsolaiSettings::instance();
+    if (settings) {
+        searchRoot = settings->projectRoot();
+    }
+    if (searchRoot.isEmpty()) {
+        searchRoot = QDir::homePath() + QStringLiteral("/projects");
+    }
+
+    // Snapshot known working directories from registry (discover filter)
+    QSet<QString> knownDirs;
+    if (m_registry) {
+        for (const auto &state : m_registry->allSessionStates()) {
+            knownDirs.insert(state.workingDirectory);
+        }
+    }
+
+    // Collect all directories that need conversation refresh
+    QSet<QString> convDirs;
+    for (auto it = m_metadata.constBegin(); it != m_metadata.constEnd(); ++it) {
+        if (!it.value().workingDirectory.isEmpty()) {
+            convDirs.insert(it.value().workingDirectory);
+        }
+    }
+    for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
+        convDirs.insert(state.workingDirectory);
+    }
+
+    QPointer<SessionManagerPanel> guard(this);
+    auto future = QtConcurrent::run([searchRoot, knownDirs, convDirs]() -> CacheRefreshResult {
+        CacheRefreshResult result;
+
+        // Discover sessions (directory scan + settings.local.json reads)
+        if (!searchRoot.isEmpty() && QDir(searchRoot).exists()) {
+            QDir rootDir(searchRoot);
+            const auto entries = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+            for (const QString &dirName : entries) {
+                QString projectPath = rootDir.filePath(dirName);
+                QString claudeDir = QDir(projectPath).filePath(QStringLiteral(".claude"));
+                if (!QDir(claudeDir).exists()) {
+                    continue;
+                }
+                if (knownDirs.contains(projectPath)) {
+                    continue;
+                }
+
+                ClaudeSessionState state;
+                state.sessionName = QStringLiteral("discovered-%1").arg(dirName);
+                state.sessionId = dirName.left(8);
+                state.workingDirectory = projectPath;
+                state.isAttached = false;
+
+                QString settingsPath = QDir(claudeDir).filePath(QStringLiteral("settings.local.json"));
+                if (QFile::exists(settingsPath)) {
+                    QFile f(settingsPath);
+                    if (f.open(QIODevice::ReadOnly)) {
+                        QJsonParseError err;
+                        QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+                        if (err.error == QJsonParseError::NoError && doc.isObject()) {
+                            QString content = QString::fromUtf8(doc.toJson());
+                            state.profileName = content.contains(QStringLiteral("konsolai")) ? QStringLiteral("Claude") : QStringLiteral("External");
+                        }
+                        f.close();
+                    }
+                } else {
+                    state.profileName = QStringLiteral("External");
+                }
+
+                QFileInfo claudeDirInfo(claudeDir);
+                state.created = claudeDirInfo.birthTime().isValid() ? claudeDirInfo.birthTime() : claudeDirInfo.lastModified();
+                state.lastAccessed = claudeDirInfo.lastModified();
+
+                result.discovered.append(state);
+            }
+        }
+
+        // Read conversations for all directories (the expensive part)
+        QSet<QString> allDirs = convDirs;
+        for (const auto &state : std::as_const(result.discovered)) {
+            allDirs.insert(state.workingDirectory);
+        }
+        for (const QString &dir : std::as_const(allDirs)) {
+            result.conversations[dir] = ClaudeSessionRegistry::readClaudeConversations(dir);
+        }
+
+        return result;
+    });
+
+    auto *watcher = new QFutureWatcher<CacheRefreshResult>(this);
+    connect(watcher, &QFutureWatcher<CacheRefreshResult>::finished, this, [this, guard, watcher]() {
+        if (!guard) {
+            watcher->deleteLater();
+            return;
+        }
+        auto result = watcher->result();
+        m_cachedDiscoveredSessions = result.discovered;
+        m_discoveredCacheValid = true;
+        for (auto it = result.conversations.constBegin(); it != result.conversations.constEnd(); ++it) {
+            m_conversationCache[it.key()] = it.value();
+        }
+        m_cacheRefreshInFlight = false;
+        watcher->deleteLater();
+        scheduleTreeUpdate();
+    });
+    watcher->setFuture(future);
+}
+
 void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames)
 {
     // Purge stale null QPointer entries — sessions destroyed via deleteLater()
@@ -2685,18 +2812,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         delete m_discoveredCategory->takeChild(0);
     }
     if (m_registry) {
-        // Use cached discoverSessions() result (invalidated on 120s timer and session register/unregister)
-        if (!m_discoveredCacheValid) {
-            QString searchRoot;
-            auto *settings = KonsolaiSettings::instance();
-            if (settings) {
-                searchRoot = settings->projectRoot();
-            } else {
-                searchRoot = QDir::homePath() + QStringLiteral("/projects");
-            }
-            m_cachedDiscoveredSessions = m_registry->discoverSessions(searchRoot);
-            m_discoveredCacheValid = true;
-        }
+        // Use cached data only — background refreshCachesAsync() keeps it fresh.
+        // Never call discoverSessions() or readClaudeConversations() here
+        // to avoid blocking the main thread.
         for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
             auto *item = new QTreeWidgetItem(m_discoveredCategory);
             QString displayName = QDir(state.workingDirectory).dirName();
@@ -2705,10 +2823,7 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             item->setData(0, Qt::UserRole + 1, state.workingDirectory);
             item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-cloud")));
 
-            // Show conversation count via cache (same TTL as conversation cache)
-            if (!m_conversationCache.contains(state.workingDirectory)) {
-                m_conversationCache.insert(state.workingDirectory, ClaudeSessionRegistry::readClaudeConversations(state.workingDirectory));
-            }
+            // Show conversation count from cache (populated by refreshCachesAsync)
             const auto &conversations = m_conversationCache[state.workingDirectory];
             if (!conversations.isEmpty()) {
                 item->setText(1, QStringLiteral("%1 conv").arg(conversations.size()));
@@ -2833,11 +2948,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     }
 
     // 3. Claude CLI conversation data (only available for local sessions)
-    if (description.isEmpty() && !meta.workingDirectory.isEmpty() && m_registry) {
-        // Populate cache on first access per working directory
-        if (!m_conversationCache.contains(meta.workingDirectory)) {
-            m_conversationCache.insert(meta.workingDirectory, m_registry->readClaudeConversations(meta.workingDirectory));
-        }
+    // Use cached data only — never block tree rebuild with disk I/O.
+    // refreshCachesAsync() keeps the cache populated in background.
+    if (description.isEmpty() && !meta.workingDirectory.isEmpty() && m_registry && m_conversationCache.contains(meta.workingDirectory)) {
         const auto &conversations = m_conversationCache[meta.workingDirectory];
 
         // 1. Direct match by conversation UUID
@@ -3665,7 +3778,7 @@ void SessionManagerPanel::loadMetadata()
     }
 }
 
-void SessionManagerPanel::saveMetadata()
+void SessionManagerPanel::saveMetadata(bool sync)
 {
     QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataPath);
@@ -3801,16 +3914,26 @@ void SessionManagerPanel::saveMetadata()
         array.append(obj);
     }
 
-    QFile file(filePath);
-    if (file.open(QIODevice::WriteOnly)) {
-        QByteArray json = QJsonDocument(array).toJson();
-        qint64 written = file.write(json);
-        if (written != json.size()) {
-            qWarning() << "SessionManagerPanel::saveMetadata: Incomplete write —" << written << "of" << json.size() << "bytes to" << filePath;
+    // Serialize + write: async by default (avoids blocking UI for 1MB+ files),
+    // but synchronous during destruction to prevent races with the next operation.
+    QJsonDocument doc(array);
+    auto writeFile = [filePath, doc]() {
+        QByteArray json = doc.toJson();
+        QFile file(filePath);
+        if (file.open(QIODevice::WriteOnly)) {
+            qint64 written = file.write(json);
+            if (written != json.size()) {
+                qWarning() << "SessionManagerPanel::saveMetadata: Incomplete write —" << written << "of" << json.size() << "bytes to" << filePath;
+            }
+            file.close();
+        } else {
+            qWarning() << "SessionManagerPanel::saveMetadata: Failed to open" << filePath << "for writing:" << file.errorString();
         }
-        file.close();
+    };
+    if (sync) {
+        writeFile();
     } else {
-        qWarning() << "SessionManagerPanel::saveMetadata: Failed to open" << filePath << "for writing:" << file.errorString();
+        QtConcurrent::run(writeFile);
     }
 
     Q_EMIT usageAggregateChanged();
