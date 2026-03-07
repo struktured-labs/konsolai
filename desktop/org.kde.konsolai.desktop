@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 TryExec=konsolai
-Exec=konsolai
+Exec=env QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 konsolai
 Icon=konsolai
 Categories=Qt;KDE;System;TerminalEmulator;
 Actions=NewWindow;NewTab;
@@ -351,7 +351,7 @@ Name[uk]=Відкрити нове вікно
 Name[zh_CN]=打开新窗口
 Name[zh_TW]=開啟新視窗
 Icon=window-new
-Exec=konsolai
+Exec=env QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 konsolai
 
 [Desktop Action NewTab]
 Name=Open a New Tab
@@ -409,4 +409,4 @@ Name[uk]=Відкрити нову вкладку
 Name[zh_CN]=打开新的标签页
 Name[zh_TW]=開啟新分頁
 Icon=tab-new
-Exec=konsolai --new-tab
+Exec=env QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 konsolai --new-tab
