@@ -49,6 +49,8 @@ ClaudeMenu::ClaudeMenu(QWidget *parent)
     : QMenu(i18n("&Claude"), parent)
     , m_registry(ClaudeSessionRegistry::instance())
 {
+    setObjectName(QStringLiteral("claudeMenu"));
+
     // Load persisted yolo mode settings before creating actions
     // so the checkboxes start in the correct state.
     auto *settings = KonsolaiSettings::instance();

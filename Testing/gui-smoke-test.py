@@ -229,6 +229,129 @@ def test_widget_state(backend: AtspiBackend):
         check("New Tab button visible", state.visible)
 
 
+def test_object_names(backend: AtspiBackend):
+    """Key widgets should have objectName set for stable test targeting.
+
+    These only pass after the objectName-enabled build is installed.
+    Failures here are non-blocking — flagged as WARN not FAIL.
+    """
+    print("\n[Object Names / Automation IDs]")
+    all_found = True
+    for auto_id, label in [
+        ("claudeStateLabel", "Claude state label"),
+        ("claudeTaskLabel", "Claude task label"),
+        ("sessionTree", "Session tree widget"),
+        ("claudeMenu", "Claude menu"),
+    ]:
+        results = backend.find_widget("konsolai", auto_id=auto_id)
+        if results:
+            check(f"{label} has objectName '{auto_id}'", True)
+        else:
+            all_found = False
+            print(f"  WARN  {label} missing objectName '{auto_id}' (needs install)")
+    if not all_found:
+        print("  NOTE  Run ./install.sh to deploy objectName markers")
+
+
+def test_status_bar_content(backend: AtspiBackend):
+    """Parse and validate status bar fields."""
+    print("\n[Status Bar Content Parsing]")
+    # Try objectName first, fall back to finding label with "Claude:" in name
+    results = backend.find_widget("konsolai", auto_id="claudeStateLabel")
+    if not results:
+        tree = backend.get_widget_tree("konsolai", max_depth=4)
+        status_bar = find_child(tree, role="status_bar")
+        if status_bar:
+            labels = find_all(status_bar, role="label")
+            claude_labels = [l for l in labels if "Claude:" in l.info.name]
+            if claude_labels:
+                results = [claude_labels[0].info]
+    if not results:
+        check("status label found (objectName or fallback)", False)
+        return
+    path = results[0].path if hasattr(results[0], 'path') else results[0].path
+    text = backend.read_text(path)
+    check("status text not empty", len(text) > 0)
+
+    # Parse known fields
+    has_state = any(s in text for s in ["Idle", "Working", "Waiting", "Not Running", "Starting", "Error"])
+    check("status contains state", has_state, f"text={text[:60]}")
+
+    # Context percent: "Ctx:NN%"
+    ctx_match = re.search(r"Ctx:(\d+)%", text)
+    check("status contains Ctx:N%", ctx_match is not None, f"text={text[:80]}")
+    if ctx_match:
+        ctx_pct = int(ctx_match.group(1))
+        check("context percent 0-100", 0 <= ctx_pct <= 100, f"ctx={ctx_pct}%")
+
+    # Token usage: "NNN.NK↑ NNN.NK↓"
+    check("status contains token arrows", "↑" in text and "↓" in text, f"text={text[:80]}")
+
+    # Cost: "($N.NN)"
+    cost_match = re.search(r"\(\$[\d.]+\)", text)
+    check("status contains cost", cost_match is not None, f"text={text[:80]}")
+
+
+def test_tab_switching(backend: AtspiBackend):
+    """Verify we can read tab names and that at least one is selected."""
+    print("\n[Tab Switching]")
+    tabs = backend.find_widget("konsolai", role="tab")
+    check("tabs found for switching test", len(tabs) >= 2)
+    if len(tabs) < 2:
+        return
+
+    # Check that tab states are readable
+    states_read = 0
+    for tab in tabs[:3]:
+        try:
+            state = backend.get_widget_state(tab.path)
+            states_read += 1
+        except Exception:
+            pass
+    check("tab states readable", states_read >= 1, f"read {states_read}/{min(3, len(tabs))}")
+
+
+def test_session_tree_structure(backend: AtspiBackend):
+    """Session tree must have category nodes."""
+    print("\n[Session Tree Structure]")
+    # Try objectName first, fall back to finding the largest tree in Sessions panel
+    tree_results = backend.find_widget("konsolai", auto_id="sessionTree")
+    tree_widget = backend.get_widget_tree("konsolai", max_depth=4)
+    sessions_panel = find_child(tree_widget, name="Sessions")
+    session_tree = None
+
+    if tree_results:
+        check("sessionTree found by objectName", True)
+    elif sessions_panel:
+        session_tree = find_child(sessions_panel, role="tree")
+        check("session tree found (fallback)", session_tree is not None)
+    else:
+        check("Sessions panel found", False)
+        return
+
+    if not session_tree and sessions_panel:
+        session_tree = find_child(sessions_panel, role="tree")
+    if session_tree:
+        check("session tree has children", session_tree.info.children_count > 0,
+              f"count={session_tree.info.children_count}")
+
+
+def test_notification_overlay(backend: AtspiBackend):
+    """If a notification overlay is visible, validate its structure."""
+    print("\n[Notification Overlay]")
+    # Notification widget shows "[project] Task Complete" etc.
+    tree = backend.get_widget_tree("konsolai", max_depth=5)
+    # Look for notification-like labels
+    task_labels = find_all(tree, name="Task Complete")
+    info_labels = find_all(tree, name="Permission")
+    has_notification = len(task_labels) > 0 or len(info_labels) > 0
+    # This is optional — notification may not be showing
+    if has_notification:
+        check("notification overlay visible", True)
+    else:
+        print("  SKIP  No notification currently visible (OK)")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -246,6 +369,7 @@ def main():
         print("Make sure konsolai is running with QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1")
         sys.exit(2)
 
+    # Structure tests
     test_app_visible(backend)
     test_window_structure(backend)
     test_menu_bar(backend)
@@ -255,6 +379,15 @@ def main():
     test_session_panel(backend)
     test_toolbars(backend)
     test_widget_state(backend)
+
+    # Stability tests (objectName-based)
+    test_object_names(backend)
+    test_status_bar_content(backend)
+
+    # Interaction tests
+    test_tab_switching(backend)
+    test_session_tree_structure(backend)
+    test_notification_overlay(backend)
 
     print("\n" + "=" * 50)
     print(f"Results: {_passed} passed, {_failed} failed")

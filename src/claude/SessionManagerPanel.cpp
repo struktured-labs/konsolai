@@ -307,6 +307,7 @@ void SessionManagerPanel::setupUi()
 
     // Tree widget for sessions
     m_treeWidget = new QTreeWidget(this);
+    m_treeWidget->setObjectName(QStringLiteral("sessionTree"));
     m_treeWidget->setColumnCount(2);
     m_treeWidget->setHeaderHidden(true);
     m_treeWidget->setRootIsDecorated(true);

@@ -22,10 +22,13 @@ ClaudeStatusWidget::ClaudeStatusWidget(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
+    setObjectName(QStringLiteral("claudeStatusWidget"));
+    m_stateLabel->setObjectName(QStringLiteral("claudeStateLabel"));
     m_stateLabel->setTextFormat(Qt::RichText);
     m_stateLabel->setToolTip(QStringLiteral("Claude status"));
     layout->addWidget(m_stateLabel);
 
+    m_taskLabel->setObjectName(QStringLiteral("claudeTaskLabel"));
     m_taskLabel->setToolTip(QStringLiteral("Current task"));
     m_taskLabel->setVisible(false);
     layout->addWidget(m_taskLabel);
