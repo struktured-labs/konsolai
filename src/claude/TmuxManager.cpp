@@ -76,11 +76,21 @@ QString TmuxManager::buildSessionName(const QString &profileName,
     result.replace(QStringLiteral("{profile}"), profileName);
     result.replace(QStringLiteral("{id}"), sessionId);
 
-    // Sanitize session name: tmux doesn't allow certain characters
+    // Sanitize session name: replace unsafe characters with dashes, then strip
+    // anything that isn't alphanumeric, dash, or underscore. This prevents
+    // shell injection via profile names and satisfies tmux naming rules.
     result.replace(QLatin1Char('.'), QLatin1Char('-'));
     result.replace(QLatin1Char(':'), QLatin1Char('-'));
 
-    return result;
+    QString sanitized;
+    sanitized.reserve(result.size());
+    for (const QChar &ch : std::as_const(result)) {
+        if (ch.isLetterOrNumber() || ch == QLatin1Char('-') || ch == QLatin1Char('_')) {
+            sanitized.append(ch);
+        }
+    }
+
+    return sanitized;
 }
 
 QString TmuxManager::buildNewSessionCommand(const QString &sessionName,
