@@ -16,7 +16,6 @@ from __future__ import annotations
 import base64
 import json
 import platform
-import sys
 from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
@@ -125,8 +124,11 @@ def type_text(
     Replaces existing content with the new text.
     """
     backend = _get_backend()
-    backend.type_text(widget_path, text)
-    return json.dumps({"success": True, "text": text})
+    try:
+        backend.type_text(widget_path, text)
+        return json.dumps({"success": True, "text": text})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -181,8 +183,11 @@ def select_tab(
     not an individual tab.
     """
     backend = _get_backend()
-    backend.select_tab(tab_path, tab_name)
-    return json.dumps({"success": True, "tab": tab_name})
+    try:
+        backend.select_tab(tab_path, tab_name)
+        return json.dumps({"success": True, "tab": tab_name})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -195,8 +200,11 @@ def expand_node(
     Works on tree_item role widgets in QTreeWidget/QTreeView.
     """
     backend = _get_backend()
-    backend.expand_tree_node(node_path, expand=expand)
-    return json.dumps({"success": True, "expanded": expand})
+    try:
+        backend.expand_tree_node(node_path, expand=expand)
+        return json.dumps({"success": True, "expanded": expand})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -211,8 +219,11 @@ def send_keys(
     - Modifiers: {Ctrl+c}, {Alt+F4}, {Shift+Tab}
     """
     backend = _get_backend()
-    backend.send_keys(keys)
-    return json.dumps({"success": True, "keys": keys})
+    try:
+        backend.send_keys(keys)
+        return json.dumps({"success": True, "keys": keys})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -224,12 +235,15 @@ def screenshot(
     Returns base64-encoded PNG data.
     """
     backend = _get_backend()
-    png_bytes = backend.take_screenshot(widget_path)
-    return json.dumps({
-        "format": "png",
-        "size_bytes": len(png_bytes),
-        "data_base64": base64.b64encode(png_bytes).decode("ascii"),
-    })
+    try:
+        png_bytes = backend.take_screenshot(widget_path)
+        return json.dumps({
+            "format": "png",
+            "size_bytes": len(png_bytes),
+            "data_base64": base64.b64encode(png_bytes).decode("ascii"),
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
