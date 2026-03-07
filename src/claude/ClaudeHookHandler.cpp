@@ -516,8 +516,8 @@ bool ClaudeHookClient::sendEvent(const QString &socketPath,
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact) + "\n";
 
-    m_socket->write(data);
-    if (!m_socket->waitForBytesWritten(timeoutMs)) {
+    qint64 written = m_socket->write(data);
+    if (written != data.size() || !m_socket->waitForBytesWritten(timeoutMs)) {
         m_socket->disconnectFromServer();
         return false;
     }

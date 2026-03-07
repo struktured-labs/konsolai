@@ -40,7 +40,11 @@ NotificationManager::~NotificationManager()
 {
     if (m_audioThread) {
         m_audioThread->quit();
-        m_audioThread->wait(1000);
+        if (!m_audioThread->wait(3000)) {
+            qWarning() << "NotificationManager: Audio thread did not exit in time, terminating";
+            m_audioThread->terminate();
+            m_audioThread->wait(1000);
+        }
         delete m_soundEffect; // lives on m_audioThread, safe after thread exits
         delete m_audioThread;
     }
@@ -238,17 +242,20 @@ void NotificationManager::playSound(NotificationType type)
 
     ensureAudioThread();
 
-    // Invoke on the audio thread via queued connection to avoid blocking UI
+    // Invoke on the audio thread via queued connection to avoid blocking UI.
+    // Capture soundEffect pointer directly — avoids capturing 'this' which may
+    // be destroyed before the queued lambda executes.
     qreal volume = m_audioVolume;
     QString loadedPath = m_loadedSoundPath;
+    QSoundEffect *effect = m_soundEffect;
     QMetaObject::invokeMethod(
-        m_soundEffect,
-        [this, path, volume, loadedPath]() {
-            m_soundEffect->setVolume(volume);
+        effect,
+        [effect, path, volume, loadedPath]() {
+            effect->setVolume(volume);
             if (loadedPath != path) {
-                m_soundEffect->setSource(QUrl::fromLocalFile(path));
+                effect->setSource(QUrl::fromLocalFile(path));
             }
-            m_soundEffect->play();
+            effect->play();
         },
         Qt::QueuedConnection);
     m_loadedSoundPath = path;
