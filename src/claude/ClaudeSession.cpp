@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -1311,6 +1312,16 @@ void ClaudeSession::restart()
     m_pendingBashIds.clear();
     if (m_claudeProcess) {
         m_claudeProcess->reset();
+    }
+
+    // Detect current conversation ID from the JSONL file being tracked,
+    // so restart always resumes the conversation (even if session was started fresh).
+    if (m_resumeSessionId.isEmpty() && !m_lastTokenFile.isEmpty()) {
+        QString basename = QFileInfo(m_lastTokenFile).completeBaseName();
+        if (!basename.isEmpty()) {
+            m_resumeSessionId = basename;
+            qDebug() << "ClaudeSession::restart() - detected conversation ID from JSONL:" << m_resumeSessionId;
+        }
     }
 
     // Build the claude command (same as initial launch)
