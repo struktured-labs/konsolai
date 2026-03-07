@@ -44,6 +44,10 @@ struct KONSOLEPRIVATE_EXPORT TokenUsage {
     quint64 cacheReadTokens = 0;
     quint64 cacheCreationTokens = 0;
 
+    // Context window tracking (from the last assistant message, NOT cumulative)
+    quint64 lastContextTokens = 0; // input + cache_read + cache_creation from last message
+    QString detectedModel; // model string from JSONL (e.g. "claude-opus-4-6")
+
     quint64 totalTokens() const
     {
         return inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
@@ -53,6 +57,30 @@ struct KONSOLEPRIVATE_EXPORT TokenUsage {
     {
         // Anthropic pricing per million tokens (Claude Opus 4.5)
         return (inputTokens * 3.0 + outputTokens * 15.0 + cacheCreationTokens * 0.30 + cacheReadTokens * 0.30) / 1000000.0;
+    }
+
+    /**
+     * Get the context window size for the detected model (in tokens).
+     * Opus 4.6 and Sonnet 4.6 support 1M beta; others default to 200K.
+     */
+    quint64 contextWindowSize() const
+    {
+        if (detectedModel.contains(QStringLiteral("opus-4")) || detectedModel.contains(QStringLiteral("sonnet-4"))) {
+            return 1000000;
+        }
+        return 200000;
+    }
+
+    /**
+     * Context window usage as a percentage (0-100+).
+     * Returns -1 if no context data is available.
+     */
+    double contextPercent() const
+    {
+        if (lastContextTokens == 0) {
+            return -1.0;
+        }
+        return static_cast<double>(lastContextTokens) / static_cast<double>(contextWindowSize()) * 100.0;
     }
 
     QString formatCompact() const

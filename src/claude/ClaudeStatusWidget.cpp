@@ -161,9 +161,15 @@ void ClaudeStatusWidget::updateDisplay()
     // Build status text (rich text for colored elements)
     QString statusText = QStringLiteral("%1 Claude: %2").arg(icon, stateStr);
 
-    // Model name
+    // Model name — prefer detected model from JSONL, fall back to session enum
     if (session) {
-        QString model = ClaudeProcess::shortModelName(session->claudeModel());
+        QString model = session->tokenUsage().detectedModel;
+        if (model.isEmpty()) {
+            model = ClaudeProcess::shortModelName(session->claudeModel());
+        } else {
+            // Shorten: "claude-opus-4-6" → "opus-4-6"
+            model.remove(QStringLiteral("claude-"));
+        }
         if (!model.isEmpty()) {
             statusText += QStringLiteral(" (%1)").arg(model);
         }
@@ -204,6 +210,22 @@ void ClaudeStatusWidget::updateDisplay()
     if (session && session->tokenUsage().totalTokens() > 0) {
         const auto &usage = session->tokenUsage();
         statusText += QStringLiteral(" │ %1 ($%2)").arg(usage.formatCompact(), QString::number(usage.estimatedCostUSD(), 'f', 2));
+    }
+
+    // Context window percent
+    if (session) {
+        double ctxPct = session->tokenUsage().contextPercent();
+        if (ctxPct >= 0.0) {
+            QString ctxStr = QStringLiteral("Ctx:%1%").arg(ctxPct, 0, 'f', 0);
+            if (ctxPct >= 80.0) {
+                // Warning icon + orange/red coloring
+                QString warnIcon = ctxPct >= 95.0 ? QStringLiteral("🔴") : QStringLiteral("⚠");
+                QString color = ctxPct >= 95.0 ? QStringLiteral("#f44336") : QStringLiteral("#ff9800");
+                statusText += QStringLiteral(" │ %1 <span style='color:%2'>%3</span>").arg(warnIcon, color, ctxStr);
+            } else {
+                statusText += QStringLiteral(" │ %1").arg(ctxStr);
+            }
+        }
     }
 
     // Session budget percent

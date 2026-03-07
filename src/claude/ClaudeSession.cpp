@@ -1796,10 +1796,25 @@ TokenUsage ClaudeSession::parseConversationTokens(const QString &jsonlPath)
             continue;
         }
 
-        usage.inputTokens += usageObj.value(QStringLiteral("input_tokens")).toInteger();
-        usage.outputTokens += usageObj.value(QStringLiteral("output_tokens")).toInteger();
-        usage.cacheReadTokens += usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger();
-        usage.cacheCreationTokens += usageObj.value(QStringLiteral("cache_creation_input_tokens")).toInteger();
+        quint64 inp = usageObj.value(QStringLiteral("input_tokens")).toInteger();
+        quint64 out = usageObj.value(QStringLiteral("output_tokens")).toInteger();
+        quint64 cr = usageObj.value(QStringLiteral("cache_read_input_tokens")).toInteger();
+        quint64 cc = usageObj.value(QStringLiteral("cache_creation_input_tokens")).toInteger();
+
+        usage.inputTokens += inp;
+        usage.outputTokens += out;
+        usage.cacheReadTokens += cr;
+        usage.cacheCreationTokens += cc;
+
+        // Track the last message's context window usage (not cumulative — this is
+        // how many tokens were in the prompt sent to the API for this turn)
+        usage.lastContextTokens = inp + cr + cc;
+
+        // Detect model from JSONL
+        QString model = message.value(QStringLiteral("model")).toString();
+        if (!model.isEmpty()) {
+            usage.detectedModel = model;
+        }
     }
 
     // Save position for next incremental parse
