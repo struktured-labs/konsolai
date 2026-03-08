@@ -435,6 +435,21 @@ void ClaudeSession::run()
             if (m_hookHandler->start()) {
                 qDebug() << "ClaudeSession::run() - Hook handler started on:" << m_hookHandler->socketPath();
 
+                // Sync .yolo file to match current session state. Stale .yolo files
+                // from previous Konsolai launches can cause the hook handler to
+                // auto-approve even though the UI shows yolo as OFF.
+                QString yoloPath = m_hookHandler->socketPath();
+                yoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo"));
+                if (!m_yoloMode && QFile::exists(yoloPath)) {
+                    QFile::remove(yoloPath);
+                    qDebug() << "ClaudeSession::run() - Removed stale yolo file:" << yoloPath;
+                }
+                QString teamYoloPath = yoloPath;
+                teamYoloPath.replace(QStringLiteral(".yolo"), QStringLiteral(".yolo-team"));
+                if (!m_tripleYoloMode && QFile::exists(teamYoloPath)) {
+                    QFile::remove(teamYoloPath);
+                }
+
                 // Write hooks config to project's .claude/settings.local.json
                 // Claude Code reads hooks from settings.local.json, not hooks.json
                 QString hooksConfig = m_hookHandler->generateHooksConfig();
