@@ -44,7 +44,16 @@ KONSOLAI_PID=$!
 echo "  Xvfb display :${DISPLAY_NUM}, Konsolai PID $KONSOLAI_PID"
 
 cleanup() {
+    # Kill the test instance first — this should trigger tmux client detach
     kill $KONSOLAI_PID 2>/dev/null || true
+    sleep 1
+    # Force-detach any stale tmux clients from dead PTYs.
+    # Test instances leave zombie clients that shrink the user's real panes.
+    for tty in $(tmux list-clients -F '#{client_tty}' 2>/dev/null); do
+        if [ ! -e "$tty" ]; then
+            tmux detach-client -t "$tty" 2>/dev/null
+        fi
+    done
     kill $XVFB_PID 2>/dev/null || true
     wait 2>/dev/null
 }
