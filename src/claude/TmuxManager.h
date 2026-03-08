@@ -63,17 +63,30 @@ public:
     static QString generateSessionId();
 
     /**
+     * Get the current workspace name from KONSOLAI_WORKSPACE env var.
+     * Returns "default" if not set.
+     */
+    static QString currentWorkspace();
+
+    /**
      * Build session name from template
      *
      * Template variables:
+     *   {workspace} - Workspace name (from env or "default")
      *   {profile} - Profile name
      *   {id} - Unique session ID
      *
-     * Default template: "konsolai-{profile}-{id}"
+     * Default template: "konsolai-{workspace}-{profile}-{id}"
      */
     static QString buildSessionName(const QString &profileName,
                                     const QString &sessionId,
                                     const QString &templateFormat = QString());
+
+    /**
+     * Extract workspace name from a tmux session name.
+     * Returns "default" for legacy names without a workspace segment.
+     */
+    static QString workspaceFromSessionName(const QString &sessionName);
 
     /**
      * Build command to create or attach to a tmux session
@@ -109,9 +122,11 @@ public:
     QList<SessionInfo> listSessions() const;
 
     /**
-     * List only Konsolai-managed sessions (those matching our naming pattern)
+     * List only Konsolai-managed sessions matching the current workspace.
+     * If workspace is empty, uses currentWorkspace().
+     * The "default" workspace also matches legacy sessions (konsolai-{profile}-{id}).
      */
-    QList<SessionInfo> listKonsolaiSessions() const;
+    QList<SessionInfo> listKonsolaiSessions(const QString &workspace = QString()) const;
 
     /**
      * Check if a session with the given name exists

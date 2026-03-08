@@ -32,12 +32,12 @@ sleep 0.5
 # Launch Konsolai on virtual display, sharing host dbus (so AT-SPI sees it).
 # Use separate XDG dirs so it doesn't reattach user's sessions or stomp hooks.
 export LD_LIBRARY_PATH="$PWD/build/bin:$LD_LIBRARY_PATH"
-# Share user's XDG dirs (needs KDE profiles to start). The test instance runs
-# on a separate virtual display so it can't interfere with the live instance's
-# window. Hook sockets are per-session-ID so they don't collide either.
+# Share user's XDG dirs (needs KDE profiles to start). The test workspace
+# ensures this instance doesn't reattach the user's production sessions.
 DISPLAY=:${DISPLAY_NUM} \
     QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
     QT_QPA_PLATFORM=xcb \
+    KONSOLAI_WORKSPACE=test \
     LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
     "$BINARY" &
 KONSOLAI_PID=$!

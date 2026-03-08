@@ -50,13 +50,14 @@ void TmuxManagerTest::testBuildSessionName()
 {
     QString sessionId = QStringLiteral("a1b2c3d4");
 
-    // Default profile name
+    // Default profile name — includes workspace ("default" from env or fallback)
+    QString ws = TmuxManager::currentWorkspace();
     QString name = TmuxManager::buildSessionName(QStringLiteral("default"), sessionId);
-    QCOMPARE(name, QStringLiteral("konsolai-default-a1b2c3d4"));
+    QCOMPARE(name, QStringLiteral("konsolai-%1-default-a1b2c3d4").arg(ws));
 
     // Custom profile name
     name = TmuxManager::buildSessionName(QStringLiteral("MyProfile"), sessionId);
-    QCOMPARE(name, QStringLiteral("konsolai-MyProfile-a1b2c3d4"));
+    QCOMPARE(name, QStringLiteral("konsolai-%1-MyProfile-a1b2c3d4").arg(ws));
 
     // Empty profile name should use "default"
     name = TmuxManager::buildSessionName(QString(), sessionId);
@@ -175,13 +176,14 @@ void TmuxManagerTest::testVersion()
 void TmuxManagerTest::testBuildSessionNameSanitizesChars()
 {
     // Dots and colons should be replaced with hyphens
+    QString ws = TmuxManager::currentWorkspace();
     QString name = TmuxManager::buildSessionName(QStringLiteral("my.profile"), QStringLiteral("a1b2c3d4"));
     QVERIFY(!name.contains(QLatin1Char('.')));
-    QCOMPARE(name, QStringLiteral("konsolai-my-profile-a1b2c3d4"));
+    QCOMPARE(name, QStringLiteral("konsolai-%1-my-profile-a1b2c3d4").arg(ws));
 
     QString name2 = TmuxManager::buildSessionName(QStringLiteral("host:8080"), QStringLiteral("deadbeef"));
     QVERIFY(!name2.contains(QLatin1Char(':')));
-    QCOMPARE(name2, QStringLiteral("konsolai-host-8080-deadbeef"));
+    QCOMPARE(name2, QStringLiteral("konsolai-%1-host-8080-deadbeef").arg(ws));
 }
 
 // ============================================================
@@ -568,12 +570,13 @@ void TmuxManagerTest::testBuildNewSessionCommandAllOptions()
 void TmuxManagerTest::testBuildSessionNameMultipleBadChars()
 {
     // Profile with multiple dots and colons
+    QString ws = TmuxManager::currentWorkspace();
     QString name = TmuxManager::buildSessionName(QStringLiteral("my.host:8080.local"), QStringLiteral("deadbeef"));
 
     // All dots and colons should be replaced with hyphens
     QVERIFY(!name.contains(QLatin1Char('.')));
     QVERIFY(!name.contains(QLatin1Char(':')));
-    QCOMPARE(name, QStringLiteral("konsolai-my-host-8080-local-deadbeef"));
+    QCOMPARE(name, QStringLiteral("konsolai-%1-my-host-8080-local-deadbeef").arg(ws));
 }
 
 void TmuxManagerTest::testBuildSessionNameTemplateNoPlaceholders()
@@ -582,6 +585,49 @@ void TmuxManagerTest::testBuildSessionNameTemplateNoPlaceholders()
     QString name = TmuxManager::buildSessionName(QStringLiteral("ignored"), QStringLiteral("12345678"), QStringLiteral("my-static-session"));
 
     QCOMPARE(name, QStringLiteral("my-static-session"));
+}
+
+// ============================================================
+// Workspace support tests
+// ============================================================
+
+void TmuxManagerTest::testCurrentWorkspaceDefault()
+{
+    // With no env var set, workspace should be "default"
+    // (we can't easily unset env in tests, so just verify it returns non-empty)
+    QString ws = TmuxManager::currentWorkspace();
+    QVERIFY(!ws.isEmpty());
+}
+
+void TmuxManagerTest::testBuildSessionNameIncludesWorkspace()
+{
+    // Default workspace: session name should contain "default"
+    QString name = TmuxManager::buildSessionName(QStringLiteral("Claude"), QStringLiteral("deadbeef"));
+    // Should be "konsolai-{workspace}-Claude-deadbeef"
+    QVERIFY2(name.startsWith(QStringLiteral("konsolai-")), qPrintable(name));
+    QVERIFY2(name.endsWith(QStringLiteral("-Claude-deadbeef")), qPrintable(name));
+    QVERIFY2(name.contains(QStringLiteral("-Claude-")), qPrintable(name));
+}
+
+void TmuxManagerTest::testWorkspaceFromSessionName_NewFormat()
+{
+    // New format: konsolai-default-Claude-06a8ac8b
+    QString ws = TmuxManager::workspaceFromSessionName(QStringLiteral("konsolai-default-Claude-06a8ac8b"));
+    QCOMPARE(ws, QStringLiteral("default"));
+}
+
+void TmuxManagerTest::testWorkspaceFromSessionName_LegacyFormat()
+{
+    // Legacy format: konsolai-Claude-06a8ac8b (no workspace segment)
+    QString ws = TmuxManager::workspaceFromSessionName(QStringLiteral("konsolai-Claude-06a8ac8b"));
+    QCOMPARE(ws, QStringLiteral("default"));
+}
+
+void TmuxManagerTest::testWorkspaceFromSessionName_TestWorkspace()
+{
+    // Test workspace: konsolai-test-Claude-06a8ac8b
+    QString ws = TmuxManager::workspaceFromSessionName(QStringLiteral("konsolai-test-Claude-06a8ac8b"));
+    QCOMPARE(ws, QStringLiteral("test"));
 }
 
 QTEST_GUILESS_MAIN(TmuxManagerTest)

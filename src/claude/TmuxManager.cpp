@@ -63,16 +63,49 @@ QString TmuxManager::generateSessionId()
     return id;
 }
 
+QString TmuxManager::currentWorkspace()
+{
+    QByteArray ws = qgetenv("KONSOLAI_WORKSPACE");
+    return ws.isEmpty() ? QStringLiteral("default") : QString::fromUtf8(ws);
+}
+
+QString TmuxManager::workspaceFromSessionName(const QString &sessionName)
+{
+    // New format: konsolai-{workspace}-{profile}-{id}
+    // Legacy format: konsolai-{profile}-{id}
+    // Detect by counting segments after "konsolai-"
+    if (!sessionName.startsWith(QStringLiteral("konsolai-"))) {
+        return QStringLiteral("default");
+    }
+    QString rest = sessionName.mid(9); // after "konsolai-"
+    // The last segment is always the 8-char hex ID
+    // Legacy: "Claude-06a8ac8b" → 2 segments → workspace=default
+    // New: "default-Claude-06a8ac8b" → 3+ segments → first segment is workspace
+    QStringList parts = rest.split(QLatin1Char('-'));
+    if (parts.size() <= 2) {
+        return QStringLiteral("default"); // legacy format
+    }
+    // Check if first segment is a known workspace (lowercase alpha only)
+    // Workspace names are short lowercase identifiers like "default", "test"
+    // Profile names are typically capitalized ("Claude") or mixed case
+    QString candidate = parts.first();
+    if (candidate == candidate.toLower() && candidate.length() <= 20) {
+        return candidate;
+    }
+    return QStringLiteral("default");
+}
+
 QString TmuxManager::buildSessionName(const QString &profileName,
                                        const QString &sessionId,
                                        const QString &templateFormat)
 {
     QString tmpl = templateFormat;
     if (tmpl.isEmpty()) {
-        tmpl = QStringLiteral("konsolai-{profile}-{id}");
+        tmpl = QStringLiteral("konsolai-{workspace}-{profile}-{id}");
     }
 
     QString result = tmpl;
+    result.replace(QStringLiteral("{workspace}"), currentWorkspace());
     result.replace(QStringLiteral("{profile}"), profileName);
     result.replace(QStringLiteral("{id}"), sessionId);
 
@@ -161,16 +194,20 @@ QList<TmuxManager::SessionInfo> TmuxManager::listSessions() const
     return parseSessionList(output);
 }
 
-QList<TmuxManager::SessionInfo> TmuxManager::listKonsolaiSessions() const
+QList<TmuxManager::SessionInfo> TmuxManager::listKonsolaiSessions(const QString &workspace) const
 {
+    QString ws = workspace.isEmpty() ? currentWorkspace() : workspace;
     QList<SessionInfo> all = listSessions();
     QList<SessionInfo> konsolai;
 
-    // Filter sessions that match our naming pattern: konsolai-*
-    static const QRegularExpression pattern(QStringLiteral("^konsolai-"));
-
     for (const auto &session : all) {
-        if (pattern.match(session.name).hasMatch()) {
+        if (!session.name.startsWith(QStringLiteral("konsolai-"))) {
+            continue;
+        }
+        // Match workspace: new format sessions must match exactly,
+        // legacy sessions (no workspace segment) match "default" workspace only.
+        QString sessionWs = workspaceFromSessionName(session.name);
+        if (sessionWs == ws) {
             konsolai.append(session);
         }
     }
@@ -388,15 +425,18 @@ void TmuxManager::sessionExistsAsync(const QString &sessionName, std::function<v
 
 void TmuxManager::listKonsolaiSessionsAsync(std::function<void(const QList<SessionInfo> &)> callback)
 {
+    QString ws = currentWorkspace();
     executeCommandAsync(
         {QStringLiteral("list-sessions"), QStringLiteral("-F"), QStringLiteral("#{session_name}:#{session_windows}:#{session_created}:#{session_attached}")},
-        [this, callback](bool ok, const QString &output) {
+        [this, ws, callback](bool ok, const QString &output) {
             QList<SessionInfo> result;
             if (ok) {
                 QList<SessionInfo> all = parseSessionList(output);
-                static const QRegularExpression pattern(QStringLiteral("^konsolai-"));
                 for (const auto &session : all) {
-                    if (pattern.match(session.name).hasMatch()) {
+                    if (!session.name.startsWith(QStringLiteral("konsolai-"))) {
+                        continue;
+                    }
+                    if (TmuxManager::workspaceFromSessionName(session.name) == ws) {
                         result.append(session);
                     }
                 }

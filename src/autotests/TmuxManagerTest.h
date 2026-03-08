@@ -78,6 +78,13 @@ private Q_SLOTS:
     // Session name edge cases
     void testBuildSessionNameMultipleBadChars();
     void testBuildSessionNameTemplateNoPlaceholders();
+
+    // Workspace support
+    void testCurrentWorkspaceDefault();
+    void testBuildSessionNameIncludesWorkspace();
+    void testWorkspaceFromSessionName_NewFormat();
+    void testWorkspaceFromSessionName_LegacyFormat();
+    void testWorkspaceFromSessionName_TestWorkspace();
 };
 
 }
