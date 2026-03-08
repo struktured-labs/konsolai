@@ -290,6 +290,7 @@ void SessionManagerPanel::setupUi()
 
     // Search/filter bar
     m_filterEdit = new QLineEdit(this);
+    m_filterEdit->setObjectName(QStringLiteral("sessionFilter"));
     m_filterEdit->setPlaceholderText(i18n("Filter sessions..."));
     m_filterEdit->setClearButtonEnabled(true);
     m_filterEdit->addAction(QIcon::fromTheme(QStringLiteral("edit-find")), QLineEdit::LeadingPosition);
