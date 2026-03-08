@@ -28,7 +28,15 @@ from .types import (
 
 
 class AtspiBackend(GuiBackend):
-    """AT-SPI2 implementation of the GUI backend."""
+    """AT-SPI2 implementation of the GUI backend.
+
+    Args:
+        target_pid: If set, only interact with the application matching this PID.
+                    Useful for isolated testing against a specific instance.
+    """
+
+    def __init__(self, target_pid: int | None = None):
+        self._target_pid = target_pid
 
     # ------------------------------------------------------------------
     # Helpers
@@ -67,13 +75,25 @@ class AtspiBackend(GuiBackend):
         return f"{prefix}/{name}" if prefix else name
 
     def _find_app(self, app_name: str) -> Atspi.Accessible | None:
-        """Find an application by name (case-insensitive substring match)."""
+        """Find an application by name (case-insensitive substring match).
+
+        If target_pid is set, only matches the app with that PID.
+        """
         desktop = Atspi.get_desktop(0)
         app_name_lower = app_name.lower()
         for i in range(desktop.get_child_count()):
             app = desktop.get_child_at_index(i)
-            if app and app_name_lower in (self._name(app) or "").lower():
-                return app
+            if not app:
+                continue
+            if app_name_lower not in (self._name(app) or "").lower():
+                continue
+            if self._target_pid is not None:
+                try:
+                    if app.get_process_id() != self._target_pid:
+                        continue
+                except Exception:
+                    continue
+            return app
         return None
 
     def _resolve_path(self, widget_path: str) -> Atspi.Accessible | None:
@@ -171,13 +191,15 @@ class AtspiBackend(GuiBackend):
             if not app:
                 continue
             try:
-                toolkit = app.get_toolkit_name() or "unknown"
-            except Exception:
-                toolkit = "unknown"
-            try:
                 pid = app.get_process_id()
             except Exception:
                 pid = -1
+            if self._target_pid is not None and pid != self._target_pid:
+                continue
+            try:
+                toolkit = app.get_toolkit_name() or "unknown"
+            except Exception:
+                toolkit = "unknown"
             apps.append(AppInfo(
                 name=self._name(app) or f"app-{i}",
                 pid=pid,
