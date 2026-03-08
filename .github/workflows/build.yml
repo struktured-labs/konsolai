@@ -88,16 +88,15 @@ jobs:
       - name: Run GUI smoke test
         continue-on-error: true
         run: |
-          # Install to system so konsolai binary is in PATH
-          sudo cmake --install build
-          sudo ldconfig
-          # Launch konsolai headless with accessibility enabled.
+          # Launch konsolai from build dir (no system install — that would break Package step).
           # This may fail in CI (no KDE profile, no tmux) — non-blocking.
+          export LD_LIBRARY_PATH="$PWD/build/bin:$LD_LIBRARY_PATH"
           xvfb-run -a dbus-run-session bash -c '
             export QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
             export QT_QPA_PLATFORM=xcb
+            export LD_LIBRARY_PATH="'"$PWD/build/bin:$LD_LIBRARY_PATH"'"
             # Konsolai needs a Claude profile to start; skip if it crashes
-            konsolai &
+            ./build/bin/konsolai &
             KONSOLAI_PID=$!
             sleep 1
             if ! kill -0 $KONSOLAI_PID 2>/dev/null; then
