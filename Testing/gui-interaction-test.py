@@ -305,6 +305,34 @@ def test_multiple_tab_reads(backend: AtspiBackend):
           f"names={[t.name for t in session_tabs[:5]]}")
 
 
+def test_worktree_prerequisites(backend: AtspiBackend):
+    """Sessions must have working directories (needed for worktree action)."""
+    print("\n[Worktree Session Prerequisites]")
+    # The "New Worktree Session..." context menu action requires sessions
+    # to have a working directory. Verify that session tree items exist
+    # and that tabs have project names (indicating working dirs are set).
+    tabs = backend.find_widget("konsolai", role="tab")
+    session_tabs = [t for t in tabs
+                    if "Quick Commands" not in t.path
+                    and "Warnings" not in t.path
+                    and "Command" not in t.path
+                    and "bash" not in t.name]
+    check("Claude session tabs exist", len(session_tabs) >= 1,
+          f"count={len(session_tabs)}")
+
+    # Session tabs with project names indicate working directory is set
+    # Format: "project-name (sessionId)" e.g. "konsolai (06a8ac8b)"
+    tabs_with_projects = [t for t in session_tabs if "(" in t.name]
+    check("session tabs have project names", len(tabs_with_projects) >= 1,
+          f"count={len(tabs_with_projects)}, names={[t.name for t in tabs_with_projects[:3]]}")
+
+    # Verify session panel tree has items (worktree menu attaches to these)
+    tree_items = backend.find_widget("konsolai", role="tree_item")
+    session_items = [t for t in tree_items if "Sessions" in t.path]
+    check("session tree items available for context menu", len(session_items) > 0,
+          f"count={len(session_items)}")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -321,13 +349,16 @@ def main():
         print("Make sure konsolai is running with QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1")
         sys.exit(2)
 
-    test_tab_click(backend)
+    # Non-mutating tests first (don't change window title/active tab)
     test_status_bar_updates(backend)
     test_menu_structure(backend)
     test_session_panel_interaction(backend)
     test_toolbar_button_states(backend)
     test_window_properties(backend)
     test_multiple_tab_reads(backend)
+    test_worktree_prerequisites(backend)
+    # Tab click LAST — changes window title, invalidates cached widget paths
+    test_tab_click(backend)
 
     print("\n" + "=" * 50)
     print(f"Results: {_passed} passed, {_failed} failed")
