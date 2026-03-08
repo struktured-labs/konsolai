@@ -434,6 +434,59 @@ def test_notification_sound_paths():
               f"checked: {local_path}, {system_path}")
 
 
+def test_status_reflects_active_session(backend: AtspiBackend):
+    """Status bar should show 'Not Running' for bash tabs or session state for Claude tabs."""
+    print("\n[Status Bar Reflects Active Session]")
+    tree = backend.get_widget_tree("konsolai", max_depth=4)
+
+    def find_child_r(node, role="", name=""):
+        if role and node.info.role != role:
+            pass
+        elif name and name.lower() not in node.info.name.lower():
+            pass
+        elif role or name:
+            return node
+        for child in node.children:
+            result = find_child_r(child, role, name)
+            if result:
+                return result
+        return None
+
+    def find_all_r(node, role="", name=""):
+        results = []
+        matches = True
+        if role and node.info.role != role:
+            matches = False
+        if name and name.lower() not in node.info.name.lower():
+            matches = False
+        if matches and (role or name):
+            results.append(node)
+        for child in node.children:
+            results.extend(find_all_r(child, role, name))
+        return results
+
+    status_bar = find_child_r(tree, role="status_bar")
+    check("status_bar found", status_bar is not None)
+    if not status_bar:
+        return
+
+    labels = find_all_r(status_bar, role="label")
+    status_labels = [l for l in labels if "Claude:" in l.info.name]
+    check("status label shows Claude state", len(status_labels) >= 1)
+
+    if status_labels:
+        text = status_labels[0].info.name
+        # Must show one of the known states
+        valid_states = ["Idle", "Working", "Waiting", "Not Running", "Starting", "Error"]
+        has_state = any(s in text for s in valid_states)
+        check("status shows valid state", has_state, f"text={text[:60]}")
+
+        # If Claude session is active, status should have model name
+        if "Not Running" not in text:
+            check("active session shows model", "opus" in text or "sonnet" in text or "haiku" in text,
+                  f"text={text[:60]}")
+
+
 def test_subagent_subprocess_nodes(backend: AtspiBackend):
     """If any session has subagents or subprocesses, they should appear in the tree."""
     print("\n[Subagent/Subprocess Nodes]")
@@ -484,6 +537,7 @@ def main():
     test_filter_field(backend)
     test_notification_sound_paths()
     test_subagent_subprocess_nodes(backend)
+    test_status_reflects_active_session(backend)
     # Tab click LAST — changes window title, invalidates cached widget paths
     test_tab_click(backend)
 
