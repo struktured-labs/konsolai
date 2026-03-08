@@ -1393,45 +1393,50 @@ QString ClaudeSession::getTranscript(int lines)
 
 void ClaudeSession::setYoloMode(bool enabled)
 {
-    if (m_yoloMode != enabled) {
+    bool changed = (m_yoloMode != enabled);
+    if (changed) {
         m_yoloMode = enabled;
         qDebug() << "ClaudeSession::setYoloMode:" << enabled << "current state:" << static_cast<int>(claudeState());
         Q_EMIT yoloModeChanged(enabled);
+    }
 
-        // Write yolo state file for hook handler to read
-        // File location: same as socket but with .yolo extension
-        if (m_hookHandler) {
-            QString yoloPath = m_hookHandler->socketPath();
-            yoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo"));
+    // Always sync the .yolo file to match state — even if the value didn't
+    // change. Stale files from previous launches must be cleaned up.
+    // Try hook handler path first, fall back to data dir + session ID.
+    QString yoloPath;
+    if (m_hookHandler) {
+        yoloPath = m_hookHandler->socketPath();
+        yoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo"));
+    } else {
+        QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+        yoloPath = dataDir + QStringLiteral("/konsolai/sessions/") + m_sessionId + QStringLiteral(".yolo");
+    }
 
-            if (enabled) {
-                // Create the yolo file
-                QFile yoloFile(yoloPath);
-                if (yoloFile.open(QIODevice::WriteOnly)) {
-                    yoloFile.write("1");
-                    yoloFile.close();
-                    qDebug() << "ClaudeSession: Created yolo state file:" << yoloPath;
-                }
-                // Also start terminal polling as a fallback
-                startPermissionPolling();
-
-                // If a permission prompt is already showing, approve it now
-                // (unless budget gate is active)
-                if (claudeState() == ClaudeProcess::State::WaitingInput && !(m_budgetController && m_budgetController->shouldBlockYolo())) {
-                    qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving always immediately";
-                    QTimer::singleShot(100, this, [this]() {
-                        approvePermissionAlways();
-                        logApproval(QStringLiteral("permission"), QStringLiteral("auto-approved"), 1);
-                    });
-                }
-            } else {
-                // Remove the yolo file
-                if (QFile::exists(yoloPath)) {
-                    QFile::remove(yoloPath);
-                    qDebug() << "ClaudeSession: Removed yolo state file:" << yoloPath;
-                }
-                stopPermissionPolling();
+    if (enabled) {
+        QFile yoloFile(yoloPath);
+        if (yoloFile.open(QIODevice::WriteOnly)) {
+            yoloFile.write("1");
+            yoloFile.close();
+            qDebug() << "ClaudeSession: Created yolo state file:" << yoloPath;
+        }
+        if (changed) {
+            startPermissionPolling();
+            // If a permission prompt is already showing, approve it now
+            if (claudeState() == ClaudeProcess::State::WaitingInput && !(m_budgetController && m_budgetController->shouldBlockYolo())) {
+                qDebug() << "ClaudeSession: Permission prompt already showing - auto-approving always immediately";
+                QTimer::singleShot(100, this, [this]() {
+                    approvePermissionAlways();
+                    logApproval(QStringLiteral("permission"), QStringLiteral("auto-approved"), 1);
+                });
             }
+        }
+    } else {
+        if (QFile::exists(yoloPath)) {
+            QFile::remove(yoloPath);
+            qDebug() << "ClaudeSession: Removed yolo state file:" << yoloPath;
+        }
+        if (changed) {
+            stopPermissionPolling();
         }
     }
 }

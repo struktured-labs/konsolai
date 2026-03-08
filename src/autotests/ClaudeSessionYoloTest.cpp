@@ -649,6 +649,31 @@ void ClaudeSessionYoloTest::testSetTripleYoloMode_CreatesAndRemovesTeamFile()
     QVERIFY2(!QFile::exists(teamYoloPath), "Team yolo file should be removed after disabling");
 }
 
+void ClaudeSessionYoloTest::testSetYoloMode_CleansStaleFileWhenAlreadyOff()
+{
+    // Regression test: stale .yolo file from a previous Konsolai launch
+    // should be cleaned up even when setYoloMode(false) is called on a
+    // session that already has m_yoloMode=false (the old guard skipped this).
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    QString yoloPath = dataDir + QStringLiteral("/konsolai/sessions/") + session.sessionId() + QStringLiteral(".yolo");
+    QDir().mkpath(QFileInfo(yoloPath).absolutePath());
+
+    // Simulate stale .yolo file from previous launch
+    QFile staleFile(yoloPath);
+    QVERIFY(staleFile.open(QIODevice::WriteOnly));
+    staleFile.write("1");
+    staleFile.close();
+    QVERIFY(QFile::exists(yoloPath));
+
+    // Session starts with yoloMode=false (default). Calling setYoloMode(false)
+    // should still clean up the stale file.
+    QVERIFY(!session.yoloMode());
+    session.setYoloMode(false);
+    QVERIFY2(!QFile::exists(yoloPath), "Stale yolo file should be removed even when already off");
+}
+
 // ============================================================
 // hasActiveTeam and subagent tracking tests
 // ============================================================

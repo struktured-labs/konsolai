@@ -74,6 +74,7 @@ private Q_SLOTS:
     // Yolo file management
     void testSetYoloMode_CreatesAndRemovesFile();
     void testSetTripleYoloMode_CreatesAndRemovesTeamFile();
+    void testSetYoloMode_CleansStaleFileWhenAlreadyOff();
 
     // Tool input/output in approval log
     void testLogApproval_WithToolInput();

@@ -6,8 +6,14 @@
 - Build system: CMake + Ninja
 
 ## Testing
+- **MANDATORY**: Every feature, bug fix, or behavioral change MUST have an automated test before it's considered complete.
+  - C++ unit tests (`src/autotests/`) for logic, state machines, data structures
+  - GUI tests (`Testing/`) for UI behavior, widget state, interaction flows
+  - If a bug was found without a test, add a test that reproduces it BEFORE fixing it
 - Run `ctest --test-dir build/ --output-on-failure` after changes to Claude integration code.
+- Run `bash Testing/run-all-gui-tests.sh` for GUI validation against a live instance.
 - Claude integration tests are in `src/autotests/Claude*.cpp` and `src/autotests/T*.cpp` (TmuxManager, TokenUsage, etc.)
+- GUI tests are in `Testing/gui-smoke-test.py`, `Testing/gui-interaction-test.py`, `Testing/gui-lifecycle-test.py`
 - Tests use QTest framework (`QTEST_GUILESS_MAIN` for non-GUI, `QTEST_MAIN` for widget tests).
 - Test libraries: `Qt::Test Qt::Network konsolai_claude konsoleprivate`
 
