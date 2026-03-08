@@ -2278,6 +2278,14 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         }
 
+        // Create worktree session from this session's project
+        if (!meta.workingDirectory.isEmpty()) {
+            QAction *worktreeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("New Worktree Session..."));
+            connect(worktreeAction, &QAction::triggered, this, [this, meta]() {
+                Q_EMIT worktreeSessionRequested(meta.workingDirectory);
+            });
+        }
+
         menu.addSeparator();
 
         QAction *closeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("process-stop")), i18n("Close"));

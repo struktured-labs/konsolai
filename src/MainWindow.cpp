@@ -722,6 +722,89 @@ void MainWindow::setupActions()
         triggerAction(QStringLiteral("new-tab"));
     });
 
+    // Worktree session: open wizard pre-configured for git worktree from source dir
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::worktreeSessionRequested, this, [this](const QString &sourceWorkingDir) {
+        // Find the Claude profile
+        Konsole::Profile::Ptr claudeProfile;
+        const QList<Konsole::Profile::Ptr> profiles = Konsole::ProfileManager::instance()->allProfiles();
+        for (const Konsole::Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Konsole::Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+        if (!claudeProfile) {
+            return;
+        }
+
+        Konsolai::ClaudeSessionWizard wizard(this);
+        wizard.setProfile(claudeProfile);
+        wizard.setWorktreeSource(sourceWorkingDir);
+        wizard.setWindowTitle(i18n("New Worktree Session"));
+
+        if (wizard.exec() != QDialog::Accepted) {
+            return;
+        }
+
+        // The rest of session creation follows the same path as new-tab
+        QString workDir = wizard.selectedDirectory();
+        if (workDir.isEmpty()) {
+            return;
+        }
+
+        // Handle git worktree creation
+        if (!wizard.worktreeBranch().isEmpty()) {
+            QString branchName = wizard.worktreeBranch();
+            QString repoRoot = wizard.repoRoot();
+
+            QProcess checkBranch;
+            checkBranch.start(
+                QStringLiteral("git"),
+                {QStringLiteral("-C"), repoRoot, QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("refs/heads/") + branchName});
+            checkBranch.waitForFinished(5000);
+            bool branchExists = (checkBranch.exitCode() == 0);
+
+            QStringList args = {QStringLiteral("-C"), repoRoot, QStringLiteral("worktree"), QStringLiteral("add")};
+            if (!branchExists) {
+                args << QStringLiteral("-b") << branchName << workDir;
+            } else {
+                args << workDir << branchName;
+            }
+
+            int exitCode = QProcess::execute(QStringLiteral("git"), args);
+            if (exitCode != 0) {
+                qWarning() << "Failed to create git worktree:" << args;
+                return;
+            }
+            qDebug() << "Created git worktree:" << workDir << "branch:" << branchName;
+        }
+
+        // Create the session
+        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
+        QString taskPrompt = wizard.taskPrompt();
+        if (!taskPrompt.isEmpty()) {
+            claudeSession->setTaskDescription(taskPrompt);
+        }
+
+        Konsole::SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+        claudeSession->setInitialWorkingDirectory(workDir);
+
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
+
+        _sessionPanel->registerSession(claudeSession);
+        auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+        if (registry) {
+            registry->registerSession(claudeSession);
+        }
+        _claudeMenu->setActiveSession(claudeSession);
+        _claudeStatusWidget->setSession(claudeSession);
+    });
+
     // Update status widget with aggregated weekly/monthly usage
     auto updateUsageAggregates = [this]() {
         auto *settings = Konsolai::KonsolaiSettings::instance();

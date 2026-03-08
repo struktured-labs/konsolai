@@ -111,6 +111,34 @@ void ClaudeSessionWizard::setDefaultDirectory(const QString &path)
     m_defaultDirectory = path;
 }
 
+void ClaudeSessionWizard::setWorktreeSource(const QString &sourceWorkingDir)
+{
+    // Set the project root to the parent of the source session's working dir
+    m_defaultDirectory = QFileInfo(sourceWorkingDir).absolutePath();
+    if (m_projectRootEdit) {
+        m_projectRootEdit->setText(m_defaultDirectory);
+    }
+
+    // Switch git mode to Worktree
+    if (m_gitModeCombo) {
+        m_gitModeCombo->setCurrentIndex(GitWorktree);
+    }
+
+    // Fill the source repo field
+    if (m_sourceRepoEdit) {
+        m_sourceRepoEdit->setText(sourceWorkingDir);
+    }
+
+    // Detect git state for the source dir
+    detectGitState(sourceWorkingDir);
+
+    // Focus the prompt field — user types what they want to do
+    if (m_promptEdit) {
+        m_promptEdit->setFocus();
+        m_promptEdit->setPlaceholderText(i18n("Describe the task for this worktree branch..."));
+    }
+}
+
 QString ClaudeSessionWizard::selectedDirectory() const
 {
     if (m_useExistingDir) {

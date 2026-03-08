@@ -277,6 +277,11 @@ Q_SIGNALS:
     void remoteSessionRequested(const QString &sshHost, const QString &sshUsername, int sshPort, const QString &workDir);
 
     /**
+     * Emitted when user wants to create a worktree session from an existing session
+     */
+    void worktreeSessionRequested(const QString &sourceWorkingDir);
+
+    /**
      * Emitted when user wants to resume a specific conversation in a directory.
      * Works for both local and remote sessions.
      */

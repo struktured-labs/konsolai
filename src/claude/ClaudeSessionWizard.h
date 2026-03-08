@@ -56,6 +56,12 @@ public:
     void setProfile(const Konsole::Profile::Ptr &profile);
     void setDefaultDirectory(const QString &path);
 
+    /**
+     * Pre-populate the wizard for creating a worktree from an existing session.
+     * Sets git mode to GitWorktree, fills the source repo, and focuses the prompt.
+     */
+    void setWorktreeSource(const QString &sourceWorkingDir);
+
     QString selectedDirectory() const;
     bool shouldInitGit() const;
     QString worktreeBranch() const;
