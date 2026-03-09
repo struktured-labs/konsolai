@@ -314,6 +314,17 @@ ViewManager *MainWindow::viewManager() const
     return _viewManager;
 }
 
+void MainWindow::setControllerShortcutContext(SessionController *controller, Qt::ShortcutContext context)
+{
+    if (!controller || !controller->isValid()) {
+        return;
+    }
+    const auto actions = controller->actionCollection()->actions();
+    for (QAction *action : actions) {
+        action->setShortcutContext(context);
+    }
+}
+
 void MainWindow::disconnectController(SessionController *controller)
 {
     if (!controller) {
@@ -370,6 +381,10 @@ void MainWindow::activeViewChanged(SessionController *controller)
     }
 
     if (!_pluggedController.isNull()) {
+        // Restore widget-scoped shortcuts for the outgoing controller so its
+        // shortcuts no longer fire from non-terminal widgets (sidebar, etc.)
+        setControllerShortcutContext(_pluggedController, Qt::WidgetWithChildrenShortcut);
+
         if (skipGuiFactorySwap) {
             // Lightweight disconnect: just remove signals and event filter,
             // skip the expensive guiFactory()->removeClient() call.
@@ -385,6 +400,10 @@ void MainWindow::activeViewChanged(SessionController *controller)
     }
 
     _pluggedController = controller;
+
+    // Promote the active controller's shortcuts to window scope so they work
+    // even when focus is on the sidebar panels (session/agent manager).
+    setControllerShortcutContext(controller, Qt::WindowShortcut);
     if (auto view = _pluggedController->view()) {
         view->installEventFilter(this);
     }
@@ -569,11 +588,11 @@ void MainWindow::setupActions()
         }
     });
 
-    // Quick Session Switcher (Ctrl+Shift+P)
+    // Quick Session Switcher — Ctrl+Alt+P to avoid conflict with Print (Ctrl+Shift+P)
     action = collection->addAction(QStringLiteral("session-switcher"));
     action->setIcon(QIcon::fromTheme(QStringLiteral("system-search")));
     action->setText(i18nc("@action:inmenu", "Quick Session Switcher"));
-    collection->setDefaultShortcut(action, Qt::CTRL | Qt::SHIFT | Qt::Key_P);
+    collection->setDefaultShortcut(action, Qt::CTRL | Qt::ALT | Qt::Key_P);
     connect(action, &QAction::triggered, this, &MainWindow::showSessionSwitcher);
 
     // Claude Menu
