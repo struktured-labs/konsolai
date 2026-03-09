@@ -17,6 +17,7 @@
 // Konsolai
 #include "../claude/ClaudeProcess.h"
 #include "../claude/ClaudeSession.h"
+#include "../claude/SessionManagerPanel.h"
 
 using namespace Konsolai;
 
@@ -580,6 +581,257 @@ void YoloPollingTest::testTrySuggestionsFirst_DefaultTrue()
 {
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
     QVERIFY2(session.trySuggestionsFirst(), "Default trySuggestionsFirst should be true (double yolo fires before triple)");
+}
+
+// ============================================================
+// Multi-Session Isolation
+// ============================================================
+
+void YoloPollingTest::testTripleYolo_IsolatedTimers()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Enable triple yolo on A only
+    sessionA.setTripleYoloMode(true);
+
+    // A should have idle polling timer
+    QVERIFY2(hasActiveTimerWithInterval(&sessionA, 2000), "Session A should have idle polling after enabling triple yolo");
+
+    // B should NOT have idle polling timer
+    QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 2000), "Session B must NOT have idle polling — triple yolo was only enabled on A");
+}
+
+void YoloPollingTest::testTripleYolo_IsolatedState()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    sessionA.setTripleYoloMode(true);
+
+    QVERIFY(sessionA.tripleYoloMode());
+    QVERIFY2(!sessionB.tripleYoloMode(), "Session B's triple yolo must remain false when only A is enabled");
+
+    // Enable on B too
+    sessionB.setTripleYoloMode(true);
+    QVERIFY(sessionB.tripleYoloMode());
+
+    // Disable on A
+    sessionA.setTripleYoloMode(false);
+    QVERIFY(!sessionA.tripleYoloMode());
+    QVERIFY2(sessionB.tripleYoloMode(), "Session B's triple yolo must stay enabled after disabling A");
+}
+
+void YoloPollingTest::testTripleYolo_IsolatedPrompt()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Both start with the same default prompt
+    QString defaultPrompt = sessionA.autoContinuePrompt();
+    QCOMPARE(sessionB.autoContinuePrompt(), defaultPrompt);
+
+    // Customize A's prompt
+    QString customPrompt = QStringLiteral("Session A custom prompt");
+    sessionA.setAutoContinuePrompt(customPrompt);
+
+    QCOMPARE(sessionA.autoContinuePrompt(), customPrompt);
+    QVERIFY2(sessionB.autoContinuePrompt() != customPrompt, "Session B's prompt must not be affected by changing A's prompt");
+    QCOMPARE(sessionB.autoContinuePrompt(), defaultPrompt);
+}
+
+void YoloPollingTest::testTripleYolo_IsolatedApprovalCounts()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Log approvals to session A
+    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+
+    // Log one approval to session B
+    sessionB.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+
+    QCOMPARE(sessionA.tripleYoloApprovalCount(), 3);
+    QCOMPARE(sessionB.tripleYoloApprovalCount(), 1);
+    QVERIFY2(sessionA.tripleYoloApprovalCount() != sessionB.tripleYoloApprovalCount(), "Approval counts must be independent per-session");
+
+    // Also verify total counts
+    QCOMPARE(sessionA.totalApprovalCount(), 3);
+    QCOMPARE(sessionB.totalApprovalCount(), 1);
+}
+
+void YoloPollingTest::testTripleYolo_IsolatedTmuxManagers()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Each session must have its own TmuxManager instance
+    QVERIFY(sessionA.tmuxManager() != nullptr);
+    QVERIFY(sessionB.tmuxManager() != nullptr);
+    QVERIFY2(sessionA.tmuxManager() != sessionB.tmuxManager(),
+             "Each session must have its own TmuxManager — shared instances would route prompts to wrong session");
+}
+
+void YoloPollingTest::testTripleYolo_DisableOneKeepsOther()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Enable triple yolo on both
+    sessionA.setTripleYoloMode(true);
+    sessionB.setTripleYoloMode(true);
+
+    QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
+    QVERIFY(hasActiveTimerWithInterval(&sessionB, 2000));
+
+    // Disable on A only
+    sessionA.setTripleYoloMode(false);
+
+    QVERIFY2(!hasActiveTimerWithInterval(&sessionA, 2000), "Session A's idle polling must stop after disabling triple yolo");
+    QVERIFY2(hasActiveTimerWithInterval(&sessionB, 2000), "Session B's idle polling must continue — only A was disabled");
+}
+
+void YoloPollingTest::testTripleYolo_IsolatedIdlePolling()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Enable double on A, triple on B — both use idle polling
+    sessionA.setDoubleYoloMode(true);
+    sessionB.setTripleYoloMode(true);
+
+    // Both should have idle polling but independent timers
+    QTimer *timerA = findTimerByInterval(&sessionA, 2000);
+    QTimer *timerB = findTimerByInterval(&sessionB, 2000);
+
+    QVERIFY(timerA);
+    QVERIFY(timerB);
+    QVERIFY2(timerA != timerB, "Idle polling timers must be separate objects");
+
+    // Timer A is owned by session A
+    QCOMPARE(timerA->parent(), &sessionA);
+    // Timer B is owned by session B
+    QCOMPARE(timerB->parent(), &sessionB);
+}
+
+void YoloPollingTest::testTripleYolo_FullIsolationAllLevels()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    // Enable all three yolo levels on session A
+    sessionA.setYoloMode(true);
+    sessionA.setDoubleYoloMode(true);
+    sessionA.setTripleYoloMode(true);
+
+    // Session B should have NO yolo activity
+    QVERIFY(!sessionB.yoloMode());
+    QVERIFY(!sessionB.doubleYoloMode());
+    QVERIFY(!sessionB.tripleYoloMode());
+    QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 300), "Session B must have no permission polling");
+    QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 2000), "Session B must have no idle polling");
+
+    // Session A should have all timers
+    QVERIFY(hasActiveTimerWithInterval(&sessionA, 300));
+    QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
+
+    // Log approvals to A
+    sessionA.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    sessionA.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
+    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+
+    QCOMPARE(sessionA.totalApprovalCount(), 3);
+    QCOMPARE(sessionB.totalApprovalCount(), 0);
+}
+
+void YoloPollingTest::testTripleYolo_DestroyOneSessionKeepsOther()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    auto *sessionB = new ClaudeSession(QStringLiteral("test-b"), QDir::tempPath());
+
+    sessionA.setTripleYoloMode(true);
+    sessionB->setTripleYoloMode(true);
+
+    QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
+    QVERIFY(hasActiveTimerWithInterval(sessionB, 2000));
+
+    // Destroy session B
+    delete sessionB;
+
+    // Session A's timer must survive
+    QVERIFY2(hasActiveTimerWithInterval(&sessionA, 2000), "Session A's idle polling must survive destruction of session B");
+    QVERIFY(sessionA.tripleYoloMode());
+}
+
+void YoloPollingTest::testTripleYolo_CustomPromptIsolation()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+    ClaudeSession sessionC(QStringLiteral("test-c"), QDir::tempPath());
+
+    // Set different prompts on each session
+    sessionA.setAutoContinuePrompt(QStringLiteral("Keep going A"));
+    sessionB.setAutoContinuePrompt(QStringLiteral("Continue B"));
+    // C keeps default
+
+    QCOMPARE(sessionA.autoContinuePrompt(), QStringLiteral("Keep going A"));
+    QCOMPARE(sessionB.autoContinuePrompt(), QStringLiteral("Continue B"));
+    QVERIFY(sessionC.autoContinuePrompt() != QStringLiteral("Keep going A"));
+    QVERIFY(sessionC.autoContinuePrompt() != QStringLiteral("Continue B"));
+
+    // Changing A's prompt again doesn't affect B or C
+    sessionA.setAutoContinuePrompt(QStringLiteral("New prompt A"));
+    QCOMPARE(sessionA.autoContinuePrompt(), QStringLiteral("New prompt A"));
+    QCOMPARE(sessionB.autoContinuePrompt(), QStringLiteral("Continue B"));
+}
+
+void YoloPollingTest::testTripleYolo_HookDeliveredIdleIsolation()
+{
+    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
+    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
+
+    sessionA.setTripleYoloMode(true);
+    sessionB.setTripleYoloMode(true);
+
+    // Simulate hook-delivered idle on session A only
+    auto *processA = sessionA.claudeProcess();
+    processA->handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
+    processA->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    QCOMPARE(processA->state(), ClaudeProcess::State::Idle);
+
+    // Session B's process should still be in initial state (NotRunning)
+    auto *processB = sessionB.claudeProcess();
+    QVERIFY2(processB->state() != ClaudeProcess::State::Idle, "Session B's state must not be affected by hook events on session A");
+
+    // Both sessions should have their idle polling timers running independently
+    QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
+    QVERIFY(hasActiveTimerWithInterval(&sessionB, 2000));
+}
+
+void YoloPollingTest::testTripleYolo_MetadataPersistenceIsolation()
+{
+    // Verify that SessionMetadata yolo fields are independent per-session
+    SessionMetadata metaA;
+    metaA.sessionId = QStringLiteral("session-a");
+    metaA.tripleYoloMode = true;
+    metaA.tripleYoloApprovalCount = 42;
+
+    SessionMetadata metaB;
+    metaB.sessionId = QStringLiteral("session-b");
+    metaB.tripleYoloMode = false;
+    metaB.tripleYoloApprovalCount = 0;
+
+    // Verify they don't share state
+    QVERIFY(metaA.tripleYoloMode);
+    QVERIFY(!metaB.tripleYoloMode);
+    QCOMPARE(metaA.tripleYoloApprovalCount, 42);
+    QCOMPARE(metaB.tripleYoloApprovalCount, 0);
+
+    // Modifying A doesn't affect B
+    metaA.tripleYoloApprovalCount = 100;
+    QCOMPARE(metaB.tripleYoloApprovalCount, 0);
 }
 
 QTEST_GUILESS_MAIN(YoloPollingTest)

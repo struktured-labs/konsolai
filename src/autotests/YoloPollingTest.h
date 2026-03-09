@@ -122,6 +122,44 @@ private Q_SLOTS:
 
     // Default trySuggestionsFirst is true
     void testTrySuggestionsFirst_DefaultTrue();
+
+    // ========== Multi-Session Isolation ==========
+
+    // Triple yolo on session A does NOT start timers on session B
+    void testTripleYolo_IsolatedTimers();
+
+    // Enabling triple yolo on one session doesn't affect other session's state
+    void testTripleYolo_IsolatedState();
+
+    // Each session has its own auto-continue prompt
+    void testTripleYolo_IsolatedPrompt();
+
+    // Approval counts are per-session, not shared
+    void testTripleYolo_IsolatedApprovalCounts();
+
+    // Each session's TmuxManager is independent (different instances)
+    void testTripleYolo_IsolatedTmuxManagers();
+
+    // Disabling triple yolo on one session doesn't affect the other
+    void testTripleYolo_DisableOneKeepsOther();
+
+    // Idle polling timers are per-session, independent
+    void testTripleYolo_IsolatedIdlePolling();
+
+    // All three yolo levels on session A, none on session B
+    void testTripleYolo_FullIsolationAllLevels();
+
+    // Session destruction doesn't affect other sessions' timers
+    void testTripleYolo_DestroyOneSessionKeepsOther();
+
+    // Custom prompt on session A doesn't affect session B's prompt
+    void testTripleYolo_CustomPromptIsolation();
+
+    // Hook-delivered idle on session A doesn't suppress polling on session B
+    void testTripleYolo_HookDeliveredIdleIsolation();
+
+    // Persisted yolo metadata is per-session
+    void testTripleYolo_MetadataPersistenceIsolation();
 };
 
 }
