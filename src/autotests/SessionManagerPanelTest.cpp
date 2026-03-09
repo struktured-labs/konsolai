@@ -1598,6 +1598,49 @@ void SessionManagerPanelTest::testTreePersistedAgentsForcedNotRunning()
 }
 
 // ============================================================
+// Pin immediate tree update
+// ============================================================
+
+void SessionManagerPanelTest::testPinSession_ImmediateTreeUpdate()
+{
+    // Verify that pinSession() moves the item into the Pinned category immediately
+    // (no deferred timer, no processEvents needed)
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("imm11111"), QStringLiteral("konsolai-test-imm11111"), false));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Find the "Pinned" category
+    QTreeWidgetItem *pinnedCat = nullptr;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (tree->topLevelItem(i)->text(0).contains(QStringLiteral("Pinned"))) {
+            pinnedCat = tree->topLevelItem(i);
+            break;
+        }
+    }
+    QVERIFY(pinnedCat);
+    QCOMPARE(pinnedCat->childCount(), 0);
+
+    // Pin without processEvents — should update tree immediately
+    panel.pinSession(QStringLiteral("imm11111"));
+
+    // Re-find pinned category (tree was rebuilt)
+    pinnedCat = nullptr;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (tree->topLevelItem(i)->text(0).contains(QStringLiteral("Pinned"))) {
+            pinnedCat = tree->topLevelItem(i);
+            break;
+        }
+    }
+    QVERIFY(pinnedCat);
+    QVERIFY(pinnedCat->childCount() > 0);
+}
+
+// ============================================================
 // Timer pause/resume (window activation)
 // ============================================================
 
@@ -1733,6 +1776,73 @@ void SessionManagerPanelTest::testRegisterSessionFastPath()
     const SessionMetadata *meta = panel.sessionMetadata(session.sessionId());
     QVERIFY(meta);
     QVERIFY(meta->lastAccessed.secsTo(QDateTime::currentDateTime()) < 5);
+}
+
+// ============================================================
+// Auto-archive old closed sessions
+// ============================================================
+
+void SessionManagerPanelTest::testAutoArchiveClosedSessions()
+{
+    // Create a closed (expired) session with lastAccessed 8 days ago
+    QJsonArray sessions;
+    QJsonObject old = makeSession(QStringLiteral("old11111"), QStringLiteral("konsolai-test-old11111"), false, false, true);
+    old[QStringLiteral("lastAccessed")] = QDateTime::currentDateTime().addDays(-8).toString(Qt::ISODate);
+    sessions.append(old);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QCOMPARE(panel.allSessions().size(), 1);
+
+    // Verify it's expired but not archived
+    const SessionMetadata *meta = panel.sessionMetadata(QStringLiteral("old11111"));
+    QVERIFY(meta);
+    QVERIFY(meta->isExpired);
+    QVERIFY(!meta->isArchived);
+
+    // Trigger auto-archive (normally runs on timer)
+    panel.autoArchiveOldClosedSessions();
+
+    // Should now be archived
+    meta = panel.sessionMetadata(QStringLiteral("old11111"));
+    QVERIFY(meta);
+    QVERIFY(meta->isArchived);
+}
+
+void SessionManagerPanelTest::testAutoArchiveSkipsPinned()
+{
+    // Create a closed (expired) pinned session with lastAccessed 8 days ago
+    QJsonArray sessions;
+    QJsonObject pinned = makeSession(QStringLiteral("pin11111"), QStringLiteral("konsolai-test-pin11111"), true, false, true);
+    pinned[QStringLiteral("lastAccessed")] = QDateTime::currentDateTime().addDays(-8).toString(Qt::ISODate);
+    sessions.append(pinned);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    panel.autoArchiveOldClosedSessions();
+
+    // Should NOT be archived because it's pinned
+    const SessionMetadata *meta = panel.sessionMetadata(QStringLiteral("pin11111"));
+    QVERIFY(meta);
+    QVERIFY(!meta->isArchived);
+}
+
+void SessionManagerPanelTest::testAutoArchiveSkipsRecent()
+{
+    // Create a closed (expired) session with lastAccessed 3 days ago (under threshold)
+    QJsonArray sessions;
+    QJsonObject recent = makeSession(QStringLiteral("rec11111"), QStringLiteral("konsolai-test-rec11111"), false, false, true);
+    recent[QStringLiteral("lastAccessed")] = QDateTime::currentDateTime().addDays(-3).toString(Qt::ISODate);
+    sessions.append(recent);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    panel.autoArchiveOldClosedSessions();
+
+    // Should NOT be archived because it's only 3 days old
+    const SessionMetadata *meta = panel.sessionMetadata(QStringLiteral("rec11111"));
+    QVERIFY(meta);
+    QVERIFY(!meta->isArchived);
 }
 
 QTEST_MAIN(SessionManagerPanelTest)

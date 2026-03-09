@@ -44,6 +44,10 @@ def check(name: str, condition: bool, detail: str = ""):
         _errors.append(f"{name}: {detail}" if detail else name)
 
 
+def skip(name: str):
+    print(f"  SKIP  {name}")
+
+
 def find_child(node: WidgetNode, role: str = "", name: str = "") -> WidgetNode | None:
     """Recursively find a child node by role and/or name substring."""
     if role and node.info.role != role:
@@ -167,9 +171,15 @@ def test_status_bar(backend: AtspiBackend):
         text = status_labels[0].info.name
         check("shows state", any(s in text for s in ["Idle", "Working", "Waiting", "Not Running"]),
               f"text={text[:80]}")
-        check("shows model name", "opus" in text or "sonnet" in text or "haiku" in text,
-              f"text={text[:80]}")
-        check("shows Ctx: percent", "Ctx:" in text, f"text={text[:80]}")
+        # Model/context only shown when a Claude session is active
+        has_active = "Not Running" not in text
+        if has_active:
+            check("shows model name", "opus" in text or "sonnet" in text or "haiku" in text,
+                  f"text={text[:80]}")
+            check("shows Ctx: percent", "Ctx:" in text, f"text={text[:80]}")
+        else:
+            skip("shows model name (no active session)")
+            skip("shows Ctx: percent (no active session)")
 
 
 def test_tabs(backend: AtspiBackend):
@@ -277,19 +287,26 @@ def test_status_bar_content(backend: AtspiBackend):
     has_state = any(s in text for s in ["Idle", "Working", "Waiting", "Not Running", "Starting", "Error"])
     check("status contains state", has_state, f"text={text[:60]}")
 
-    # Context percent: "Ctx:NN%"
-    ctx_match = re.search(r"Ctx:(\d+)%", text)
-    check("status contains Ctx:N%", ctx_match is not None, f"text={text[:80]}")
-    if ctx_match:
-        ctx_pct = int(ctx_match.group(1))
-        check("context percent 0-100", 0 <= ctx_pct <= 100, f"ctx={ctx_pct}%")
+    # Token/context/cost only present when a Claude session is active
+    has_active = "Not Running" not in text
+    if has_active:
+        # Context percent: "Ctx:NN%"
+        ctx_match = re.search(r"Ctx:(\d+)%", text)
+        check("status contains Ctx:N%", ctx_match is not None, f"text={text[:80]}")
+        if ctx_match:
+            ctx_pct = int(ctx_match.group(1))
+            check("context percent 0-100", 0 <= ctx_pct <= 100, f"ctx={ctx_pct}%")
 
-    # Token usage: "NNN.NK↑ NNN.NK↓"
-    check("status contains token arrows", "↑" in text and "↓" in text, f"text={text[:80]}")
+        # Token usage: "NNN.NK↑ NNN.NK↓"
+        check("status contains token arrows", "↑" in text and "↓" in text, f"text={text[:80]}")
 
-    # Cost: "($N.NN)"
-    cost_match = re.search(r"\(\$[\d.]+\)", text)
-    check("status contains cost", cost_match is not None, f"text={text[:80]}")
+        # Cost: "($N.NN)"
+        cost_match = re.search(r"\(\$[\d.]+\)", text)
+        check("status contains cost", cost_match is not None, f"text={text[:80]}")
+    else:
+        skip("status contains Ctx:N% (no active session)")
+        skip("status contains token arrows (no active session)")
+        skip("status contains cost (no active session)")
 
 
 def test_tab_switching(backend: AtspiBackend):
@@ -334,6 +351,32 @@ def test_session_tree_structure(backend: AtspiBackend):
     if session_tree:
         check("session tree has children", session_tree.info.children_count > 0,
               f"count={session_tree.info.children_count}")
+
+
+def test_session_tree_categories(backend: AtspiBackend):
+    """Session tree must have category nodes (Pinned, Active, Detached, etc.)."""
+    print("\n[Session Tree Categories]")
+    tree_widget = backend.get_widget_tree("konsolai", max_depth=6)
+    sessions_panel = find_child(tree_widget, name="Sessions")
+    if not sessions_panel:
+        skip("Sessions panel not found")
+        return
+
+    session_tree = find_child(sessions_panel, role="tree")
+    if not session_tree:
+        skip("session tree not found")
+        return
+
+    # Check for expected category nodes
+    pinned_cat = find_child(session_tree, name="Pinned")
+    active_cat = find_child(session_tree, name="Active")
+    check("Pinned category exists", pinned_cat is not None)
+    check("Active category exists", active_cat is not None)
+
+    # If there are pinned sessions, they should be under the Pinned node
+    if pinned_cat and pinned_cat.info.children_count > 0:
+        check("Pinned category has entries", True,
+              f"count={pinned_cat.info.children_count}")
 
 
 def test_notification_overlay(backend: AtspiBackend):
@@ -387,6 +430,7 @@ def main():
     # Interaction tests
     test_tab_switching(backend)
     test_session_tree_structure(backend)
+    test_session_tree_categories(backend)
     test_notification_overlay(backend)
 
     print("\n" + "=" * 50)

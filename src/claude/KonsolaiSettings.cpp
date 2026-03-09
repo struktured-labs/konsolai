@@ -358,6 +358,21 @@ void KonsolaiSettings::setNotificationYoloEnabled(bool enabled)
     Q_EMIT settingsChanged();
 }
 
+// ========== Agent Fleet Settings ==========
+
+QString KonsolaiSettings::agentFleetPath() const
+{
+    KConfigGroup group(m_config, QStringLiteral("AgentFleet"));
+    return group.readEntry("FleetPath", QString());
+}
+
+void KonsolaiSettings::setAgentFleetPath(const QString &path)
+{
+    KConfigGroup group(m_config, QStringLiteral("AgentFleet"));
+    group.writeEntry("FleetPath", path);
+    Q_EMIT settingsChanged();
+}
+
 QString KonsolaiSettings::lastSshHost() const
 {
     KConfigGroup group(m_config, QStringLiteral("SSH"));

@@ -35,6 +35,10 @@ set(claude_SRCS
     PromptQualityGate.cpp
     PromptTemplateManager.cpp
     OneShotController.cpp
+    AgentProvider.cpp
+    AgentFleetProvider.cpp
+    AgentManagerPanel.cpp
+    AgentSessionLinker.cpp
     ${dbus_xml_srcs}
 )
 

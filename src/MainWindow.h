@@ -30,8 +30,12 @@ class KActionMenu;
 class KHamburgerMenu;
 class KToggleAction;
 
+class QTabWidget;
+
 namespace Konsolai
 {
+class AgentManagerPanel;
+class AgentSessionLinker;
 class ClaudeMenu;
 class ClaudeNotificationWidget;
 class ClaudeSession;
@@ -250,6 +254,9 @@ private:
     Konsolai::ClaudeNotificationWidget *_notificationWidget = nullptr;
     Konsolai::ClaudeStatusWidget *_claudeStatusWidget = nullptr;
     Konsolai::SessionManagerPanel *_sessionPanel = nullptr;
+    Konsolai::AgentManagerPanel *_agentPanel = nullptr;
+    Konsolai::AgentSessionLinker *_agentSessionLinker = nullptr;
+    QTabWidget *_sidebarTabs = nullptr;
 
     QPointer<SessionController> _pluggedController;
     std::vector<IKonsolePlugin *> _plugins;

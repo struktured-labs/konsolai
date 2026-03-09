@@ -18,6 +18,7 @@
 
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QFileSystemWatcher>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMap>
@@ -622,6 +623,12 @@ public:
     void refreshTokenUsage();
 
     /**
+     * Set up the token refresh timer and QFileSystemWatcher for the current working dir.
+     * Safe to call multiple times (idempotent). Called from run(); exposed for testing.
+     */
+    void startTokenTracking();
+
+    /**
      * Get current resource usage (CPU%, RSS) for this session's Claude process
      */
     const ResourceUsage &resourceUsage() const
@@ -1045,9 +1052,12 @@ private:
     // Token usage tracking
     TokenUsage m_tokenUsage;
     QTimer *m_tokenRefreshTimer = nullptr;
+    QFileSystemWatcher *m_tokenFileWatcher = nullptr;
+    QTimer *m_tokenWatcherDebounce = nullptr; // 500ms debounce for file watcher
     QString m_lastTokenFile; // path of JSONL file being tracked
+    QString m_watchedProjectDir; // currently watched directory
     qint64 m_lastTokenFilePos = 0; // byte offset for incremental parsing
-    void startTokenTracking();
+    void onTokenDirChanged();
     TokenUsage parseConversationTokens(const QString &jsonlPath);
 
     // Resource usage tracking (CPU%, RSS via /proc)

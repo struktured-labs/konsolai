@@ -29,9 +29,11 @@
 namespace Konsolai
 {
 
-// Build a display name for tabs/panels: "project (task desc) @host" for remote or "project (sessionId)" fallback
+// Build a display name for tabs/panels: "project (task desc) @host" for remote, or just "project"
 static QString buildDisplayName(const QString &projectName, const QString &taskDescription, const QString &sessionId, const QString &sshHost = QString())
 {
+    Q_UNUSED(sessionId);
+
     QString name;
     if (!taskDescription.isEmpty()) {
         QString desc = taskDescription;
@@ -39,8 +41,6 @@ static QString buildDisplayName(const QString &projectName, const QString &taskD
             desc = desc.left(27) + QStringLiteral("...");
         }
         name = QStringLiteral("%1 (%2)").arg(projectName, desc);
-    } else if (!sessionId.isEmpty()) {
-        name = QStringLiteral("%1 (%2)").arg(projectName, sessionId.left(8));
     } else {
         name = projectName;
     }
@@ -1756,11 +1756,45 @@ void ClaudeSession::startTokenTracking()
         m_tokenRefreshTimer = new QTimer(this);
         connect(m_tokenRefreshTimer, &QTimer::timeout, this, &ClaudeSession::refreshTokenUsage);
     }
-    // Refresh every 30s as a background poll; also refreshes on Idle state changes
+    // Keep 30s timer as fallback for edge cases (file moves, new conversations)
     m_tokenRefreshTimer->start(30000);
+
+    // Set up QFileSystemWatcher for near-instant token updates
+    if (!m_tokenFileWatcher) {
+        m_tokenFileWatcher = new QFileSystemWatcher(this);
+        m_tokenWatcherDebounce = new QTimer(this);
+        m_tokenWatcherDebounce->setSingleShot(true);
+        m_tokenWatcherDebounce->setInterval(500); // debounce rapid-fire during streaming
+        connect(m_tokenWatcherDebounce, &QTimer::timeout, this, &ClaudeSession::refreshTokenUsage);
+        connect(m_tokenFileWatcher, &QFileSystemWatcher::directoryChanged, this, &ClaudeSession::onTokenDirChanged);
+    }
+
+    // Watch the project dir if we have a working directory
+    if (!m_workingDir.isEmpty()) {
+        QString hashedName = m_workingDir;
+        hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
+        QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+        if (QDir(projectDir).exists() && projectDir != m_watchedProjectDir) {
+            if (!m_watchedProjectDir.isEmpty()) {
+                m_tokenFileWatcher->removePath(m_watchedProjectDir);
+            }
+            m_tokenFileWatcher->addPath(projectDir);
+            m_watchedProjectDir = projectDir;
+            qDebug() << "ClaudeSession: Watching token dir:" << projectDir;
+        }
+    }
 
     // Initial refresh
     refreshTokenUsage();
+}
+
+void ClaudeSession::onTokenDirChanged()
+{
+    // Debounce: during streaming, the JSONL file is updated rapidly.
+    // Restart the 500ms timer so we only refresh once after writes settle.
+    if (m_tokenWatcherDebounce) {
+        m_tokenWatcherDebounce->start();
+    }
 }
 
 void ClaudeSession::refreshTokenUsage()

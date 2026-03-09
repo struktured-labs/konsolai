@@ -32,6 +32,7 @@ private Q_SLOTS:
     void testPinSession();
     void testUnpinSession();
     void testPinNonexistentSession();
+    void testPinSession_ImmediateTreeUpdate();
 
     // Archive
     void testArchiveSession();
@@ -111,6 +112,11 @@ private Q_SLOTS:
 
     // Register fast-path (tab switch)
     void testRegisterSessionFastPath();
+
+    // Auto-archive old closed sessions
+    void testAutoArchiveClosedSessions();
+    void testAutoArchiveSkipsPinned();
+    void testAutoArchiveSkipsRecent();
 };
 
 }

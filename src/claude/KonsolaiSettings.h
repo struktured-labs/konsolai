@@ -171,6 +171,14 @@ public:
     bool notificationYoloEnabled() const;
     void setNotificationYoloEnabled(bool enabled);
 
+    // ========== Agent Fleet Settings ==========
+
+    /**
+     * Path to agent-fleet installation (auto-detected if empty)
+     */
+    QString agentFleetPath() const;
+    void setAgentFleetPath(const QString &path);
+
     /**
      * Last-used SSH host (for wizard pre-fill)
      */

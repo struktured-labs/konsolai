@@ -72,6 +72,8 @@ ecm_add_tests(
     ClaudeStatusWidgetTest.cpp
     SessionManagerPanelTest.cpp
     KeyboardResponsivenessTest.cpp
+    AgentManagerPanelTest.cpp
+    AgentSessionLinkerTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS} Qt::Widgets
 )
 
@@ -82,5 +84,14 @@ ecm_add_tests(
     SessionObserverTest.cpp
     PromptQualityGateTest.cpp
     OneShotControllerTest.cpp
+    KonsolaiSettingsTest.cpp
+    PromptTemplateManagerTest.cpp
+    TokenTrackingTest.cpp
+    RemoteSshArgsTest.cpp
+    ClaudeProcessHookEventTest.cpp
+    YoloPollingTest.cpp
+    ClaudeHookHandlerDetailTest.cpp
+    HookCleanupRaceTest.cpp
+    AgentFleetProviderTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )

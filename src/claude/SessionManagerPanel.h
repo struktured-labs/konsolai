@@ -80,6 +80,9 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     // Human-readable description (first prompt or user-set label)
     QString description;
 
+    // Agent linkage: non-empty if this session was created from agent attach
+    QString agentId;
+
     // Persisted subagent/subprocess snapshots (survive restart)
     QVector<SubagentInfo> subagents;
     QVector<SubprocessInfo> subprocesses;
@@ -125,6 +128,11 @@ public:
      * Returns nullptr if not found.
      */
     const SessionMetadata *sessionMetadata(const QString &sessionId) const;
+
+    /**
+     * Check if a session is currently active (has an open tab)
+     */
+    bool isSessionActive(const QString &sessionId) const;
 
     /**
      * Get pinned sessions
@@ -227,6 +235,17 @@ public Q_SLOTS:
     void purgeDismissed();
 
     /**
+     * Set the agentId on a session's metadata (for agent-originated sessions)
+     */
+    void setSessionAgentId(const QString &sessionId, const QString &agentId);
+
+    /**
+     * Auto-archive closed sessions older than 7 days.
+     * Runs periodically on a timer; can also be called manually.
+     */
+    void autoArchiveOldClosedSessions();
+
+    /**
      * Pause non-essential background timers (called when window becomes inactive)
      */
     void pauseBackgroundTimers();
@@ -287,6 +306,11 @@ Q_SIGNALS:
      */
     void resumeConversationRequested(const QString &workingDirectory, const QString &conversationId,
                                       const QString &sshHost, const QString &sshUsername, int sshPort);
+
+    /**
+     * Emitted when user wants to navigate to an agent in the agent panel
+     */
+    void showAgentRequested(const QString &agentId);
 
     /**
      * Emitted when collapsed state changes
@@ -433,6 +457,9 @@ private:
     // setOverrideCursor pushes to a stack — we use a counter so batch operations
     // (Archive All, Close All) only push/pop once.
     int m_pendingAsyncKills = 0;
+
+    // Auto-archive closed sessions older than threshold
+    QTimer *m_autoArchiveTimer = nullptr;
 
     // Whether background timers are paused (window inactive)
     bool m_timersPaused = false;

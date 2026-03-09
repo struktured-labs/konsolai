@@ -6,16 +6,21 @@
 - Build system: CMake + Ninja
 
 ## Testing
-- **MANDATORY**: Every feature, bug fix, or behavioral change MUST have an automated test before it's considered complete.
-  - C++ unit tests (`src/autotests/`) for logic, state machines, data structures
-  - GUI tests (`Testing/`) for UI behavior, widget state, interaction flows
-  - If a bug was found without a test, add a test that reproduces it BEFORE fixing it
-- Run `ctest --test-dir build/ --output-on-failure` after changes to Claude integration code.
-- Run `bash Testing/run-all-gui-tests.sh` for GUI validation against a live instance.
-- Claude integration tests are in `src/autotests/Claude*.cpp` and `src/autotests/T*.cpp` (TmuxManager, TokenUsage, etc.)
-- GUI tests are in `Testing/gui-smoke-test.py`, `Testing/gui-interaction-test.py`, `Testing/gui-lifecycle-test.py`
+- **MANDATORY GATE**: Run the lightweight test suite (`/test-light`) after EVERY change. No exceptions. Do not present work as complete until all tests pass.
+- **MANDATORY**: Every new feature or bug fix MUST include both:
+  1. **C++ unit tests** (`src/autotests/`) — logic, data structures, provider parsing, signal verification
+  2. **GUI tests** (`Testing/gui-smoke-test.py` or `Testing/gui-interaction-test.py`) — AT-SPI widget presence, tree node rendering, context menu items, panel visibility
+- A feature is NOT complete until both test types exist and pass. The isolated test runner (`Testing/run-isolated-gui-tests.sh`) must remain green.
+- If a bug was found without a test, add a test that reproduces it BEFORE fixing it.
+- **Light suite** (run frequently): `ctest --test-dir build/ --output-on-failure -R "Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget"` — 27 tests, ~18s
+- **Full suite** (run before releases): `ctest --test-dir build/ --output-on-failure` — includes upstream Konsole tests
+- **GUI smoke tests** (run against live instance): `bash Testing/run-all-gui-tests.sh` — AT-SPI headless validation via MCP backend
+- **GUI introspection via MCP**: Use the `konsolai-gui` MCP tools (`widget_tree`, `find_widget`, `click`, `read_text`, `widget_state`, `screenshot`, etc.) to validate UI changes against a live Konsolai instance. These tools use AT-SPI (not Squish) and are the primary way to verify widget presence, tree structure, and interactive behavior. Always prefer MCP tools over manual verification.
+- Claude integration tests: `src/autotests/Claude*.cpp`, `src/autotests/T*.cpp`, `src/autotests/Agent*.cpp`
+- GUI tests: `Testing/gui-smoke-test.py`, `Testing/gui-interaction-test.py`, `Testing/gui-lifecycle-test.py`
+- GUI test backend: `tools/gui-mcp/` — AT-SPI MCP server (`atspi_backend.py`). Requires `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` on the target app.
 - Tests use QTest framework (`QTEST_GUILESS_MAIN` for non-GUI, `QTEST_MAIN` for widget tests).
-- Test libraries: `Qt::Test Qt::Network konsolai_claude konsoleprivate`
+- Test libraries: `Qt::Test Qt::Network konsolai_claude konsoleprivate` (add `Qt::Widgets` for widget tests)
 
 ## Yolo Mode (Auto-Approval System)
 Konsolai has a three-level yolo system. Each level must work independently and in combination.
@@ -47,6 +52,22 @@ Konsolai has a three-level yolo system. Each level must work independently and i
 - Zombie sockets: socket files without listeners — hook handler must exit 0 on connection failure
 - Pattern drift: Claude Code CLI updates may change the permission/idle UI text — keep detection patterns up to date
 - ANSI codes: terminal capture includes escape sequences — use `contains()` not exact match
+
+## Agent Panel
+- **AgentProvider** — abstract interface in `AgentProvider.h` with versioned API (`interfaceVersion()`)
+- **AgentFleetProvider** — reads goals from `{fleetPath}/goals/*.yaml`, state from `~/.config/agent-fleet/`
+- **AgentManagerPanel** — tree widget with context menu, registered in sidebar as `[Sessions][Agents]` tabs
+- Sidebar uses `QTabWidget` (`_sidebarTabs`) wrapping both `SessionManagerPanel` and `AgentManagerPanel`
+- Provider path auto-detected from `~/projects/agent-fleet` or configured via `KonsolaiSettings::agentFleetPath()`
+- Tests: `AgentFleetProviderTest` (parsing, CRUD, signals), `AgentManagerPanelTest` (tree, context menu, footer)
+- Docs: `doc/konsolai/agents.md`, `doc/konsolai/implementing-providers.md`
+
+## Key Architecture
+- **ClaudeSession** extends `Konsole::Session` (IS-A, not wrapper)
+- **SessionManagerPanel** + **AgentManagerPanel** in tabbed sidebar dock widget
+- **BudgetController** enforces per-session cost/time/token limits
+- **ClaudeHookHandler** processes hook events via Unix domain socket
+- **KonsolaiSettings** — singleton config via KSharedConfig (`~/.config/konsolai/konsolairc`)
 
 ## Debugging
 - **Always debug for the user** — don't ask them to share logs or output. Find it yourself.

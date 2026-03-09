@@ -5,21 +5,40 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 ## Features
 
 **Claude Integration**
-- 1 Tab = 1 Claude Session
-- tmux-backed session persistence
-- Claude hooks integration for notifications
-- Session state tracking (idle/working/waiting)
+- 1 Tab = 1 Claude Session with tmux-backed persistence
+- Claude hooks integration for real-time state tracking (idle/working/waiting)
+- Session wizard for project setup, git worktrees, and task configuration
+
+**Yolo Mode (3-Level Auto-Approval)**
+- Level 1: Auto-approve permission prompts (hook-based + polling fallback)
+- Level 2: Auto-accept inline suggestions (Tab + Enter on idle)
+- Level 3: Auto-continue with configurable prompt when idle
+
+**Session Management**
+- Sidebar panel with pinned, active, detached, archived, and discovered categories
+- Automatic detection and reattachment of orphaned tmux sessions
+- Remote SSH sessions with full yolo mode support
+- Git worktree integration for feature branch sessions
+- Quick session switcher (`Ctrl+Shift+P`)
+
+**Agent Panel**
+- Monitor persistent background agents from agent-fleet or custom providers
+- Trigger runs, set briefs, add steering notes from context menu
+- Interactive attachment: open a Claude tab connected to an agent's tmux session
+- Aggregate daily spend tracking across all agents
+- Pluggable provider architecture with versioned interface
+
+**Budget Controls**
+- Per-session cost, time, and token limits
+- Per-agent per-run and daily budgets
+- Weekly/monthly global spending limits
+- Soft (warn) and hard (block) budget policies
 
 **Notifications**
 - System tray status indicators
 - Desktop popup notifications via KNotification
 - Audio alerts for important events
 - In-terminal visual status indicators
-
-**Session Management**
-- Sessions persist in tmux when window closes
-- Automatic detection and reattachment of orphaned sessions
-- Session registry with state serialization
 
 **D-Bus Interface**
 - Full control over Claude sessions via D-Bus
@@ -29,8 +48,8 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 ## Building
 
 ### Dependencies
-- Qt6 (Core, Gui, Widgets, Network)
-- KDE Frameworks 6 (KNotifications, KPty, KConfig, KI18n, etc.)
+- Qt6 (Core, Gui, Widgets, Network, Multimedia, Concurrent, DBus)
+- KDE Frameworks 6 (KNotifications, KPty, KConfig, KI18n, KStatusNotifierItem, KDBusAddons)
 - tmux (runtime)
 - claude CLI (runtime)
 
@@ -38,33 +57,60 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 ```bash
 mkdir build && cd build
 cmake ..
-make
+ninja -j4
+```
+
+### Running Tests
+```bash
+# Unit tests (50 tests)
+ctest --test-dir build/ --output-on-failure
+
+# GUI tests (requires running Konsolai instance)
+bash Testing/run-all-gui-tests.sh
+```
+
+### Installation
+```bash
+./install.sh
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Konsolai Application                      │
-├─────────────────────────────────────────────────────────────┤
-│  MainWindow ──► ViewManager ──► ClaudeSession (per tab)     │
-│       │              │               │                       │
-│       │              │         ┌─────┴─────┐                │
-│       │              │         │           │                │
-│       ▼              ▼         ▼           ▼                │
-│  Claude Menu    Tab Status   TmuxManager  HookHandler       │
-│                 Indicators       │           │              │
-│                                  │           │              │
-│                                  ▼           ▼              │
-│                              tmux session  Unix Socket      │
-│                              (persistent)  (hook events)    │
-│                                                             │
-│  NotificationManager ◄──────────────────────┘               │
-│  ├─ System Tray                                             │
-│  ├─ Desktop Popup (KNotification)                           │
-│  ├─ Audio Alerts                                            │
-│  └─ In-Terminal Visual                                      │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      Konsolai Application                        │
+├──────────────────────────────────────────────────────────────────┤
+│  MainWindow ──► ViewManager ──► ClaudeSession (per tab)          │
+│       │              │               │                           │
+│       │              │         ┌─────┼─────────┐                │
+│       │              │         │     │         │                │
+│       ▼              ▼         ▼     ▼         ▼                │
+│  Claude Menu    Tab Status   Tmux  ClaudeProcess  HookHandler   │
+│                 Indicators  Manager   │           │              │
+│                                │     │           │              │
+│                                ▼     ▼           ▼              │
+│                            tmux    State      Unix Socket       │
+│                           session  Machine    (hook events)     │
+│                          (persist)                              │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Sidebar (QTabWidget)                                    │    │
+│  │  ┌──────────────────┐ ┌──────────────────┐              │    │
+│  │  │ SessionManager   │ │ AgentManager     │              │    │
+│  │  │ Panel            │ │ Panel            │              │    │
+│  │  │  - Pinned        │ │  - AgentProvider │              │    │
+│  │  │  - Active        │ │    (abstract)    │              │    │
+│  │  │  - Detached      │ │  - AgentFleet    │              │    │
+│  │  │  - Archived      │ │    Provider      │              │    │
+│  │  │  - Discovered    │ │  - (future       │              │    │
+│  │  │                  │ │    providers)    │              │    │
+│  │  └──────────────────┘ └──────────────────┘              │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  BudgetController ──► Cost/Time/Token Tracking                   │
+│  NotificationManager ──► Tray / Desktop / Audio / Terminal       │
+│  KonsolaiSettings ──► ~/.config/konsolai/konsolairc              │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Directory Structure
@@ -72,10 +118,24 @@ make
 | Directory          | Description                                                   |
 | ------------------ | ------------------------------------------------------------- |
 | `/src`             | Core terminal emulator source code                            |
-| `/src/claude`      | Claude-specific integration code                              |
+| `/src/claude`      | Claude integration (sessions, hooks, yolo, agents, budgets)   |
+| `/src/autotests`   | C++ unit tests (QTest framework, 50+ tests)                   |
+| `/Testing`         | GUI tests (AT-SPI smoke tests, interaction tests)             |
+| `/doc/konsolai`    | Konsolai-specific documentation                               |
 | `/desktop`         | Desktop files for launching Konsolai                          |
 | `/data`            | Color schemes, keyboard layouts, and other data files         |
-| `/doc`             | Documentation for users and developers                        |
+| `/tools`           | Hook handler binary, GUI MCP server                           |
+
+## Documentation
+
+See [doc/konsolai/](doc/konsolai/README.md) for detailed guides:
+- [Session Management](doc/konsolai/sessions.md)
+- [Yolo Mode](doc/konsolai/yolo-mode.md)
+- [Agent Panel](doc/konsolai/agents.md)
+- [Implementing Providers](doc/konsolai/implementing-providers.md)
+- [Budget Controls](doc/konsolai/budget-controls.md)
+- [Keyboard Shortcuts](doc/konsolai/keyboard-shortcuts.md)
+- [Testing Guide](doc/konsolai/testing.md)
 
 ## Credits
 

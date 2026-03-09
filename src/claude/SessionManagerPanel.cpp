@@ -130,6 +130,14 @@ void SessionManagerPanel::deferredInit()
     // Pre-populate caches on startup
     refreshCachesAsync();
 
+    // Auto-archive closed sessions every 5 minutes
+    m_autoArchiveTimer = new QTimer(this);
+    m_autoArchiveTimer->setInterval(300000); // 5 minutes
+    connect(m_autoArchiveTimer, &QTimer::timeout, this, &SessionManagerPanel::autoArchiveOldClosedSessions);
+    m_autoArchiveTimer->start();
+    // Run once on startup after a short delay
+    QTimer::singleShot(10000, this, &SessionManagerPanel::autoArchiveOldClosedSessions);
+
     // Process any sessions that registered before init completed
     m_initialized = true;
     for (const auto &session : std::as_const(m_pendingRegistrations)) {
@@ -783,6 +791,11 @@ const SessionMetadata *SessionManagerPanel::sessionMetadata(const QString &sessi
     return it != m_metadata.constEnd() ? &(*it) : nullptr;
 }
 
+bool SessionManagerPanel::isSessionActive(const QString &sessionId) const
+{
+    return m_activeSessions.contains(sessionId) && m_activeSessions[sessionId];
+}
+
 QList<SessionMetadata> SessionManagerPanel::pinnedSessions() const
 {
     QList<SessionMetadata> result;
@@ -939,7 +952,7 @@ void SessionManagerPanel::pinSession(const QString &sessionId)
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].isPinned = true;
         scheduleMetadataSave();
-        scheduleTreeUpdate();
+        rebuildTreeSync(); // Immediate sync rebuild — user explicitly requested this
     }
 }
 
@@ -948,7 +961,7 @@ void SessionManagerPanel::unpinSession(const QString &sessionId)
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].isPinned = false;
         scheduleMetadataSave();
-        scheduleTreeUpdate();
+        rebuildTreeSync(); // Immediate sync rebuild — user explicitly requested this
     }
 }
 
@@ -1167,6 +1180,38 @@ void SessionManagerPanel::markExpired(const QString &sessionName)
     }
 }
 
+void SessionManagerPanel::autoArchiveOldClosedSessions()
+{
+    // Auto-archive sessions in "Closed" category (isExpired && !isArchived) that
+    // have been closed for more than 7 days. Never touches Active, Detached, or Pinned.
+    const int thresholdDays = 7;
+    const QDateTime now = QDateTime::currentDateTime();
+    int archived = 0;
+
+    for (auto &meta : m_metadata) {
+        // Only target closed (expired) sessions that aren't already archived/dismissed/pinned
+        if (!meta.isExpired || meta.isArchived || meta.isDismissed || meta.isPinned) {
+            continue;
+        }
+        // Don't touch sessions with active ClaudeSession objects
+        if (m_activeSessions.contains(meta.sessionId)) {
+            continue;
+        }
+        // Check age: lastAccessed must be > threshold days ago
+        if (meta.lastAccessed.isValid() && meta.lastAccessed.daysTo(now) > thresholdDays) {
+            meta.isArchived = true;
+            ++archived;
+            qDebug() << "SessionManagerPanel: Auto-archived closed session:" << meta.sessionId << "last accessed:" << meta.lastAccessed.toString(Qt::ISODate);
+        }
+    }
+
+    if (archived > 0) {
+        scheduleMetadataSave();
+        scheduleTreeUpdate();
+        qDebug() << "SessionManagerPanel: Auto-archived" << archived << "closed sessions older than" << thresholdDays << "days";
+    }
+}
+
 QString SessionManagerPanel::sessionIdForName(const QString &sessionName) const
 {
     // Try direct sessionId lookup first (caller may pass sessionId)
@@ -1271,6 +1316,9 @@ void SessionManagerPanel::pauseBackgroundTimers()
     if (m_durationTimer) {
         m_durationTimer->stop();
     }
+    if (m_autoArchiveTimer) {
+        m_autoArchiveTimer->stop();
+    }
 
     // Stop debounce timers — no point rebuilding tree or saving metadata
     // while nobody is looking. Deferred work flushes on resume.
@@ -1309,6 +1357,9 @@ void SessionManagerPanel::resumeBackgroundTimers()
     }
     if (m_convCacheTimer) {
         m_convCacheTimer->start();
+    }
+    if (m_autoArchiveTimer) {
+        m_autoArchiveTimer->start();
     }
     // m_durationTimer is started/stopped by updateTreeWidget based on active subagents,
     // so just let the tree rebuild handle it.
@@ -2287,6 +2338,15 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         }
 
+        // Show Agent — navigate to agent panel for agent-originated sessions
+        if (!meta.agentId.isEmpty()) {
+            QAction *showAgentAction = menu.addAction(QIcon::fromTheme(QStringLiteral("system-run")), i18n("Show Agent"));
+            QString agentIdCopy = meta.agentId;
+            connect(showAgentAction, &QAction::triggered, this, [this, agentIdCopy]() {
+                Q_EMIT showAgentRequested(agentIdCopy);
+            });
+        }
+
         menu.addSeparator();
 
         QAction *closeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("process-stop")), i18n("Close"));
@@ -2913,8 +2973,11 @@ void SessionManagerPanel::applyFilter(const QString &text)
                 child->setHidden(false);
                 ++visibleChildren;
             } else {
-                // Match against display name (col 0), tooltip (working dir), and description
-                bool matches = child->text(0).contains(text, Qt::CaseInsensitive) || child->toolTip(0).contains(text, Qt::CaseInsensitive);
+                // Match against display name (col 0), tooltip (working dir + session name),
+                // and the raw sessionId (for ID-based lookup)
+                QString sessionId = child->data(0, Qt::UserRole).toString();
+                bool matches = child->text(0).contains(text, Qt::CaseInsensitive) || child->toolTip(0).contains(text, Qt::CaseInsensitive)
+                    || sessionId.contains(text, Qt::CaseInsensitive);
                 child->setHidden(!matches);
                 if (matches) {
                     ++visibleChildren;
@@ -3043,6 +3106,11 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     } else if (!meta.subagents.isEmpty()) {
         // Persisted team badge
         displayName += QStringLiteral(" [team: done]");
+    }
+
+    // Agent linkage badge
+    if (!meta.agentId.isEmpty()) {
+        displayName += QStringLiteral(" [\U0001F916 %1]").arg(meta.agentId);
     }
 
     // Add GSD badge when .planning/ or ROADMAP.md exists in working directory (cached)
@@ -3752,9 +3820,10 @@ void SessionManagerPanel::loadMetadata()
             meta.approvalLog.append(entry);
         }
 
-        // Resume session ID and description
+        // Resume session ID, description, and agent linkage
         meta.lastResumeSessionId = obj[QStringLiteral("lastResumeSessionId")].toString();
         meta.description = obj[QStringLiteral("description")].toString();
+        meta.agentId = obj[QStringLiteral("agentId")].toString();
 
         // Budget settings
         meta.budgetTimeLimitMinutes = obj[QStringLiteral("budgetTimeLimitMinutes")].toInt();
@@ -3882,6 +3951,9 @@ void SessionManagerPanel::saveMetadata(bool sync)
         }
         if (!meta.description.isEmpty()) {
             obj[QStringLiteral("description")] = meta.description;
+        }
+        if (!meta.agentId.isEmpty()) {
+            obj[QStringLiteral("agentId")] = meta.agentId;
         }
 
         // Budget settings (only save if any limit is set)
@@ -4731,6 +4803,18 @@ void SessionManagerPanel::updateSessionDescription(const QString &sessionId, con
         return;
     }
     meta->description = desc;
+    scheduleMetadataSave();
+    scheduleTreeUpdate();
+}
+
+void SessionManagerPanel::setSessionAgentId(const QString &sessionId, const QString &agentId)
+{
+    auto *meta = findMetadata(sessionId);
+    if (!meta) {
+        qWarning() << "SessionManagerPanel::setSessionAgentId: unknown sessionId" << sessionId;
+        return;
+    }
+    meta->agentId = agentId;
     scheduleMetadataSave();
     scheduleTreeUpdate();
 }

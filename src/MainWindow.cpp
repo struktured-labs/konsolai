@@ -56,6 +56,9 @@
 #include "WindowSystemInfo.h"
 
 // Claude integration
+#include "claude/AgentFleetProvider.h"
+#include "claude/AgentManagerPanel.h"
+#include "claude/AgentSessionLinker.h"
 #include "claude/ClaudeConversationPicker.h"
 #include "claude/ClaudeMenu.h"
 #include "claude/ClaudeNotificationWidget.h"
@@ -68,6 +71,8 @@
 #include "claude/NotificationManager.h"
 #include "claude/SessionManagerPanel.h"
 #include "claude/TmuxManager.h"
+
+#include <QTabWidget>
 
 #include "profile/ProfileList.h"
 #include "profile/ProfileManager.h"
@@ -681,19 +686,211 @@ void MainWindow::setupActions()
     // Session Manager Panel (collapsible sidebar)
     _sessionPanel = new Konsolai::SessionManagerPanel(this);
 
-    // Create dock widget for session panel
+    // Agent Manager Panel
+    _agentPanel = new Konsolai::AgentManagerPanel(this);
+
+    // Set up agent-fleet provider
+    auto *settings = Konsolai::KonsolaiSettings::instance();
+    QString fleetPath = settings ? settings->agentFleetPath() : QString();
+    auto *fleetProvider = new Konsolai::AgentFleetProvider(fleetPath);
+    if (fleetProvider->isAvailable()) {
+        _agentPanel->addProvider(fleetProvider);
+    } else {
+        delete fleetProvider;
+    }
+
+    // Agent↔Session linker
+    _agentSessionLinker = new Konsolai::AgentSessionLinker(_sessionPanel, _agentPanel, this);
+    _agentPanel->setLinker(_agentSessionLinker);
+
+    // Connect "Show Agent" from session panel
+    connect(_sessionPanel, &Konsolai::SessionManagerPanel::showAgentRequested, this, [this](const QString &agentId) {
+        _agentSessionLinker->selectAgent(agentId);
+    });
+
+    // Tabbed sidebar: [Sessions] [Agents]
+    _sidebarTabs = new QTabWidget(this);
+    _sidebarTabs->setObjectName(QStringLiteral("sidebarTabs"));
+    _sidebarTabs->addTab(_sessionPanel, QIcon::fromTheme(QStringLiteral("view-list-tree")), i18n("Sessions"));
+    _sidebarTabs->addTab(_agentPanel, QIcon::fromTheme(QStringLiteral("system-run")), i18n("Agents"));
+    _sidebarTabs->setTabPosition(QTabWidget::North);
+
+    // Create dock widget for sidebar
     auto *sessionDock = new QDockWidget(i18n("Sessions"), this);
     sessionDock->setObjectName(QStringLiteral("SessionManagerDock"));
-    sessionDock->setWidget(_sessionPanel);
+    sessionDock->setWidget(_sidebarTabs);
     sessionDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
     sessionDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     addDockWidget(Qt::LeftDockWidgetArea, sessionDock);
+
+    // Update dock title when tab changes
+    connect(_sidebarTabs, &QTabWidget::currentChanged, this, [sessionDock, this](int index) {
+        sessionDock->setWindowTitle(_sidebarTabs->tabText(index));
+    });
 
     // Add toggle action for session panel
     QAction *toggleSessionPanel = sessionDock->toggleViewAction();
     toggleSessionPanel->setText(i18n("Session &Manager"));
     toggleSessionPanel->setIcon(QIcon::fromTheme(QStringLiteral("view-list-tree")));
     collection->addAction(QStringLiteral("toggle-session-panel"), toggleSessionPanel);
+
+    // Connect agent panel signals
+    connect(_agentPanel, &Konsolai::AgentManagerPanel::attachRequested, this, [this](const Konsolai::AgentAttachInfo &info) {
+        if (!info.canAttach || info.tmuxSessionName.isEmpty()) {
+            qWarning() << "Agent attach: no tmux session name available";
+            return;
+        }
+
+        qDebug() << "Agent attach requested for tmux session:" << info.tmuxSessionName;
+
+        // Reuse the same reattach flow as session panel
+        auto *tmux = new Konsolai::TmuxManager(this);
+        QPointer<MainWindow> guard(this);
+        QString sessionName = info.tmuxSessionName;
+        QString workDir = info.workingDirectory;
+
+        QString resumeId = info.resumeSessionId;
+        QString agentName = info.agentName;
+        QString agentId = info.agentId;
+
+        tmux->sessionExistsAsync(sessionName, [guard, tmux, sessionName, workDir, resumeId, agentName, agentId](bool exists) {
+            tmux->deleteLater();
+            if (!guard) {
+                return;
+            }
+
+            if (!exists) {
+                // tmux session doesn't exist yet — create a new Claude session in the agent's working dir instead
+                qDebug() << "Agent tmux session" << sessionName << "not found, opening project dir:" << workDir;
+                if (!workDir.isEmpty()) {
+                    // Find Claude profile
+                    Profile::Ptr claudeProfile;
+                    const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+                    for (const Profile::Ptr &profile : profiles) {
+                        if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                            claudeProfile = profile;
+                            break;
+                        }
+                    }
+                    if (!claudeProfile) {
+                        return;
+                    }
+
+                    auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, guard);
+                    SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+                    claudeSession->setInitialWorkingDirectory(workDir);
+                    if (!resumeId.isEmpty()) {
+                        claudeSession->setResumeSessionId(resumeId);
+                    }
+                    // Set agent name as initial task description for the tab title
+                    if (!agentName.isEmpty()) {
+                        claudeSession->setTaskDescription(agentName);
+                    }
+
+                    auto *view = guard->_viewManager->createView(claudeSession);
+                    guard->_viewManager->activeContainer()->addView(view);
+
+                    if (!claudeSession->isRunning()) {
+                        claudeSession->run();
+                    }
+
+                    guard->_sessionPanel->registerSession(claudeSession);
+                    // Set agent linkage
+                    if (!agentId.isEmpty()) {
+                        guard->_sessionPanel->setSessionAgentId(claudeSession->sessionId(), agentId);
+                        if (guard->_agentSessionLinker) {
+                            guard->_agentSessionLinker->notifyChanged(agentId);
+                        }
+                    }
+                    guard->_claudeMenu->setActiveSession(claudeSession);
+                    guard->_claudeStatusWidget->setSession(claudeSession);
+                } else {
+                    KMessageBox::information(guard, i18n("The agent tmux session '%1' does not exist.", sessionName), i18n("Agent Not Running"));
+                }
+                return;
+            }
+
+            // tmux session exists — attach to it
+            Profile::Ptr claudeProfile;
+            const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+            for (const Profile::Ptr &profile : profiles) {
+                if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                    claudeProfile = profile;
+                    break;
+                }
+            }
+            if (!claudeProfile) {
+                qWarning() << "No Claude profile found for agent attach";
+                return;
+            }
+
+            auto *claudeSession = Konsolai::ClaudeSession::createForReattach(sessionName, guard);
+            SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+            if (!resumeId.isEmpty()) {
+                claudeSession->setResumeSessionId(resumeId);
+            }
+            // Set agent name as initial task description for the tab title
+            if (!agentName.isEmpty()) {
+                claudeSession->setTaskDescription(agentName);
+            }
+
+            auto *view = guard->_viewManager->createView(claudeSession);
+            guard->_viewManager->activeContainer()->addView(view);
+
+            if (!claudeSession->isRunning()) {
+                claudeSession->run();
+            }
+
+            auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+            if (registry) {
+                registry->registerSession(claudeSession);
+            }
+            guard->_sessionPanel->registerSession(claudeSession);
+            // Set agent linkage
+            if (!agentId.isEmpty()) {
+                guard->_sessionPanel->setSessionAgentId(claudeSession->sessionId(), agentId);
+                if (guard->_agentSessionLinker) {
+                    guard->_agentSessionLinker->notifyChanged(agentId);
+                }
+            }
+            guard->_claudeMenu->setActiveSession(claudeSession);
+            guard->_claudeStatusWidget->setSession(claudeSession);
+        });
+    });
+
+    connect(_agentPanel, &Konsolai::AgentManagerPanel::openProjectRequested, this, [this](const QString &directory) {
+        if (directory.isEmpty()) {
+            return;
+        }
+
+        // Find Claude profile and create a session in the agent's project dir
+        Profile::Ptr claudeProfile;
+        const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
+        for (const Profile::Ptr &profile : profiles) {
+            if (profile->property<bool>(Profile::ClaudeEnabled)) {
+                claudeProfile = profile;
+                break;
+            }
+        }
+        if (!claudeProfile) {
+            return;
+        }
+
+        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), directory, this);
+        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+        claudeSession->setInitialWorkingDirectory(directory);
+
+        auto *view = _viewManager->createView(claudeSession);
+        _viewManager->activeContainer()->addView(view);
+
+        if (!claudeSession->isRunning()) {
+            claudeSession->run();
+        }
+
+        _sessionPanel->registerSession(claudeSession);
+        _claudeMenu->setActiveSession(claudeSession);
+        _claudeStatusWidget->setSession(claudeSession);
+    });
 
     // Connect session panel signals
     connect(_sessionPanel, &Konsolai::SessionManagerPanel::attachRequested, this, [this](const QString &sessionName) {
@@ -1915,6 +2112,9 @@ void MainWindow::autoReattachClaudeSessions()
             return;
         }
 
+        // Phase 1: Create all session objects, views, and register them (fast, no I/O).
+        // Phase 2: Stagger run() calls with 50ms spacing so the UI stays responsive.
+        QList<Konsolai::ClaudeSession *> sessionsToRun;
         int reattached = 0;
         int skipped = 0;
         for (const Konsolai::ClaudeSessionState &state : orphans) {
@@ -1923,7 +2123,7 @@ void MainWindow::autoReattachClaudeSessions()
                 continue;
             }
 
-            qDebug() << "Reattaching session:" << state.sessionName;
+            qDebug() << "Reattaching session (deferred run):" << state.sessionName;
 
             // Create a ClaudeSession for reattach
             auto *claudeSession = Konsolai::ClaudeSession::createForReattach(state.sessionName, this);
@@ -1940,20 +2140,27 @@ void MainWindow::autoReattachClaudeSessions()
             auto *view = _viewManager->createView(claudeSession);
             _viewManager->activeContainer()->addView(view);
 
-            // Start the session (attaches to existing tmux session)
-            if (!claudeSession->isRunning()) {
-                claudeSession->run();
-            }
-
-            // Register with registry and connect to status UI
+            // Register with registry and connect to status UI (before run)
             registry->registerSession(claudeSession);
             _sessionPanel->registerSession(claudeSession);
             _claudeMenu->setActiveSession(claudeSession);
             _claudeStatusWidget->setSession(claudeSession);
+
+            sessionsToRun.append(claudeSession);
             ++reattached;
         }
 
-        qDebug() << "Auto-reattached" << reattached << "sessions, skipped" << skipped << "stale entries";
+        // Stagger run() calls: 50ms between each so tmux attaches don't block the UI
+        for (int i = 0; i < sessionsToRun.size(); ++i) {
+            QPointer<Konsolai::ClaudeSession> session = sessionsToRun[i];
+            QTimer::singleShot(i * 50, this, [session]() {
+                if (session && !session->isRunning()) {
+                    session->run();
+                }
+            });
+        }
+
+        qDebug() << "Auto-reattached" << reattached << "sessions (staggered), skipped" << skipped << "stale entries";
     });
 }
 
