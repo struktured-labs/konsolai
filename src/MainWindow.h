@@ -236,6 +236,9 @@ private:
     // sets the active shortcuts of actions in 'dest' to the shortcuts of actions
     // with the same name in 'source' (see QAction::ActiveShortcut)
     static void syncActiveShortcuts(KActionCollection *dest, const KActionCollection *source);
+    // Promote/demote session shortcuts when switching active controllers.
+    // The active controller gets WindowShortcut so paste/zoom work from sidebar.
+    static void setControllerShortcutContext(SessionController *controller, Qt::ShortcutContext context);
     void updateHamburgerMenu();
 
 private:
