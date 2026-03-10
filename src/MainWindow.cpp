@@ -314,14 +314,24 @@ ViewManager *MainWindow::viewManager() const
     return _viewManager;
 }
 
-void MainWindow::setControllerShortcutContext(SessionController *controller, Qt::ShortcutContext context)
+void MainWindow::associateControllerShortcuts(SessionController *controller, bool associate)
 {
     if (!controller || !controller->isValid()) {
         return;
     }
-    const auto actions = controller->actionCollection()->actions();
-    for (QAction *action : actions) {
-        action->setShortcutContext(context);
+    if (associate) {
+        // Add the controller's actions to this MainWindow widget so
+        // WidgetWithChildrenShortcut fires from sidebar panels too.
+        const auto actions = controller->actionCollection()->actions();
+        for (QAction *action : actions) {
+            addAction(action);
+        }
+    } else {
+        // Remove the controller's actions from this MainWindow widget.
+        const auto actions = controller->actionCollection()->actions();
+        for (QAction *action : actions) {
+            removeAction(action);
+        }
     }
 }
 
@@ -381,9 +391,9 @@ void MainWindow::activeViewChanged(SessionController *controller)
     }
 
     if (!_pluggedController.isNull()) {
-        // Restore widget-scoped shortcuts for the outgoing controller so its
+        // Remove outgoing controller's actions from MainWindow so its
         // shortcuts no longer fire from non-terminal widgets (sidebar, etc.)
-        setControllerShortcutContext(_pluggedController, Qt::WidgetWithChildrenShortcut);
+        associateControllerShortcuts(_pluggedController, false);
 
         if (skipGuiFactorySwap) {
             // Lightweight disconnect: just remove signals and event filter,
@@ -401,9 +411,10 @@ void MainWindow::activeViewChanged(SessionController *controller)
 
     _pluggedController = controller;
 
-    // Promote the active controller's shortcuts to window scope so they work
-    // even when focus is on the sidebar panels (session/agent manager).
-    setControllerShortcutContext(controller, Qt::WindowShortcut);
+    // Associate the active controller's actions with MainWindow so
+    // WidgetWithChildrenShortcut shortcuts (paste, zoom, etc.) also fire
+    // when focus is on the sidebar panels (session/agent manager).
+    associateControllerShortcuts(controller, true);
     if (auto view = _pluggedController->view()) {
         view->installEventFilter(this);
     }
