@@ -1106,6 +1106,15 @@ private:
     // Hook cleanup: remove konsolai hooks from project's .claude/settings.local.json
     void removeHooksFromProjectSettings();
 
+public:
+    /**
+     * Remove ALL konsolai hook entries from .claude/settings.local.json in workDir.
+     * Unlike removeHooksFromProjectSettings() which only removes THIS session's hooks,
+     * this clears everything — used for force-reset when hooks are stale/orphaned.
+     */
+    static void removeHooksForWorkDir(const QString &workDir);
+
+private:
     // Remote hook cleanup: remove hook script and settings via SSH
     void cleanupRemoteHooks();
 };

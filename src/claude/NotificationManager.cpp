@@ -175,6 +175,13 @@ void NotificationManager::showDesktopNotification(NotificationType type, const Q
     notification->setIconName(iconName(type));
     notification->setComponentName(QStringLiteral("konsolai"));
 
+    // When our Audio channel is disabled, tell the notification daemon to
+    // suppress its own sound.  Without this, KDE plays its global notification
+    // sound for popups regardless of our internal Audio toggle.
+    if (!m_enabledChannels.testFlag(Channel::Audio)) {
+        notification->setHint(QStringLiteral("suppress-sound"), true);
+    }
+
     // Make notification clickable — clicking focuses the session's tab
     if (session) {
         auto *action = notification->addDefaultAction(i18n("Show Session"));

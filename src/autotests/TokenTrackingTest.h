@@ -40,6 +40,8 @@ private Q_SLOTS:
 
     // File watcher / debounce tests
     void testTokenRefreshTimerStarted();
+    void testFileWatcherTriggersRefresh();
+    void testFileWatcherDebounces();
 };
 
 }

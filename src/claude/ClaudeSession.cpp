@@ -164,7 +164,10 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     // Override with per-session state if one was persisted for this project
     if (auto *registry = ClaudeSessionRegistry::instance()) {
         if (const auto *saved = registry->lastSessionState(m_workingDir)) {
-            if (!saved->autoContinuePrompt.isEmpty()) {
+            // Only use per-session prompt if it was explicitly customized
+            // (differs from the current global).  Otherwise the global prompt
+            // can never be updated — stale session copies stomp it forever.
+            if (!saved->autoContinuePrompt.isEmpty() && saved->autoContinuePrompt != m_autoContinuePrompt) {
                 m_autoContinuePrompt = saved->autoContinuePrompt;
             }
             m_yoloMode = saved->yoloMode;
@@ -237,7 +240,7 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
             m_yoloMode = saved->yoloMode;
             m_doubleYoloMode = saved->doubleYoloMode;
             m_tripleYoloMode = saved->tripleYoloMode;
-            if (!saved->autoContinuePrompt.isEmpty()) {
+            if (!saved->autoContinuePrompt.isEmpty() && saved->autoContinuePrompt != m_autoContinuePrompt) {
                 m_autoContinuePrompt = saved->autoContinuePrompt;
             }
             if (!saved->workingDirectory.isEmpty()) {
@@ -2586,6 +2589,84 @@ void ClaudeSession::removeHooksFromProjectSettings()
         outFile.write(outDoc.toJson(QJsonDocument::Indented));
         if (outFile.commit()) {
             qDebug() << "ClaudeSession: Removed this session's hooks from" << settingsPath;
+        }
+    }
+}
+
+void ClaudeSession::removeHooksForWorkDir(const QString &workDir)
+{
+    if (workDir.isEmpty()) {
+        return;
+    }
+
+    QString settingsPath = workDir + QStringLiteral("/.claude/settings.local.json");
+    QFile file(settingsPath);
+    if (!file.exists()) {
+        return;
+    }
+
+    if (!file.open(QIODevice::ReadOnly)) {
+        return;
+    }
+
+    QJsonParseError error;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+    file.close();
+
+    if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+        return;
+    }
+
+    QJsonObject settings = doc.object();
+
+    if (!settings.contains(QStringLiteral("hooks"))) {
+        return;
+    }
+
+    // Remove ALL konsolai hook entries (identified by konsolai-hook-handler in command)
+    QJsonObject hooks = settings[QStringLiteral("hooks")].toObject();
+    bool anyRemoved = false;
+
+    const QStringList hookKeys = hooks.keys();
+    for (const QString &key : hookKeys) {
+        QJsonArray entries = hooks[key].toArray();
+        QJsonArray filtered;
+        for (const auto &entry : entries) {
+            QString entryStr = QString::fromUtf8(QJsonDocument(entry.toObject()).toJson());
+            if (entryStr.contains(QStringLiteral("konsolai-hook-handler"))) {
+                anyRemoved = true;
+            } else {
+                filtered.append(entry);
+            }
+        }
+        hooks[key] = filtered;
+    }
+
+    if (!anyRemoved) {
+        return;
+    }
+
+    // Check if any hooks remain; if not, remove the key entirely
+    bool anyHooksLeft = false;
+    for (auto it = hooks.begin(); it != hooks.end(); ++it) {
+        if (!it.value().toArray().isEmpty()) {
+            anyHooksLeft = true;
+            break;
+        }
+    }
+
+    if (anyHooksLeft) {
+        settings[QStringLiteral("hooks")] = hooks;
+    } else {
+        settings.remove(QStringLiteral("hooks"));
+    }
+
+    QSaveFile outFile(settingsPath);
+    if (outFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QJsonDocument outDoc(settings);
+        outFile.write(outDoc.toJson(QJsonDocument::Indented));
+        if (outFile.commit()) {
+            qDebug() << "ClaudeSession::removeHooksForWorkDir: Cleared all konsolai hooks from" << settingsPath;
         }
     }
 }

@@ -181,6 +181,7 @@ private Q_SLOTS:
     void onSetAutoContinuePrompt();
     void onArchiveAll();
     void onArchiveSession();
+    void onClearStaleHooks();
     void onConfigureNotifications();
     void onToggleNotificationChannel();
 
@@ -201,6 +202,7 @@ private:
     QAction *m_detachAction = nullptr;
     QAction *m_killAction = nullptr;
     QAction *m_archiveAllAction = nullptr;
+    QAction *m_clearStaleHooksAction = nullptr;
     QAction *m_configureHooksAction = nullptr;
 
     // Reattach submenu

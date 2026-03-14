@@ -16,11 +16,16 @@
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QDialogButtonBox>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QRegularExpression>
 #include <QVBoxLayout>
 
 namespace Konsolai
@@ -164,6 +169,12 @@ void ClaudeMenu::createActions()
     connect(m_archiveAllAction, &QAction::triggered, this, &ClaudeMenu::onArchiveAll);
 
     addSeparator();
+
+    // Clear All Stale Hooks
+    m_clearStaleHooksAction = addAction(i18n("Clear All Stale &Hooks"));
+    m_clearStaleHooksAction->setIcon(QIcon::fromTheme(QStringLiteral("edit-clear-all")));
+    m_clearStaleHooksAction->setToolTip(i18n("Remove orphaned hook entries from all known working directories"));
+    connect(m_clearStaleHooksAction, &QAction::triggered, this, &ClaudeMenu::onClearStaleHooks);
 
     // Configure Hooks
     m_configureHooksAction = addAction(i18n("Configure &Hooks..."));
@@ -667,6 +678,102 @@ void ClaudeMenu::onArchiveSession()
             registry->refreshOrphanedSessionsAsync();
         }
     });
+}
+
+void ClaudeMenu::onClearStaleHooks()
+{
+    if (!m_registry) {
+        return;
+    }
+
+    // Collect unique working directories from all known sessions
+    QSet<QString> workDirs;
+    const auto states = m_registry->allSessionStates();
+    for (const auto &state : states) {
+        if (!state.workingDirectory.isEmpty()) {
+            workDirs.insert(state.workingDirectory);
+        }
+    }
+    // Also include active sessions
+    const auto active = m_registry->activeSessions();
+    for (auto *session : active) {
+        if (session && !session->workingDirectory().isEmpty()) {
+            workDirs.insert(session->workingDirectory());
+        }
+    }
+
+    int cleared = 0;
+    for (const QString &workDir : workDirs) {
+        QString settingsPath = workDir + QStringLiteral("/.claude/settings.local.json");
+        if (!QFile::exists(settingsPath)) {
+            continue;
+        }
+
+        // Check if any hook entries reference sockets that don't exist
+        QFile file(settingsPath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+        file.close();
+
+        if (!doc.isObject()) {
+            continue;
+        }
+        QJsonObject settings = doc.object();
+        if (!settings.contains(QStringLiteral("hooks"))) {
+            continue;
+        }
+
+        QJsonObject hooks = settings[QStringLiteral("hooks")].toObject();
+        bool hasStale = false;
+
+        // Check each hook entry for stale socket references
+        for (const QString &key : hooks.keys()) {
+            QJsonArray entries = hooks[key].toArray();
+            for (const auto &entry : entries) {
+                QString entryStr = QString::fromUtf8(QJsonDocument(entry.toObject()).toJson());
+                // Look for socket paths in the command
+                static const QRegularExpression socketRx(QStringLiteral("(/[^ \"]+\\.sock)"));
+                auto match = socketRx.match(entryStr);
+                if (match.hasMatch()) {
+                    QString sockPath = match.captured(1);
+                    if (!QFile::exists(sockPath)) {
+                        hasStale = true;
+                        break;
+                    }
+                }
+            }
+            if (hasStale) {
+                break;
+            }
+        }
+
+        if (hasStale) {
+            ClaudeSession::removeHooksForWorkDir(workDir);
+            ++cleared;
+
+            // Re-install hooks for any active session in this workDir
+            for (auto *session : active) {
+                if (session && session->workingDirectory() == workDir) {
+                    // Emit signal so SessionManagerPanel can re-install
+                    // For now, just log — the session panel's periodic check will repair
+                    qDebug() << "ClaudeMenu: Cleared stale hooks for" << workDir << "- active session will need hook repair";
+                }
+            }
+        }
+    }
+
+    qDebug() << "ClaudeMenu: Cleared stale hooks from" << cleared << "working directories";
+
+    if (cleared == 0) {
+        QMessageBox::information(this, i18n("Clear Stale Hooks"), i18n("No stale hooks found."));
+    } else {
+        QMessageBox::information(
+            this,
+            i18n("Clear Stale Hooks"),
+            i18n("Cleared stale hooks from %1 working directory(ies).\n\nActive sessions will automatically re-install their hooks.", cleared));
+    }
 }
 
 void ClaudeMenu::createNotificationMenu()

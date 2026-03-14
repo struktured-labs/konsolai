@@ -31,6 +31,7 @@ set(claude_SRCS
     SessionManagerPanel.cpp
     KonsolaiSettings.cpp
     BudgetController.cpp
+    KonsolaiLogging.cpp
     SessionObserver.cpp
     PromptQualityGate.cpp
     PromptTemplateManager.cpp

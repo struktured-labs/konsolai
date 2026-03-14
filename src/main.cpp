@@ -543,6 +543,9 @@ void fillAboutData(KAboutData &aboutData)
 {
     aboutData.setOrganizationDomain("kde.org");
 
+    aboutData.addAuthor(i18nc("@info:credit", "struktured"),
+                        i18nc("@info:credit", "Konsolai creator, Claude integration"),
+                        QStringLiteral("struktured@strukturedlabs.com"));
     aboutData.addAuthor(i18nc("@info:credit", "Kurt Hindenburg"),
                         i18nc("@info:credit",
                               "General maintainer, bug fixes and general"

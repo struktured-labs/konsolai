@@ -2248,28 +2248,63 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             QAction *yoloAction = menu.addAction(i18n("Yolo Mode"));
             yoloAction->setCheckable(true);
             yoloAction->setChecked(activeSession->yoloMode());
-            connect(yoloAction, &QAction::triggered, this, [activeSession](bool checked) {
+            connect(yoloAction, &QAction::triggered, this, [this, activeSession](bool checked) {
                 if (activeSession) {
                     activeSession->setYoloMode(checked);
+                    if (checked) {
+                        ensureHooksConfigured(activeSession);
+                    }
                 }
             });
 
             QAction *doubleYoloAction = menu.addAction(i18n("Double Yolo"));
             doubleYoloAction->setCheckable(true);
             doubleYoloAction->setChecked(activeSession->doubleYoloMode());
-            connect(doubleYoloAction, &QAction::triggered, this, [activeSession](bool checked) {
+            connect(doubleYoloAction, &QAction::triggered, this, [this, activeSession](bool checked) {
                 if (activeSession) {
                     activeSession->setDoubleYoloMode(checked);
+                    if (checked) {
+                        ensureHooksConfigured(activeSession);
+                    }
                 }
             });
 
             QAction *tripleYoloAction = menu.addAction(i18n("Triple Yolo"));
             tripleYoloAction->setCheckable(true);
             tripleYoloAction->setChecked(activeSession->tripleYoloMode());
-            connect(tripleYoloAction, &QAction::triggered, this, [activeSession](bool checked) {
+            connect(tripleYoloAction, &QAction::triggered, this, [this, activeSession](bool checked) {
                 if (activeSession) {
                     activeSession->setTripleYoloMode(checked);
+                    if (checked) {
+                        ensureHooksConfigured(activeSession);
+                    }
                 }
+            });
+
+            // Reset Hooks — force-clear all hooks and reset yolo state
+            QAction *resetHooksAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear")), i18n("Reset Hooks"));
+            connect(resetHooksAction, &QAction::triggered, this, [this, sessionId, activeSession]() {
+                auto *meta = findMetadata(sessionId);
+                if (!meta) {
+                    return;
+                }
+
+                // 1. Clear all hooks from settings file
+                ClaudeSession::removeHooksForWorkDir(meta->workingDirectory);
+
+                // 2. Reset yolo state if session is active
+                if (activeSession) {
+                    activeSession->setYoloMode(false);
+                    activeSession->setDoubleYoloMode(false);
+                    activeSession->setTripleYoloMode(false);
+                }
+
+                // 3. Re-install fresh hooks if session is still active
+                if (activeSession && m_activeSessions.contains(sessionId)) {
+                    ensureHooksConfigured(activeSession);
+                }
+
+                qDebug() << "SessionManagerPanel: Reset hooks for session" << sessionId;
             });
         }
 

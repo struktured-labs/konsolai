@@ -4,6 +4,7 @@
 */
 
 #include "ClaudeProcess.h"
+#include "KonsolaiLogging.h"
 
 #include <QDir>
 #include <QFile>
@@ -120,7 +121,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
 {
     QJsonDocument doc = QJsonDocument::fromJson(eventData.toUtf8());
     if (doc.isNull() || !doc.isObject()) {
-        qWarning() << "ClaudeProcess::handleHookEvent: Invalid JSON for event" << eventType << "data:" << eventData.left(200);
+        qCWarning(KonsolaiLog) << "ClaudeProcess::handleHookEvent: Invalid JSON for event" << eventType << "data:" << eventData.left(200);
         return;
     }
     QJsonObject obj = doc.object();
@@ -166,7 +167,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
             if (inputVal.isObject()) {
                 QString desc = inputVal.toObject().value(QStringLiteral("description")).toString();
                 if (!desc.isEmpty()) {
-                    qDebug() << "ClaudeProcess: Task tool call detected, description:" << desc;
+                    qCDebug(KonsolaiLog) << "ClaudeProcess: Task tool call detected, description:" << desc;
                     Q_EMIT taskToolCalled(desc);
                 }
             }
@@ -202,7 +203,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
 
         if (yoloApproved) {
             // Hook handler auto-approved this via yolo mode
-            qDebug() << "ClaudeProcess: Permission auto-approved by yolo mode for:" << toolName;
+            qCDebug(KonsolaiLog) << "ClaudeProcess: Permission auto-approved by yolo mode for:" << toolName;
             Q_EMIT yoloApprovalOccurred(toolName, toolInput);
         } else {
             // Need user approval
@@ -232,7 +233,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
             agentType = obj.value(QStringLiteral("subagent_type")).toString();
         }
         QString transcriptPath = obj.value(QStringLiteral("transcript_path")).toString();
-        qDebug() << "ClaudeProcess: SubagentStart - id:" << agentId << "type:" << agentType << "transcript:" << transcriptPath;
+        qCDebug(KonsolaiLog) << "ClaudeProcess: SubagentStart - id:" << agentId << "type:" << agentType << "transcript:" << transcriptPath;
         Q_EMIT subagentStarted(agentId, agentType, transcriptPath);
     } else if (eventType == QStringLiteral("SubagentStop")) {
         QString agentId = obj.value(QStringLiteral("agent_id")).toString();
@@ -241,7 +242,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
             agentType = obj.value(QStringLiteral("subagent_type")).toString();
         }
         QString transcriptPath = obj.value(QStringLiteral("agent_transcript_path")).toString();
-        qDebug() << "ClaudeProcess: SubagentStop - id:" << agentId << "type:" << agentType;
+        qCDebug(KonsolaiLog) << "ClaudeProcess: SubagentStop - id:" << agentId << "type:" << agentType;
         Q_EMIT subagentStopped(agentId, agentType, transcriptPath);
     } else if (eventType == QStringLiteral("TeammateIdle")) {
         QString teammateName = obj.value(QStringLiteral("teammate_name")).toString();
@@ -249,7 +250,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
             teammateName = obj.value(QStringLiteral("name")).toString();
         }
         QString tName = obj.value(QStringLiteral("team_name")).toString();
-        qDebug() << "ClaudeProcess: TeammateIdle - name:" << teammateName << "team:" << tName;
+        qCDebug(KonsolaiLog) << "ClaudeProcess: TeammateIdle - name:" << teammateName << "team:" << tName;
         Q_EMIT teammateIdle(teammateName, tName);
     } else if (eventType == QStringLiteral("TaskCompleted")) {
         QString taskId = obj.value(QStringLiteral("task_id")).toString();
@@ -262,7 +263,7 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
             teammateName = obj.value(QStringLiteral("name")).toString();
         }
         QString tName = obj.value(QStringLiteral("team_name")).toString();
-        qDebug() << "ClaudeProcess: TaskCompleted - id:" << taskId << "subject:" << taskSubject << "by:" << teammateName;
+        qCDebug(KonsolaiLog) << "ClaudeProcess: TaskCompleted - id:" << taskId << "subject:" << taskSubject << "by:" << teammateName;
         Q_EMIT taskCompleted(taskId, taskSubject, teammateName, tName);
     }
 }

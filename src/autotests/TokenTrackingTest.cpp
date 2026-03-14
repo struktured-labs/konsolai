@@ -553,6 +553,77 @@ void TokenTrackingTest::testTokenRefreshTimerStarted()
     cleanupProjectDir(workDir);
 }
 
+void TokenTrackingTest::testFileWatcherTriggersRefresh()
+{
+    // Verify that adding a new JSONL file to the project dir causes an automatic
+    // token refresh via the QFileSystemWatcher + 500ms debounce path.
+    //
+    // NOTE: QFileSystemWatcher::directoryChanged fires on file addition/removal,
+    // NOT on content changes to existing files. Claude CLI creates a new JSONL
+    // file per conversation, so adding a newer file is the realistic trigger.
+    QTemporaryDir tmpDir;
+    QVERIFY(tmpDir.isValid());
+    QString workDir = tmpDir.path();
+
+    // Start with one older conversation file
+    QByteArray initial = makeAssistantLine(100, 50) + "\n";
+    setupProjectDir(workDir, initial, QStringLiteral("conversation_old.jsonl"));
+
+    ClaudeSession session(QStringLiteral("test"), workDir);
+    session.startTokenTracking(); // sets up QFileSystemWatcher, does initial refresh
+    QCOMPARE(session.tokenUsage().totalTokens(), quint64(150));
+
+    // Add a NEW conversation file with more tokens — triggers directoryChanged
+    setupProjectDir(workDir, makeAssistantLine(200, 100) + "\n", QStringLiteral("conversation_new.jsonl"));
+
+    // Drain the event loop briefly so the inotify event is delivered to the
+    // QFileSystemWatcher before we start the QTRY poll.  Without this, prior
+    // tests' deleteLater queues can delay watcher signal delivery past the
+    // QTRY timeout when the full suite runs 23 other tests beforehand.
+    QTest::qWait(100);
+
+    // Debounce is 500ms; allow 2.5s total from here (inotify already delivered).
+    QTRY_COMPARE_WITH_TIMEOUT(session.tokenUsage().totalTokens(), quint64(300), 2500);
+
+    cleanupProjectDir(workDir);
+}
+
+void TokenTrackingTest::testFileWatcherDebounces()
+{
+    // Adding multiple files rapidly should only trigger ONE refresh after the
+    // 500ms debounce settles, not one refresh per file addition.
+    QTemporaryDir tmpDir;
+    QVERIFY(tmpDir.isValid());
+    QString workDir = tmpDir.path();
+
+    setupProjectDir(workDir, makeAssistantLine(10, 5) + "\n");
+
+    ClaudeSession session(QStringLiteral("test"), workDir);
+    session.startTokenTracking();
+    QCOMPARE(session.tokenUsage().totalTokens(), quint64(15));
+
+    QSignalSpy spy(&session, &ClaudeSession::tokenUsageChanged);
+
+    // Add 5 new JSONL files rapidly (simulate Claude creating new conversation files)
+    for (int i = 1; i <= 5; ++i) {
+        QString fname = QStringLiteral("conversation_%1.jsonl").arg(i);
+        setupProjectDir(workDir, makeAssistantLine(10 * i, 5 * i) + "\n", fname);
+        QTest::qWait(40); // 40ms between files — well under 500ms debounce
+    }
+
+    // Wait for debounce to fire (500ms + margin)
+    QTRY_VERIFY_WITH_TIMEOUT(spy.count() >= 1, 1500);
+
+    // Give it another 200ms to ensure no extra signals arrive
+    QTest::qWait(200);
+
+    // Should have fired fewer signals than files added (debounce collapses rapid events)
+    // Allow up to 2 (one possible mid-burst + one final), definitely < 5
+    QVERIFY2(spy.count() <= 2, qPrintable(QStringLiteral("Expected <=2 signals, got %1").arg(spy.count())));
+
+    cleanupProjectDir(workDir);
+}
+
 QTEST_GUILESS_MAIN(TokenTrackingTest)
 
 #include "moc_TokenTrackingTest.cpp"

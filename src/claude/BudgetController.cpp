@@ -5,8 +5,7 @@
 
 #include "BudgetController.h"
 #include "ClaudeSession.h"
-
-#include <QDebug>
+#include "KonsolaiLogging.h"
 
 namespace Konsolai
 {
@@ -56,13 +55,13 @@ void BudgetController::onTokenUsageChanged(const TokenUsage &usage)
                 m_budget.costExceeded = true;
                 if (!m_costExceededEmitted) {
                     m_costExceededEmitted = true;
-                    qDebug() << "BudgetController: Cost ceiling exceeded -" << cost << ">=" << m_budget.costCeilingUSD;
+                    qCDebug(KonsolaiLog) << "BudgetController: Cost ceiling exceeded -" << cost << ">=" << m_budget.costCeilingUSD;
                     Q_EMIT budgetExceeded(QStringLiteral("cost"));
                 }
             }
         } else if (percent >= m_budget.warningThresholdPercent && !m_costWarningEmitted) {
             m_costWarningEmitted = true;
-            qDebug() << "BudgetController: Cost warning at" << percent << "%";
+            qCDebug(KonsolaiLog) << "BudgetController: Cost warning at" << percent << "%";
             Q_EMIT budgetWarning(QStringLiteral("cost"), percent);
         }
     }
@@ -77,13 +76,13 @@ void BudgetController::onTokenUsageChanged(const TokenUsage &usage)
                 m_budget.tokenExceeded = true;
                 if (!m_tokenExceededEmitted) {
                     m_tokenExceededEmitted = true;
-                    qDebug() << "BudgetController: Token ceiling exceeded -" << tokens << ">=" << m_budget.tokenCeiling;
+                    qCDebug(KonsolaiLog) << "BudgetController: Token ceiling exceeded -" << tokens << ">=" << m_budget.tokenCeiling;
                     Q_EMIT budgetExceeded(QStringLiteral("token"));
                 }
             }
         } else if (percent >= m_budget.warningThresholdPercent && !m_tokenWarningEmitted) {
             m_tokenWarningEmitted = true;
-            qDebug() << "BudgetController: Token warning at" << percent << "%";
+            qCDebug(KonsolaiLog) << "BudgetController: Token warning at" << percent << "%";
             Q_EMIT budgetWarning(QStringLiteral("token"), percent);
         }
     }
@@ -97,7 +96,7 @@ void BudgetController::onResourceUsageChanged(const ResourceUsage &usage)
         if (!m_gate.gateTriggered && m_gate.currentCpuExceedCount >= m_gate.cpuDebounceCount) {
             m_gate.gateTriggered = true;
             m_yoloPausedByGate = true;
-            qDebug() << "BudgetController: CPU gate triggered after" << m_gate.currentCpuExceedCount << "ticks at" << usage.cpuPercent << "%";
+            qCDebug(KonsolaiLog) << "BudgetController: CPU gate triggered after" << m_gate.currentCpuExceedCount << "ticks at" << usage.cpuPercent << "%";
             Q_EMIT resourceGateTriggered(
                 QStringLiteral("CPU sustained above %1% for %2 ticks").arg(m_gate.cpuThresholdPercent, 0, 'f', 0).arg(m_gate.currentCpuExceedCount));
         }
@@ -112,7 +111,7 @@ void BudgetController::onResourceUsageChanged(const ResourceUsage &usage)
             if (usage.rssBytes < rssThreshold) {
                 m_gate.gateTriggered = false;
                 m_yoloPausedByGate = false;
-                qDebug() << "BudgetController: Resource gate cleared";
+                qCDebug(KonsolaiLog) << "BudgetController: Resource gate cleared";
                 Q_EMIT resourceGateCleared();
             }
         }
@@ -124,14 +123,14 @@ void BudgetController::onResourceUsageChanged(const ResourceUsage &usage)
         if (!m_gate.gateTriggered) {
             m_gate.gateTriggered = true;
             m_yoloPausedByGate = true;
-            qDebug() << "BudgetController: RSS gate triggered -" << usage.rssBytes << ">=" << rssThreshold;
+            qCDebug(KonsolaiLog) << "BudgetController: RSS gate triggered -" << usage.rssBytes << ">=" << rssThreshold;
             Q_EMIT resourceGateTriggered(QStringLiteral("RSS %1 bytes exceeds threshold %2 bytes").arg(usage.rssBytes).arg(rssThreshold));
         }
     } else if (m_gate.gateTriggered && usage.cpuPercent < m_gate.cpuThresholdPercent) {
         // RSS dropped below threshold and CPU is also OK — clear the gate
         m_gate.gateTriggered = false;
         m_yoloPausedByGate = false;
-        qDebug() << "BudgetController: Resource gate cleared (RSS recovered)";
+        qCDebug(KonsolaiLog) << "BudgetController: Resource gate cleared (RSS recovered)";
         Q_EMIT resourceGateCleared();
     }
 }
@@ -147,13 +146,13 @@ void BudgetController::checkTimeBudget()
                 m_budget.timeExceeded = true;
                 if (!m_timeExceededEmitted) {
                     m_timeExceededEmitted = true;
-                    qDebug() << "BudgetController: Time budget exceeded -" << elapsed << ">=" << m_budget.timeLimitMinutes << "minutes";
+                    qCDebug(KonsolaiLog) << "BudgetController: Time budget exceeded -" << elapsed << ">=" << m_budget.timeLimitMinutes << "minutes";
                     Q_EMIT budgetExceeded(QStringLiteral("time"));
                 }
             }
         } else if (percent >= m_budget.warningThresholdPercent && !m_timeWarningEmitted) {
             m_timeWarningEmitted = true;
-            qDebug() << "BudgetController: Time warning at" << percent << "%";
+            qCDebug(KonsolaiLog) << "BudgetController: Time warning at" << percent << "%";
             Q_EMIT budgetWarning(QStringLiteral("time"), percent);
         }
     }

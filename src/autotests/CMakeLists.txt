@@ -93,5 +93,6 @@ ecm_add_tests(
     ClaudeHookHandlerDetailTest.cpp
     HookCleanupRaceTest.cpp
     AgentFleetProviderTest.cpp
+    SplitViewClaudeTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )
