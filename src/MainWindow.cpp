@@ -521,9 +521,17 @@ void MainWindow::setupActions()
     menuAction = collection->addAction(QStringLiteral("new-window"));
     menuAction->setIcon(QIcon::fromTheme(QStringLiteral("window-new")));
     menuAction->setText(i18nc("@action:inmenu", "New &Window"));
-    collection->setDefaultShortcut(menuAction, Konsole::ACCEL | Qt::Key_N);
+    collection->setDefaultShortcut(menuAction, QKeySequence());
     menuAction->setAutoRepeat(false);
     connect(menuAction, &QAction::triggered, this, &Konsole::MainWindow::newWindow);
+
+    // New Claude Session — opens the wizard directly
+    menuAction = collection->addAction(QStringLiteral("new-claude-session"));
+    menuAction->setIcon(QIcon::fromTheme(QStringLiteral("tab-new")));
+    menuAction->setText(i18nc("@action:inmenu", "New Claude &Session..."));
+    collection->setDefaultShortcut(menuAction, Konsole::ACCEL | Qt::Key_N);
+    menuAction->setAutoRepeat(false);
+    connect(menuAction, &QAction::triggered, this, &Konsole::MainWindow::newTab);
 
     menuAction = collection->addAction(QStringLiteral("close-window"));
     menuAction->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
