@@ -413,7 +413,7 @@ void ViewManager::toggleActionsBasedOnState()
     }
 
     // Disable split-view actions for Claude sessions
-    if (_actionCollection) {
+    if (_actionCollection && _viewContainer && _viewContainer->activeViewSplitter()) {
         bool isClaude = false;
         auto *activeDisplay = _viewContainer->activeViewSplitter()->activeTerminalDisplay();
         if (activeDisplay) {
@@ -842,6 +842,9 @@ void ViewManager::splitAutoNextTab()
 void ViewManager::splitView(Qt::Orientation orientation, bool fromNextTab)
 {
     // Split view is disabled for Claude sessions (tmux sharing is unreliable)
+    if (!_viewContainer || !_viewContainer->activeViewSplitter()) {
+        return;
+    }
     auto *activeDisplay = _viewContainer->activeViewSplitter()->activeTerminalDisplay();
     if (activeDisplay) {
         Session *activeSession = _sessionMap.value(activeDisplay);
