@@ -721,7 +721,7 @@ void MainWindow::setupActions()
     _claudeStatusWidget = new Konsolai::ClaudeStatusWidget(this);
     statusBar()->addPermanentWidget(_claudeStatusWidget);
 
-    // Session Manager Panel (collapsible sidebar)
+    // Workspace sidebar (Sessions + Agents tabs)
     _sessionPanel = new Konsolai::SessionManagerPanel(this);
 
     // Agent Manager Panel
@@ -754,7 +754,7 @@ void MainWindow::setupActions()
     _sidebarTabs->setTabPosition(QTabWidget::North);
 
     // Create dock widget for sidebar
-    auto *sessionDock = new QDockWidget(i18n("Sessions"), this);
+    auto *sessionDock = new QDockWidget(i18n("Workspace"), this);
     sessionDock->setObjectName(QStringLiteral("SessionManagerDock"));
     sessionDock->setWidget(_sidebarTabs);
     sessionDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
@@ -768,7 +768,7 @@ void MainWindow::setupActions()
 
     // Add toggle action for session panel
     QAction *toggleSessionPanel = sessionDock->toggleViewAction();
-    toggleSessionPanel->setText(i18n("Session &Manager"));
+    toggleSessionPanel->setText(i18n("&Workspace"));
     toggleSessionPanel->setIcon(QIcon::fromTheme(QStringLiteral("view-list-tree")));
     collection->addAction(QStringLiteral("toggle-session-panel"), toggleSessionPanel);
 

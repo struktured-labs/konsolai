@@ -1280,7 +1280,14 @@ void ClaudeSession::approvePermissionAlways()
             }
         }
 
-        if (cursorLine >= 0 && alwaysLine >= 0) {
+        if (cursorLine < 0) {
+            // No permission prompt visible — user may have started typing between
+            // the detect poll and this capture.  Do NOT send Enter blindly.
+            qDebug() << "ClaudeSession: approvePermissionAlways - no prompt found in capture, skipping";
+            return;
+        }
+
+        if (alwaysLine >= 0) {
             int delta = alwaysLine - cursorLine;
             QString key = delta > 0 ? QStringLiteral("Down") : QStringLiteral("Up");
             int steps = qAbs(delta);
