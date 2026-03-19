@@ -1146,8 +1146,9 @@ void ClaudeSessionWizard::onTestConnectionClicked()
         }
         args << host;
     }
-    // Check connectivity, tmux availability, and claude availability
-    args << QStringLiteral("echo ok && which tmux 2>/dev/null && which claude 2>/dev/null");
+    // Check connectivity, tmux availability, and claude availability.
+    // Use semicolons (not &&) so missing tools don't cause a non-zero exit code.
+    args << QStringLiteral("echo ok; which tmux 2>/dev/null; which claude 2>/dev/null; exit 0");
 
     auto *process = new QProcess(this);
     ClaudeSessionRegistry::ensureSshAuthSock(process);
@@ -1155,13 +1156,13 @@ void ClaudeSessionWizard::onTestConnectionClicked()
         process->deleteLater();
         m_testConnectionButton->setEnabled(true);
 
-        if (exitCode == 0) {
-            QString output = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
-            QStringList lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        QString output = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+        bool connected = output.contains(QStringLiteral("ok"));
 
-            // Line 0: "ok", Line 1: tmux path (if found), Line 2: claude path (if found)
-            bool hasTmux = lines.size() >= 2 && !lines[1].isEmpty();
-            bool hasClaude = lines.size() >= 3 && !lines[2].isEmpty();
+        if (connected) {
+            // Check for tool paths in the output
+            bool hasTmux = output.contains(QStringLiteral("/tmux"));
+            bool hasClaude = output.contains(QStringLiteral("/claude"));
 
             QString status;
             if (hasTmux && hasClaude) {
@@ -1184,7 +1185,7 @@ void ClaudeSessionWizard::onTestConnectionClicked()
             if (error.isEmpty()) {
                 error = i18n("Connection failed (exit %1)", exitCode);
             }
-            m_connectionStatusLabel->setText(error.left(50));
+            m_connectionStatusLabel->setText(error.left(80));
             m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: red;"));
         }
     });
