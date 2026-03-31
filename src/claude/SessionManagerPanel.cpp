@@ -3048,9 +3048,8 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 
         auto *groupItem = new QTreeWidgetItem(categoryItemFor(cat));
         QString groupName = isWT ? QDir(key).dirName() : key;
-        QString icon = isWT ? QStringLiteral("folder-sync") : QStringLiteral("folder-open");
-        QString badge = isWT ? QStringLiteral("\xf0\x9f\x8c\xb3") : QStringLiteral("\xf0\x9f\x93\x81");
-        groupItem->setText(0, QStringLiteral("%1 %2 (%3)").arg(badge, groupName).arg(it.value()));
+        QString icon = isWT ? QStringLiteral("folder-sync") : QStringLiteral("folder-group");
+        groupItem->setText(0, QStringLiteral("%1 (%2)").arg(groupName).arg(it.value()));
         groupItem->setIcon(0, QIcon::fromTheme(icon, QIcon::fromTheme(QStringLiteral("folder-open"))));
         groupItem->setFlags(Qt::ItemIsEnabled);
         groupItem->setToolTip(0, isWT ? i18n("Worktree group: %1", key) : i18n("Prefix group: %1*", key));
