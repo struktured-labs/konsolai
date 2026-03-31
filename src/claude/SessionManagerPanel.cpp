@@ -1370,6 +1370,22 @@ void SessionManagerPanel::resumeBackgroundTimers()
     qDebug() << "SessionManagerPanel: Resumed background timers (window active)";
 }
 
+// Check if an item is under a given category, accounting for group items in between
+static bool isUnderCategory(QTreeWidgetItem *item, QTreeWidgetItem *category)
+{
+    if (!item) {
+        return false;
+    }
+    QTreeWidgetItem *p = item->parent();
+    while (p) {
+        if (p == category) {
+            return true;
+        }
+        p = p->parent();
+    }
+    return false;
+}
+
 void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column)
@@ -1379,9 +1395,19 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         return;
     }
 
-    // Check if this is a subagent/subprocess child item (parent is a session item, not a category)
+    // Group items (auto-grouping headers) — toggle expand, not clickable as sessions
+    QString compositeKey = item->data(0, Qt::UserRole + 6).toString();
+    if (compositeKey.startsWith(QStringLiteral("group:"))) {
+        item->setExpanded(!item->isExpanded());
+        return;
+    }
+
+    // Check if this is a subagent/subprocess child item (parent is a session item, not a category).
+    // Group items sit between category and session — skip them when checking depth.
     QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem && parentItem->parent() != nullptr) {
+    bool parentIsGroupOrCategory =
+        !parentItem || parentItem->parent() == nullptr || parentItem->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"));
+    if (parentItem && !parentIsGroupOrCategory) {
         // Check if this is a prompt group item (toggle expand/collapse)
         QVariant promptGroupVar = item->data(0, Qt::UserRole + 3);
         if (promptGroupVar.isValid() && !promptGroupVar.isNull()) {
@@ -1490,7 +1516,7 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         if (session) {
             Q_EMIT focusSessionRequested(session);
         }
-    } else if (item->parent() == m_closedCategory) {
+    } else if (isUnderCategory(item, m_closedCategory)) {
         // Closed session — tmux is dead, recreate like unarchive
         unarchiveSession(sessionId);
     } else {
@@ -1519,15 +1545,23 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         }
         QMenu menu(this);
 
-        // Collect child session IDs for this category
+        // Collect child session IDs for this category (walks into group items)
         auto collectChildIds = [](QTreeWidgetItem *category) {
             QStringList ids;
-            for (int i = 0; i < category->childCount(); ++i) {
-                QString id = category->child(i)->data(0, Qt::UserRole).toString();
-                if (!id.isEmpty()) {
-                    ids << id;
+            std::function<void(QTreeWidgetItem *)> walk = [&](QTreeWidgetItem *parent) {
+                for (int i = 0; i < parent->childCount(); ++i) {
+                    auto *child = parent->child(i);
+                    QString id = child->data(0, Qt::UserRole).toString();
+                    if (!id.isEmpty()) {
+                        ids << id;
+                    }
+                    // Recurse into group items
+                    if (child->childCount() > 0 && child->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"))) {
+                        walk(child);
+                    }
                 }
-            }
+            };
+            walk(category);
             return ids;
         };
 
@@ -2116,7 +2150,7 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     } else {
         // Active, detached, or closed session
         bool isActive = m_activeSessions.contains(sessionId);
-        bool isClosed = (item->parent() == m_closedCategory);
+        bool isClosed = isUnderCategory(item, m_closedCategory);
         QPointer<ClaudeSession> activeSession = isActive ? m_activeSessions[sessionId] : nullptr;
 
         if (isActive && activeSession) {
@@ -2915,7 +2949,7 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             }
         }
 
-        static constexpr int MIN_PREFIX_LEN = 4;
+        static constexpr int MIN_PREFIX_LEN = 3;
 
         for (auto it = catDirNames.constBegin(); it != catDirNames.constEnd(); ++it) {
             const QList<int> &indices = it.value();
