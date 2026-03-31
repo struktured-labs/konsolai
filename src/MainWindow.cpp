@@ -509,7 +509,6 @@ void MainWindow::setupActions()
     _newTabMenuAction->setAutoRepeat(false);
     connect(_newTabMenuAction, &KActionMenu::triggered, this, &MainWindow::newTab);
     collection->addAction(QStringLiteral("new-tab"), _newTabMenuAction);
-    collection->setShortcutsConfigurable(_newTabMenuAction, true);
 
     QAction *menuAction = collection->addAction(QStringLiteral("clone-tab"));
     menuAction->setIcon(QIcon::fromTheme(QStringLiteral("tab-duplicate")));
@@ -711,8 +710,6 @@ void MainWindow::setupActions()
     collection->setDefaultShortcut(_claudeMenu->restartAction(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_R));
     collection->addAction(QStringLiteral("claude-yolo-mode"), _claudeMenu->yoloModeAction());
     collection->addAction(QStringLiteral("claude-double-yolo-mode"), _claudeMenu->doubleYoloModeAction());
-    collection->addAction(QStringLiteral("claude-triple-yolo-mode"), _claudeMenu->tripleYoloModeAction());
-    collection->addAction(QStringLiteral("claude-set-prompt"), _claudeMenu->setPromptAction());
     collection->addAction(QStringLiteral("claude-detach"), _claudeMenu->detachAction());
     collection->addAction(QStringLiteral("claude-kill"), _claudeMenu->killAction());
     collection->addAction(QStringLiteral("claude-archive-all"), _claudeMenu->archiveAllAction());
@@ -1069,9 +1066,10 @@ void MainWindow::setupActions()
             return;
         }
 
-        // Look up persisted metadata for this session (resume ID, etc.)
+        // Look up persisted metadata for this session (resume ID, description, etc.)
         const auto *meta = _sessionPanel->sessionMetadata(sessionId);
         QString savedResumeId = meta ? meta->lastResumeSessionId : QString();
+        QString savedDescription = meta ? meta->description : QString();
 
         // Check for existing Claude conversations in this project
         auto conversations = Konsolai::ClaudeSessionRegistry::readClaudeConversations(workingDirectory);
@@ -1080,11 +1078,17 @@ void MainWindow::setupActions()
             resumeId = Konsolai::ClaudeConversationPicker::pick(conversations, this);
         }
 
-        // Create new session with the working directory
+        // Create new session with a FRESH session ID and tmux name.
+        // Do NOT reuse the old session ID — the old tmux session is killed
+        // asynchronously and may still be alive.  Reusing the name causes
+        // tmux new-session -A to ATTACH to the dying session, which is then
+        // killed by the pending async kill, closing the new tab immediately.
         auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workingDirectory, this);
 
-        // Preserve the old session ID so metadata, tmux name, and hooks match
-        claudeSession->setSessionId(sessionId);
+        // Migrate metadata from the old session to the new one
+        if (!savedDescription.isEmpty()) {
+            claudeSession->setTaskDescription(savedDescription);
+        }
 
         // Set resume ID: user pick takes priority, then persisted conversation
         if (!resumeId.isEmpty()) {
@@ -1115,7 +1119,8 @@ void MainWindow::setupActions()
             claudeSession->run();
         }
 
-        // Register with panel (will find existing metadata and clear stale flags)
+        // Register with panel — archive the old entry and register the new one
+        _sessionPanel->archiveSession(sessionId);
         _sessionPanel->registerSession(claudeSession);
 
         // Register with registry

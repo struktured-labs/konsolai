@@ -86,9 +86,6 @@ ClaudeSession::~ClaudeSession()
     if (m_suggestionTimer) {
         m_suggestionTimer->stop();
     }
-    if (m_suggestionFallbackTimer) {
-        m_suggestionFallbackTimer->stop();
-    }
     if (m_tokenRefreshTimer) {
         m_tokenRefreshTimer->stop();
     }
@@ -156,23 +153,14 @@ void ClaudeSession::initializeNew(const QString &profileName, const QString &wor
     if (auto *settings = KonsolaiSettings::instance()) {
         m_yoloMode = settings->yoloMode();
         m_doubleYoloMode = settings->doubleYoloMode();
-        m_tripleYoloMode = settings->tripleYoloMode();
-        m_autoContinuePrompt = settings->autoContinuePrompt();
         m_trySuggestionsFirst = settings->trySuggestionsFirst();
     }
 
     // Override with per-session state if one was persisted for this project
     if (auto *registry = ClaudeSessionRegistry::instance()) {
         if (const auto *saved = registry->lastSessionState(m_workingDir)) {
-            // Only use per-session prompt if it was explicitly customized
-            // (differs from the current global).  Otherwise the global prompt
-            // can never be updated — stale session copies stomp it forever.
-            if (!saved->autoContinuePrompt.isEmpty() && saved->autoContinuePrompt != m_autoContinuePrompt) {
-                m_autoContinuePrompt = saved->autoContinuePrompt;
-            }
             m_yoloMode = saved->yoloMode;
             m_doubleYoloMode = saved->doubleYoloMode;
-            m_tripleYoloMode = saved->tripleYoloMode;
         }
     }
 
@@ -231,18 +219,12 @@ void ClaudeSession::initializeReattach(const QString &existingSessionName)
     if (auto *settings = KonsolaiSettings::instance()) {
         m_yoloMode = settings->yoloMode();
         m_doubleYoloMode = settings->doubleYoloMode();
-        m_tripleYoloMode = settings->tripleYoloMode();
-        m_autoContinuePrompt = settings->autoContinuePrompt();
         m_trySuggestionsFirst = settings->trySuggestionsFirst();
     }
     if (auto *registry = ClaudeSessionRegistry::instance()) {
         if (const auto *saved = registry->sessionState(existingSessionName)) {
             m_yoloMode = saved->yoloMode;
             m_doubleYoloMode = saved->doubleYoloMode;
-            m_tripleYoloMode = saved->tripleYoloMode;
-            if (!saved->autoContinuePrompt.isEmpty() && saved->autoContinuePrompt != m_autoContinuePrompt) {
-                m_autoContinuePrompt = saved->autoContinuePrompt;
-            }
             if (!saved->workingDirectory.isEmpty()) {
                 m_workingDir = saved->workingDirectory;
                 setInitialWorkingDirectory(m_workingDir);
@@ -447,12 +429,6 @@ void ClaudeSession::run()
                     QFile::remove(yoloPath);
                     qDebug() << "ClaudeSession::run() - Removed stale yolo file:" << yoloPath;
                 }
-                QString teamYoloPath = yoloPath;
-                teamYoloPath.replace(QStringLiteral(".yolo"), QStringLiteral(".yolo-team"));
-                if (!m_tripleYoloMode && QFile::exists(teamYoloPath)) {
-                    QFile::remove(teamYoloPath);
-                }
-
                 // Write hooks config to project's .claude/settings.local.json
                 // Claude Code reads hooks from settings.local.json, not hooks.json
                 QString hooksConfig = m_hookHandler->generateHooksConfig();
@@ -574,7 +550,7 @@ void ClaudeSession::run()
     if (m_yoloMode) {
         startPermissionPolling();
     }
-    if (m_doubleYoloMode || m_tripleYoloMode) {
+    if (m_doubleYoloMode) {
         startIdlePolling();
     }
 }
@@ -626,24 +602,18 @@ void ClaudeSession::connectSignals()
         }
     });
 
-    // Handle idle state for double/triple yolo modes
-    // Precedence: when trySuggestionsFirst is true, double yolo fires first.
-    // If Claude stays idle after 2s, triple yolo fires as fallback.
-    // When an agent team is active, L2/L3 keyboard-based yolo is suppressed —
+    // Handle idle state for double yolo mode
+    // When an agent team is active, L2 keyboard-based yolo is suppressed —
     // hook-based TeammateIdle continuation handles it instead.
     connect(m_claudeProcess, &ClaudeProcess::stateChanged, this, [this](ClaudeProcess::State newState) {
         qDebug() << "ClaudeSession: State changed to:" << static_cast<int>(newState) << "doubleYoloMode:" << m_doubleYoloMode
-                 << "tripleYoloMode:" << m_tripleYoloMode << "trySuggestionsFirst:" << m_trySuggestionsFirst << "hasActiveTeam:" << hasActiveTeam();
+                 << "trySuggestionsFirst:" << m_trySuggestionsFirst << "hasActiveTeam:" << hasActiveTeam();
 
-        // Cancel any pending suggestion/fallback timers if Claude is no longer idle
+        // Cancel any pending suggestion timers if Claude is no longer idle
         if (newState != ClaudeProcess::State::Idle) {
             if (m_suggestionTimer && m_suggestionTimer->isActive()) {
                 m_suggestionTimer->stop();
                 qDebug() << "ClaudeSession: Cancelled suggestion timer (state changed)";
-            }
-            if (m_suggestionFallbackTimer && m_suggestionFallbackTimer->isActive()) {
-                m_suggestionFallbackTimer->stop();
-                qDebug() << "ClaudeSession: Cancelled suggestion fallback (state changed)";
             }
             // Reset idle detection since hooks are delivering events
             m_idlePromptDetected = false;
@@ -656,15 +626,15 @@ void ClaudeSession::connectSignals()
         // (state checks, cooldown flag) prevent spam, and polling must stay alive so
         // it can re-attempt Tab+Enter when Claude stays Idle on background tabs.
 
-        // When an agent team is active, suppress keyboard-based L2/L3.
+        // When an agent team is active, suppress keyboard-based L2.
         // Hook-based TeammateIdle continuation handles auto-continue for teams.
         if (hasActiveTeam()) {
-            qDebug() << "ClaudeSession: Team active - suppressing keyboard-based L2/L3 yolo";
+            qDebug() << "ClaudeSession: Team active - suppressing keyboard-based L2 yolo";
             return;
         }
 
         if (m_budgetController && m_budgetController->shouldBlockYolo()) {
-            qDebug() << "ClaudeSession: Budget gate blocking L2/L3 yolo";
+            qDebug() << "ClaudeSession: Budget gate blocking L2 yolo";
             return;
         }
 
@@ -679,8 +649,8 @@ void ClaudeSession::connectSignals()
             }
         });
 
-        if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
-            // Double yolo fires first: Tab + Enter to accept suggestion
+        if (m_doubleYoloMode) {
+            // Double yolo: Tab + Enter to accept suggestion
             // Use 5s delay to give Claude's inline suggestion time to appear
             // (suggestions can take several seconds depending on API latency)
             // Also gives user time to start typing, which cancels via state change
@@ -695,22 +665,6 @@ void ClaudeSession::connectSignals()
                 });
             }
             m_suggestionTimer->start(5000);
-
-            // If triple yolo is also on, schedule fallback
-            if (m_tripleYoloMode) {
-                scheduleSuggestionFallback();
-            }
-        } else if (m_tripleYoloMode) {
-            // Triple yolo fires directly (trySuggestionsFirst is off, or double yolo is off)
-            qDebug() << "ClaudeSession: Auto-continuing (triple yolo mode)";
-            QPointer<ClaudeSession> guard(this);
-            QTimer::singleShot(500, this, [guard]() {
-                if (!guard || !guard->m_tripleYoloMode) {
-                    return;
-                }
-                guard->sendPrompt(guard->m_autoContinuePrompt);
-                guard->logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, guard->m_autoContinuePrompt);
-            });
         }
     });
 
@@ -854,7 +808,7 @@ void ClaudeSession::connectSignals()
             if (m_yoloMode) {
                 startPermissionPolling();
             }
-            if (m_doubleYoloMode || m_tripleYoloMode) {
+            if (m_doubleYoloMode) {
                 startIdlePolling();
             }
         }
@@ -1590,7 +1544,7 @@ void ClaudeSession::startIdlePolling()
     }
 
     if (!m_idlePollTimer->isActive()) {
-        qDebug() << "ClaudeSession: Starting idle polling for triple yolo mode";
+        qDebug() << "ClaudeSession: Starting idle polling for double yolo mode";
         m_idlePollTimer->start(2000); // Poll every 2s
     }
 }
@@ -1606,7 +1560,7 @@ void ClaudeSession::stopIdlePolling()
 
 void ClaudeSession::pollForIdlePrompt()
 {
-    if (!m_doubleYoloMode && !m_tripleYoloMode) {
+    if (!m_doubleYoloMode) {
         return;
     }
     if (!m_tmuxManager) {
@@ -1661,7 +1615,7 @@ void ClaudeSession::pollForIdlePrompt()
         if (!ok) {
             return;
         }
-        if (!m_doubleYoloMode && !m_tripleYoloMode) {
+        if (!m_doubleYoloMode) {
             return;
         }
 
@@ -1681,37 +1635,18 @@ void ClaudeSession::pollForIdlePrompt()
             if (!m_idlePromptDetected) {
                 m_idlePromptDetected = true;
 
-                if (m_doubleYoloMode && (m_trySuggestionsFirst || !m_tripleYoloMode)) {
+                if (m_doubleYoloMode) {
                     // Double yolo via polling: Tab+Enter to accept suggestion
                     qDebug() << "ClaudeSession: Idle detected via polling - auto-accepting suggestion (double yolo)";
                     QTimer::singleShot(500, this, [this]() {
                         if (m_doubleYoloMode) {
                             autoAcceptSuggestion();
-
-                            // If triple yolo is also on, schedule fallback
-                            if (m_tripleYoloMode) {
-                                scheduleSuggestionFallback();
-                            }
                         }
 
                         // Cooldown to avoid rapid-fire on stale output
                         QTimer::singleShot(5000, this, [this]() {
                             m_idlePromptDetected = false;
                         });
-                    });
-                } else if (m_tripleYoloMode) {
-                    // Triple yolo fires directly (trySuggestionsFirst off, or double yolo off)
-                    qDebug() << "ClaudeSession: Idle detected via polling - auto-continuing (triple yolo)";
-                    QTimer::singleShot(500, this, [this]() {
-                        if (m_tripleYoloMode) {
-                            sendPrompt(m_autoContinuePrompt);
-                            logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, m_autoContinuePrompt);
-
-                            // Cooldown to avoid rapid-fire on stale output
-                            QTimer::singleShot(5000, this, [this]() {
-                                m_idlePromptDetected = false;
-                            });
-                        }
                     });
                 }
             }
@@ -1966,33 +1901,6 @@ void ClaudeSession::autoAcceptSuggestion()
     });
 }
 
-void ClaudeSession::scheduleSuggestionFallback()
-{
-    if (!m_suggestionFallbackTimer) {
-        m_suggestionFallbackTimer = new QTimer(this);
-        m_suggestionFallbackTimer->setSingleShot(true);
-        connect(m_suggestionFallbackTimer, &QTimer::timeout, this, &ClaudeSession::onSuggestionFallbackTimeout);
-    }
-
-    // 2s after double yolo fires, check if Claude is still idle
-    qDebug() << "ClaudeSession: Scheduling suggestion fallback in 2000ms";
-    m_suggestionFallbackTimer->start(2000);
-}
-
-void ClaudeSession::onSuggestionFallbackTimeout()
-{
-    // Only fire if Claude is still idle (suggestion wasn't accepted)
-    if (m_tripleYoloMode && claudeState() == ClaudeProcess::State::Idle) {
-        if (m_budgetController && m_budgetController->shouldBlockYolo()) {
-            qDebug() << "ClaudeSession: Budget gate blocking suggestion fallback";
-            return;
-        }
-        qDebug() << "ClaudeSession: Suggestion fallback - auto-continuing (triple yolo)";
-        sendPrompt(m_autoContinuePrompt);
-        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, m_autoContinuePrompt);
-    }
-}
-
 void ClaudeSession::setDoubleYoloMode(bool enabled)
 {
     if (m_doubleYoloMode != enabled) {
@@ -2003,28 +1911,23 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
             // Start idle polling so double yolo can re-fire on background tabs
             startIdlePolling();
 
-            // If Claude appears idle, apply immediately with new precedence.
+            // If Claude appears idle, apply immediately.
             // Use m_suggestionTimer (not a one-shot) so that if stateChanged(Idle) also
             // fires, both paths share the same timer and can't double-fire.
             auto state = claudeState();
             if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
-                if (m_trySuggestionsFirst || !m_tripleYoloMode) {
-                    qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-accepting suggestion immediately";
-                    if (!m_suggestionTimer) {
-                        m_suggestionTimer = new QTimer(this);
-                        m_suggestionTimer->setSingleShot(true);
-                        connect(m_suggestionTimer, &QTimer::timeout, this, [this]() {
-                            if (m_doubleYoloMode) {
-                                autoAcceptSuggestion();
-                            }
-                        });
-                    }
-                    if (!m_suggestionTimer->isActive()) {
-                        m_suggestionTimer->start(500);
-                    }
-                    if (m_tripleYoloMode) {
-                        scheduleSuggestionFallback();
-                    }
+                qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-accepting suggestion immediately";
+                if (!m_suggestionTimer) {
+                    m_suggestionTimer = new QTimer(this);
+                    m_suggestionTimer->setSingleShot(true);
+                    connect(m_suggestionTimer, &QTimer::timeout, this, [this]() {
+                        if (m_doubleYoloMode) {
+                            autoAcceptSuggestion();
+                        }
+                    });
+                }
+                if (!m_suggestionTimer->isActive()) {
+                    m_suggestionTimer->start(500);
                 }
             }
         } else {
@@ -2033,71 +1936,7 @@ void ClaudeSession::setDoubleYoloMode(bool enabled)
                 m_suggestionTimer->stop();
                 qDebug() << "ClaudeSession: Cancelled pending suggestion timer (double yolo disabled)";
             }
-            if (m_suggestionFallbackTimer && m_suggestionFallbackTimer->isActive()) {
-                m_suggestionFallbackTimer->stop();
-                qDebug() << "ClaudeSession: Cancelled suggestion fallback timer (double yolo disabled)";
-            }
-
-            // Only stop polling if triple yolo doesn't also need it
-            if (!m_tripleYoloMode) {
-                stopIdlePolling();
-            }
-        }
-    }
-}
-
-void ClaudeSession::setTripleYoloMode(bool enabled)
-{
-    if (m_tripleYoloMode != enabled) {
-        m_tripleYoloMode = enabled;
-        Q_EMIT tripleYoloModeChanged(enabled);
-
-        // Manage .yolo-team state file for hook-based team auto-continue
-        if (m_hookHandler) {
-            QString teamYoloPath = m_hookHandler->socketPath();
-            teamYoloPath.replace(QStringLiteral(".sock"), QStringLiteral(".yolo-team"));
-
-            if (enabled) {
-                QFile teamYoloFile(teamYoloPath);
-                if (teamYoloFile.open(QIODevice::WriteOnly)) {
-                    teamYoloFile.write("1");
-                    teamYoloFile.close();
-                    qDebug() << "ClaudeSession: Created team yolo state file:" << teamYoloPath;
-                }
-            } else {
-                if (QFile::exists(teamYoloPath)) {
-                    QFile::remove(teamYoloPath);
-                    qDebug() << "ClaudeSession: Removed team yolo state file:" << teamYoloPath;
-                }
-            }
-        }
-
-        if (enabled) {
-            // Start idle polling as a fallback when hooks aren't delivering state
-            startIdlePolling();
-
-            // Also fire immediately if Claude appears idle right now.
-            // Set m_idlePromptDetected to prevent polling from double-firing.
-            auto state = claudeState();
-            if (state == ClaudeProcess::State::Idle || state == ClaudeProcess::State::NotRunning) {
-                m_idlePromptDetected = true;
-                qDebug() << "ClaudeSession: Claude state" << static_cast<int>(state) << "- auto-continuing immediately (triple yolo enabled)";
-                QTimer::singleShot(500, this, [this]() {
-                    if (m_tripleYoloMode) {
-                        sendPrompt(m_autoContinuePrompt);
-                        logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3, m_autoContinuePrompt);
-                    }
-                    // Reset after cooldown to allow polling to work for subsequent idle events
-                    QTimer::singleShot(5000, this, [this]() {
-                        m_idlePromptDetected = false;
-                    });
-                });
-            }
-        } else {
-            // Only stop polling if double yolo doesn't also need it
-            if (!m_doubleYoloMode) {
-                stopIdlePolling();
-            }
+            stopIdlePolling();
         }
     }
 }

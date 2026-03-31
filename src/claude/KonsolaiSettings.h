@@ -90,19 +90,7 @@ public:
     void setDoubleYoloMode(bool enabled);
 
     /**
-     * Triple yolo mode (auto-continue) default
-     */
-    bool tripleYoloMode() const;
-    void setTripleYoloMode(bool enabled);
-
-    /**
-     * Auto-continue prompt for triple yolo mode
-     */
-    QString autoContinuePrompt() const;
-    void setAutoContinuePrompt(const QString &prompt);
-
-    /**
-     * Try suggestions first (double yolo before triple yolo)
+     * Try suggestions first in double yolo mode
      */
     bool trySuggestionsFirst() const;
     void setTrySuggestionsFirst(bool enabled);

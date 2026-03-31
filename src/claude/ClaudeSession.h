@@ -483,30 +483,7 @@ public:
     void setDoubleYoloMode(bool enabled);
 
     /**
-     * Yolo Mode Level 3: Auto-continue with prompt when Claude finishes
-     */
-    bool tripleYoloMode() const
-    {
-        return m_tripleYoloMode;
-    }
-    void setTripleYoloMode(bool enabled);
-
-    /**
-     * The prompt to send in Triple Yolo mode when Claude becomes idle
-     */
-    QString autoContinuePrompt() const
-    {
-        return m_autoContinuePrompt;
-    }
-    void setAutoContinuePrompt(const QString &prompt)
-    {
-        m_autoContinuePrompt = prompt;
-    }
-
-    /**
-     * Whether double yolo (accept suggestions) fires before triple yolo (auto-continue).
-     * When true (default), Tab+Enter fires first; if Claude stays idle, triple yolo follows.
-     * When false, triple yolo fires directly (old behavior).
+     * Whether to try accepting suggestions first in double yolo mode.
      */
     bool trySuggestionsFirst() const
     {
@@ -528,13 +505,9 @@ public:
     {
         return m_doubleYoloApprovalCount;
     }
-    int tripleYoloApprovalCount() const
-    {
-        return m_tripleYoloApprovalCount;
-    }
     int totalApprovalCount() const
     {
-        return m_yoloApprovalCount + m_doubleYoloApprovalCount + m_tripleYoloApprovalCount;
+        return m_yoloApprovalCount + m_doubleYoloApprovalCount;
     }
 
     /**
@@ -548,14 +521,12 @@ public:
     /**
      * Restore persisted approval state (counts + log) from a previous session run
      */
-    void restoreApprovalState(int yoloCount, int doubleCount, int tripleCount, const QVector<ApprovalLogEntry> &log)
+    void restoreApprovalState(int yoloCount, int doubleCount, const QVector<ApprovalLogEntry> &log)
     {
         m_yoloApprovalCount = yoloCount;
         m_doubleYoloApprovalCount = doubleCount;
-        m_tripleYoloApprovalCount = tripleCount;
         m_approvalLog = log;
-        qDebug() << "ClaudeSession: Restored approval state - yolo:" << yoloCount << "double:" << doubleCount << "triple:" << tripleCount
-                 << "log entries:" << log.size();
+        qDebug() << "ClaudeSession: Restored approval state - yolo:" << yoloCount << "double:" << doubleCount << "log entries:" << log.size();
         Q_EMIT approvalCountChanged();
     }
 
@@ -583,8 +554,6 @@ public:
             m_yoloApprovalCount++;
         } else if (yoloLevel == 2) {
             m_doubleYoloApprovalCount++;
-        } else if (yoloLevel == 3) {
-            m_tripleYoloApprovalCount++;
         }
 
         qDebug() << "ClaudeSession: Logged approval -" << toolName << action << "level:" << yoloLevel << "total:" << totalApprovalCount();
@@ -604,11 +573,6 @@ public:
     {
         logApproval(QStringLiteral("unknown"), QStringLiteral("auto-accepted"), 2);
     }
-    void incrementTripleYoloApproval()
-    {
-        logApproval(QStringLiteral("unknown"), QStringLiteral("auto-continued"), 3);
-    }
-
     /**
      * Get current token usage for this session
      */
@@ -930,11 +894,6 @@ Q_SIGNALS:
     void doubleYoloModeChanged(bool enabled);
 
     /**
-     * Emitted when triple yolo mode changes
-     */
-    void tripleYoloModeChanged(bool enabled);
-
-    /**
      * Emitted when approval count changes
      */
     void approvalCountChanged();
@@ -1034,14 +993,11 @@ private:
     // Per-session yolo mode settings
     bool m_yoloMode = false;
     bool m_doubleYoloMode = false;
-    bool m_tripleYoloMode = false;
     bool m_trySuggestionsFirst = true;
-    QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
 
     // Approval counters
     int m_yoloApprovalCount = 0;
     int m_doubleYoloApprovalCount = 0;
-    int m_tripleYoloApprovalCount = 0;
 
     // Approval log
     QVector<ApprovalLogEntry> m_approvalLog;
@@ -1088,12 +1044,7 @@ private:
     // Timer for the hook-based 5s delayed suggestion acceptance
     QTimer *m_suggestionTimer = nullptr;
 
-    // Fallback timer: if double yolo fires but Claude stays idle, triple yolo follows
-    QTimer *m_suggestionFallbackTimer = nullptr;
-    void scheduleSuggestionFallback();
-    void onSuggestionFallbackTimeout();
-
-    // Idle polling for double/triple yolo when hooks aren't delivering state
+    // Idle polling for double yolo when hooks aren't delivering state
     QTimer *m_idlePollTimer = nullptr;
     bool m_idlePromptDetected = false;
     bool m_idlePollInFlight = false; // true while async capturePane is running (legacy, kept for compat)

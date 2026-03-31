@@ -564,7 +564,6 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         // New session - capture initial yolo mode from session (which comes from global settings)
         meta.yoloMode = session->yoloMode();
         meta.doubleYoloMode = session->doubleYoloMode();
-        meta.tripleYoloMode = session->tripleYoloMode();
         // Capture remote SSH fields so session can be restored after restart
         meta.isRemote = session->isRemote();
         meta.sshHost = session->sshHost();
@@ -583,16 +582,15 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         // Restore per-session yolo mode settings from saved metadata
         session->setYoloMode(m_metadata[sessionId].yoloMode);
         session->setDoubleYoloMode(m_metadata[sessionId].doubleYoloMode);
-        session->setTripleYoloMode(m_metadata[sessionId].tripleYoloMode);
 
         // Restore approval counts and log from saved metadata
         const auto &meta = m_metadata[sessionId];
-        if (meta.yoloApprovalCount > 0 || meta.doubleYoloApprovalCount > 0 || meta.tripleYoloApprovalCount > 0) {
-            session->restoreApprovalState(meta.yoloApprovalCount, meta.doubleYoloApprovalCount, meta.tripleYoloApprovalCount, meta.approvalLog);
+        if (meta.yoloApprovalCount > 0 || meta.doubleYoloApprovalCount > 0) {
+            session->restoreApprovalState(meta.yoloApprovalCount, meta.doubleYoloApprovalCount, meta.approvalLog);
         }
 
         qDebug() << "SessionManagerPanel: Restored yolo mode for" << sessionId << "- yolo:" << meta.yoloMode << "double:" << meta.doubleYoloMode
-                 << "triple:" << meta.tripleYoloMode << "approvals:" << (meta.yoloApprovalCount + meta.doubleYoloApprovalCount + meta.tripleYoloApprovalCount);
+                 << "approvals:" << (meta.yoloApprovalCount + meta.doubleYoloApprovalCount);
     }
 
     scheduleMetadataSave();
@@ -655,15 +653,15 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         qDebug() << "SessionManagerPanel: Updated working directory for" << sessionId << "to" << newPath;
     });
 
-    // Connect to approval count changes to update display (debounced, with smart filtering)
+    // Connect to approval count changes — lightweight label refresh only
     connect(session, &ClaudeSession::approvalCountChanged, this, [this, sessionId]() {
         ClaudeSession *s = m_activeSessions.value(sessionId);
         int newCount = s ? s->totalApprovalCount() : 0;
         if (m_lastKnownApprovalCount.value(sessionId, -1) == newCount) {
-            return; // No visible change, skip rebuild
+            return; // No visible change
         }
         m_lastKnownApprovalCount[sessionId] = newCount;
-        scheduleTreeUpdate();
+        refreshSessionItemLabel(sessionId);
     });
 
     // Persist approval state on each new approval (debounced to avoid excessive I/O)
@@ -673,36 +671,27 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
             if (ClaudeSession *s = m_activeSessions.value(sessionId)) {
                 m_metadata[sessionId].yoloApprovalCount = s->yoloApprovalCount();
                 m_metadata[sessionId].doubleYoloApprovalCount = s->doubleYoloApprovalCount();
-                m_metadata[sessionId].tripleYoloApprovalCount = s->tripleYoloApprovalCount();
                 m_metadata[sessionId].approvalLog = s->approvalLog();
             }
         }
         scheduleMetadataSave();
     });
 
-    // Connect to all yolo mode changes to update display and persist per-session settings
+    // Connect to yolo mode changes — lightweight label refresh + persist
     connect(session, &ClaudeSession::yoloModeChanged, this, [this, sessionId](bool enabled) {
         if (m_metadata.contains(sessionId)) {
             m_metadata[sessionId].yoloMode = enabled;
             scheduleMetadataSave();
         }
-        scheduleTreeUpdate();
+        refreshSessionItemLabel(sessionId);
     });
     connect(session, &ClaudeSession::doubleYoloModeChanged, this, [this, sessionId](bool enabled) {
         if (m_metadata.contains(sessionId)) {
             m_metadata[sessionId].doubleYoloMode = enabled;
             scheduleMetadataSave();
         }
-        scheduleTreeUpdate();
+        refreshSessionItemLabel(sessionId);
     });
-    connect(session, &ClaudeSession::tripleYoloModeChanged, this, [this, sessionId](bool enabled) {
-        if (m_metadata.contains(sessionId)) {
-            m_metadata[sessionId].tripleYoloMode = enabled;
-            scheduleMetadataSave();
-        }
-        scheduleTreeUpdate();
-    });
-
     // Connect to state changes (Working/Idle/etc.) to update live activity line (with smart filtering)
     connect(session, &ClaudeSession::stateChanged, this, [this, sessionId](ClaudeProcess::State newState) {
         if (m_lastKnownState.value(sessionId, static_cast<ClaudeProcess::State>(-1)) == newState) {
@@ -751,10 +740,8 @@ void SessionManagerPanel::unregisterSession(ClaudeSession *session)
     if (m_metadata.contains(sessionId)) {
         m_metadata[sessionId].yoloMode = session->yoloMode();
         m_metadata[sessionId].doubleYoloMode = session->doubleYoloMode();
-        m_metadata[sessionId].tripleYoloMode = session->tripleYoloMode();
         m_metadata[sessionId].yoloApprovalCount = session->yoloApprovalCount();
         m_metadata[sessionId].doubleYoloApprovalCount = session->doubleYoloApprovalCount();
-        m_metadata[sessionId].tripleYoloApprovalCount = session->tripleYoloApprovalCount();
         m_metadata[sessionId].approvalLog = session->approvalLog();
         if (!session->resumeSessionId().isEmpty()) {
             m_metadata[sessionId].lastResumeSessionId = session->resumeSessionId();
@@ -2269,18 +2256,6 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 }
             });
 
-            QAction *tripleYoloAction = menu.addAction(i18n("Triple Yolo"));
-            tripleYoloAction->setCheckable(true);
-            tripleYoloAction->setChecked(activeSession->tripleYoloMode());
-            connect(tripleYoloAction, &QAction::triggered, this, [this, activeSession](bool checked) {
-                if (activeSession) {
-                    activeSession->setTripleYoloMode(checked);
-                    if (checked) {
-                        ensureHooksConfigured(activeSession);
-                    }
-                }
-            });
-
             // Reset Hooks — force-clear all hooks and reset yolo state
             QAction *resetHooksAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear")), i18n("Reset Hooks"));
             connect(resetHooksAction, &QAction::triggered, this, [this, sessionId, activeSession]() {
@@ -2296,7 +2271,6 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 if (activeSession) {
                     activeSession->setYoloMode(false);
                     activeSession->setDoubleYoloMode(false);
-                    activeSession->setTripleYoloMode(false);
                 }
 
                 // 3. Re-install fresh hooks if session is still active
@@ -2861,55 +2835,110 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         return a.lastAccessed > b.lastAccessed;
     });
 
-    // Pre-pass: count sessions per (workingDirectory, category) to detect duplicates.
-    // When multiple sessions share the same directory and end up in the same category,
-    // addSessionToTree will append a creation timestamp for disambiguation.
-    QHash<QString, int> dirCategoryCount; // "workDir|categoryName" → count
-    auto categoryKey = [&](const SessionMetadata &m, const QString &cat) {
-        return m.workingDirectory + QStringLiteral("|") + cat;
-    };
-    for (const auto &meta : sortedMeta) {
-        bool isAct = m_activeSessions.contains(meta.sessionId);
-        bool alive = liveNames.contains(meta.sessionName)
-            || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
-        bool closed = m_explicitlyClosed.contains(meta.sessionId);
-        if (closed && !alive) closed = false;
-
-        QString cat;
-        if (meta.isDismissed) cat = QStringLiteral("dismissed");
-        else if (meta.isArchived) cat = QStringLiteral("archived");
-        else if (meta.isPinned) cat = QStringLiteral("pinned");
-        else if (isAct) cat = QStringLiteral("active");
-        else if (alive && !closed) cat = QStringLiteral("detached");
-        else cat = QStringLiteral("closed");
-        dirCategoryCount[categoryKey(meta, cat)]++;
-    }
-
-    // Add sessions to appropriate categories
-    // Priority: Dismissed > Archived > Pinned > Active (has tab) > Detached (tmux alive) > Closed (tmux dead)
-    for (const auto &meta : sortedMeta) {
-        bool isActive = m_activeSessions.contains(meta.sessionId);
-        bool tmuxAlive = liveNames.contains(meta.sessionName)
-            || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
-        bool wasClosed = m_explicitlyClosed.contains(meta.sessionId);
-
-        // Clear from explicitly-closed set once tmux is actually dead
-        if (wasClosed && !tmuxAlive) {
-            m_explicitlyClosed.remove(meta.sessionId);
-            wasClosed = false; // already categorized correctly via tmuxAlive=false
+    // Resolve project root: worktree paths (containing /.claude/worktrees/) resolve
+    // to the parent project; other paths are used as-is.
+    auto resolveProjectRoot = [](const QString &workDir) -> QString {
+        int idx = workDir.indexOf(QStringLiteral("/.claude/worktrees/"));
+        if (idx > 0) {
+            return workDir.left(idx);
         }
+        return workDir;
+    };
 
+    // Pre-pass 1: determine each session's category
+    struct SessionEntry {
+        SessionMetadata meta;
         QString cat;
         QTreeWidgetItem *parent = nullptr;
-        if (meta.isDismissed) { cat = QStringLiteral("dismissed"); parent = m_dismissedCategory; }
-        else if (meta.isArchived) { cat = QStringLiteral("archived"); parent = m_archivedCategory; }
-        else if (meta.isPinned) { cat = QStringLiteral("pinned"); parent = m_pinnedCategory; }
-        else if (isActive) { cat = QStringLiteral("active"); parent = m_activeCategory; }
-        else if (tmuxAlive && !wasClosed) { cat = QStringLiteral("detached"); parent = m_detachedCategory; }
-        else { cat = QStringLiteral("closed"); parent = m_closedCategory; }
+        QString projectRoot;
+    };
+    QList<SessionEntry> entries;
+    entries.reserve(sortedMeta.size());
 
-        bool hasSiblings = dirCategoryCount.value(categoryKey(meta, cat), 0) > 1;
-        addSessionToTree(meta, parent, hasSiblings);
+    for (const auto &meta : sortedMeta) {
+        bool isAct = m_activeSessions.contains(meta.sessionId);
+        bool alive = liveNames.contains(meta.sessionName) || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+        bool wasClosed = m_explicitlyClosed.contains(meta.sessionId);
+        if (wasClosed && !alive) {
+            m_explicitlyClosed.remove(meta.sessionId);
+            wasClosed = false;
+        }
+
+        SessionEntry e;
+        e.meta = meta;
+        e.projectRoot = resolveProjectRoot(meta.workingDirectory);
+        if (meta.isDismissed) {
+            e.cat = QStringLiteral("dismissed");
+            e.parent = m_dismissedCategory;
+        } else if (meta.isArchived) {
+            e.cat = QStringLiteral("archived");
+            e.parent = m_archivedCategory;
+        } else if (meta.isPinned) {
+            e.cat = QStringLiteral("pinned");
+            e.parent = m_pinnedCategory;
+        } else if (isAct) {
+            e.cat = QStringLiteral("active");
+            e.parent = m_activeCategory;
+        } else if (alive && !wasClosed) {
+            e.cat = QStringLiteral("detached");
+            e.parent = m_detachedCategory;
+        } else {
+            e.cat = QStringLiteral("closed");
+            e.parent = m_closedCategory;
+        }
+        entries.append(e);
+    }
+
+    // Pre-pass 2: count sessions per (projectRoot, category) for grouping and sibling detection
+    QHash<QString, int> rootCategoryCount; // "projectRoot|cat" → count
+    QHash<QString, int> dirCategoryCount; // "workDir|cat" → count
+    for (const auto &e : entries) {
+        rootCategoryCount[e.projectRoot + QStringLiteral("|") + e.cat]++;
+        dirCategoryCount[e.meta.workingDirectory + QStringLiteral("|") + e.cat]++;
+    }
+
+    // Create group headers for project roots with 2+ sessions in the same category
+    QHash<QString, QTreeWidgetItem *> groupItems; // "projectRoot|cat" → group item
+    for (auto it = rootCategoryCount.constBegin(); it != rootCategoryCount.constEnd(); ++it) {
+        if (it.value() < 2) {
+            continue;
+        }
+        // Extract root and cat from the composite key
+        int sep = it.key().lastIndexOf(QLatin1Char('|'));
+        QString root = it.key().left(sep);
+        QString cat = it.key().mid(sep + 1);
+        QTreeWidgetItem *categoryItem = nullptr;
+        if (cat == QStringLiteral("dismissed"))
+            categoryItem = m_dismissedCategory;
+        else if (cat == QStringLiteral("archived"))
+            categoryItem = m_archivedCategory;
+        else if (cat == QStringLiteral("pinned"))
+            categoryItem = m_pinnedCategory;
+        else if (cat == QStringLiteral("active"))
+            categoryItem = m_activeCategory;
+        else if (cat == QStringLiteral("detached"))
+            categoryItem = m_detachedCategory;
+        else
+            categoryItem = m_closedCategory;
+
+        auto *groupItem = new QTreeWidgetItem(categoryItem);
+        QString groupName = QDir(root).dirName();
+        groupItem->setText(0, QStringLiteral("%1 (%2)").arg(groupName).arg(it.value()));
+        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-open")));
+        groupItem->setFlags(Qt::ItemIsEnabled);
+        // Composite key for expansion state persistence (same role as session items)
+        QString expandKey = QStringLiteral("group:") + it.key();
+        groupItem->setData(0, Qt::UserRole + 6, expandKey);
+        groupItem->setExpanded(m_expansionState.value(expandKey, true));
+        groupItems[it.key()] = groupItem;
+    }
+
+    // Add sessions to appropriate categories (under group headers when applicable)
+    for (const auto &e : entries) {
+        QString rootKey = e.projectRoot + QStringLiteral("|") + e.cat;
+        QTreeWidgetItem *parent = groupItems.value(rootKey, e.parent);
+        bool hasSiblings = dirCategoryCount.value(e.meta.workingDirectory + QStringLiteral("|") + e.cat, 0) > 1;
+        addSessionToTree(e.meta, parent, hasSiblings);
     }
 
     // Add discovered sessions (from project folder scanning)
@@ -3240,11 +3269,10 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {
-            // Build rich text: gold bolt [yolo count]  blue bolt [double count]  purple bolt [triple count]
+            // Build rich text: gold bolt [yolo count]  blue bolt [double count]
             QString boltsHtml;
             int yoloCount = session->yoloApprovalCount();
             int doubleCount = session->doubleYoloApprovalCount();
-            int tripleCount = session->tripleYoloApprovalCount();
 
             if (session->yoloMode() || yoloCount > 0) {
                 boltsHtml += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
@@ -3261,16 +3289,6 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
                 }
             }
-            if (session->tripleYoloMode() || tripleCount > 0) {
-                if (!boltsHtml.isEmpty()) {
-                    boltsHtml += QStringLiteral(" ");
-                }
-                boltsHtml += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>"); // Purple
-                if (tripleCount > 0) {
-                    boltsHtml += QStringLiteral("<span style='color:#AB47BC'>[%1]</span>").arg(tripleCount);
-                }
-            }
-
             // Add velocity + budget ETA when budget controller is active
             if (auto *bc = session->budgetController()) {
                 if (bc->budget().hasAnyLimit()) {
@@ -3832,12 +3850,10 @@ void SessionManagerPanel::loadMetadata()
         // Per-session yolo mode settings
         meta.yoloMode = obj[QStringLiteral("yoloMode")].toBool();
         meta.doubleYoloMode = obj[QStringLiteral("doubleYoloMode")].toBool();
-        meta.tripleYoloMode = obj[QStringLiteral("tripleYoloMode")].toBool();
 
         // Approval counts
         meta.yoloApprovalCount = obj[QStringLiteral("yoloApprovalCount")].toInt();
         meta.doubleYoloApprovalCount = obj[QStringLiteral("doubleYoloApprovalCount")].toInt();
-        meta.tripleYoloApprovalCount = obj[QStringLiteral("tripleYoloApprovalCount")].toInt();
 
         // Approval log
         const QJsonArray logArray = obj[QStringLiteral("approvalLog")].toArray();
@@ -3939,19 +3955,15 @@ void SessionManagerPanel::saveMetadata(bool sync)
         if (meta.doubleYoloMode) {
             obj[QStringLiteral("doubleYoloMode")] = true;
         }
-        if (meta.tripleYoloMode) {
-            obj[QStringLiteral("tripleYoloMode")] = true;
-        }
         if (meta.isDismissed) {
             obj[QStringLiteral("isDismissed")] = true;
         }
 
         // Approval counts (only save if non-zero)
-        int totalApprovals = meta.yoloApprovalCount + meta.doubleYoloApprovalCount + meta.tripleYoloApprovalCount;
+        int totalApprovals = meta.yoloApprovalCount + meta.doubleYoloApprovalCount;
         if (totalApprovals > 0) {
             obj[QStringLiteral("yoloApprovalCount")] = meta.yoloApprovalCount;
             obj[QStringLiteral("doubleYoloApprovalCount")] = meta.doubleYoloApprovalCount;
-            obj[QStringLiteral("tripleYoloApprovalCount")] = meta.tripleYoloApprovalCount;
 
             // Approval log (cap at 500 most recent entries to keep JSON manageable)
             if (!meta.approvalLog.isEmpty()) {
@@ -4136,6 +4148,87 @@ QTreeWidgetItem *SessionManagerPanel::findTreeItem(const QString &sessionId)
     return nullptr;
 }
 
+void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
+{
+    QTreeWidgetItem *item = findTreeItem(sessionId);
+    if (!item) {
+        return;
+    }
+
+    ClaudeSession *session = m_activeSessions.value(sessionId);
+    if (!session) {
+        return;
+    }
+
+    // Rebuild the column-1 rich-text label in-place (bolts, budget, observer badges)
+    QString boltsHtml;
+    int yoloCount = session->yoloApprovalCount();
+    int doubleCount = session->doubleYoloApprovalCount();
+
+    if (session->yoloMode() || yoloCount > 0) {
+        boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xCF\x9F</span>");
+        if (yoloCount > 0) {
+            boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
+        }
+    }
+    if (session->doubleYoloMode() || doubleCount > 0) {
+        if (!boltsHtml.isEmpty()) {
+            boltsHtml += QStringLiteral(" ");
+        }
+        boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xCF\x9F</span>");
+        if (doubleCount > 0) {
+            boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
+        }
+    }
+    if (auto *bc = session->budgetController()) {
+        if (bc->budget().hasAnyLimit()) {
+            QString budgetInfo;
+            if (bc->budget().timeLimitMinutes > 0) {
+                int elapsed = bc->budget().elapsedMinutes();
+                budgetInfo += QStringLiteral(" %1/%2m").arg(elapsed).arg(bc->budget().timeLimitMinutes);
+            }
+            if (bc->budget().costCeilingUSD > 0.0) {
+                double cost = session->tokenUsage().estimatedCostUSD();
+                if (!budgetInfo.isEmpty()) {
+                    budgetInfo += QStringLiteral(" |");
+                }
+                budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
+            }
+            if (!budgetInfo.isEmpty()) {
+                boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
+            }
+        }
+        const auto &vel = bc->velocity();
+        if (vel.tokensPerMinute() > 0) {
+            boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
+        }
+    }
+    if (auto *obs = session->sessionObserver()) {
+        int severity = obs->composedSeverity();
+        if (severity >= 5) {
+            boltsHtml += QStringLiteral(" <span style='color:#F44336'>\xe2\x9a\xa0 CRITICAL</span>");
+        } else if (severity >= 3) {
+            boltsHtml += QStringLiteral(" <span style='color:#FF9800'>\xe2\x9a\xa0</span>");
+        } else if (severity > 0) {
+            boltsHtml += QStringLiteral(" <span style='color:#FFC107'>\xe2\x9a\xa0</span>");
+        }
+    }
+
+    // Update or create the label widget
+    auto *existing = qobject_cast<QLabel *>(m_treeWidget->itemWidget(item, 1));
+    if (!boltsHtml.isEmpty()) {
+        if (existing) {
+            existing->setText(boltsHtml);
+        } else {
+            auto *label = new QLabel(boltsHtml);
+            label->setTextFormat(Qt::RichText);
+            m_treeWidget->setItemWidget(item, 1, label);
+        }
+    } else if (existing) {
+        m_treeWidget->removeItemWidget(item, 1);
+    }
+}
+
 void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
 {
     if (!session) {
@@ -4148,11 +4241,10 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
     dialog.setWindowTitle(i18n("Approval Log - %1", QDir(session->workingDirectory()).dirName()));
     auto *layout = new QVBoxLayout(&dialog);
 
-    auto *summary = new QLabel(i18n("Total auto-approvals: %1 (Yolo: %2, Double: %3, Triple: %4)",
+    auto *summary = new QLabel(i18n("Total auto-approvals: %1 (Yolo: %2, Double: %3)",
                                     session->totalApprovalCount(),
                                     session->yoloApprovalCount(),
-                                    session->doubleYoloApprovalCount(),
-                                    session->tripleYoloApprovalCount()),
+                                    session->doubleYoloApprovalCount()),
                                &dialog);
     layout->addWidget(summary);
 
@@ -4236,21 +4328,12 @@ void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
         const auto &entry = logCopy[idx];
         QString detail;
 
-        // For double yolo (suggestion acceptance) and triple yolo (auto-continue),
-        // show the prompt that was sent
+        // For double yolo (suggestion acceptance), show the action
         if (entry.yoloLevel == 2) {
             detail += QStringLiteral("--- Action ---\nAccepted inline suggestion (Tab + Enter)\n");
-        } else if (entry.yoloLevel == 3) {
-            detail += QStringLiteral("--- Auto-Continue Prompt ---\n");
-            if (!entry.toolInput.isEmpty()) {
-                detail += entry.toolInput;
-            } else {
-                detail += QStringLiteral("(prompt not recorded)");
-            }
-            detail += QStringLiteral("\n");
         }
 
-        if (!entry.toolInput.isEmpty() && entry.yoloLevel != 3) {
+        if (!entry.toolInput.isEmpty()) {
             if (!detail.isEmpty()) {
                 detail += QStringLiteral("\n");
             }

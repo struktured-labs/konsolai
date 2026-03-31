@@ -227,29 +227,27 @@ void ClaudeSessionStateTest::testAttachmentStatus()
 
 void ClaudeSessionStateTest::testAutoContinuePromptSerialization()
 {
+    // autoContinuePrompt has been removed from ClaudeSessionState.
+    // This test now verifies the field is no longer serialized.
     ClaudeSessionState state;
     state.sessionName = QStringLiteral("konsolai-test-prompt01");
     state.sessionId = QStringLiteral("prompt01");
-    state.autoContinuePrompt = QStringLiteral("Keep building the app.");
 
     QJsonObject json = state.toJson();
-
-    QVERIFY(json.contains(QStringLiteral("autoContinuePrompt")));
-    QCOMPARE(json[QStringLiteral("autoContinuePrompt")].toString(), QStringLiteral("Keep building the app."));
+    QVERIFY(!json.contains(QStringLiteral("autoContinuePrompt")));
 }
 
 void ClaudeSessionStateTest::testAutoContinuePromptRoundTrip()
 {
+    // autoContinuePrompt has been removed. Verify basic round trip still works.
     ClaudeSessionState original;
     original.sessionName = QStringLiteral("konsolai-test-prompt02");
     original.sessionId = QStringLiteral("prompt02");
     original.workingDirectory = QStringLiteral("/home/user/myproject");
-    original.autoContinuePrompt = QStringLiteral("Continue fixing bugs and adding tests.");
 
     QJsonObject json = original.toJson();
     ClaudeSessionState restored = ClaudeSessionState::fromJson(json);
 
-    QCOMPARE(restored.autoContinuePrompt, original.autoContinuePrompt);
     QCOMPARE(restored.workingDirectory, original.workingDirectory);
 }
 
@@ -258,11 +256,8 @@ void ClaudeSessionStateTest::testAutoContinuePromptEmptyNotInJson()
     ClaudeSessionState state;
     state.sessionName = QStringLiteral("konsolai-test-prompt03");
     state.sessionId = QStringLiteral("prompt03");
-    // autoContinuePrompt left empty
 
     QJsonObject json = state.toJson();
-
-    // Empty prompt should NOT be serialized (saves space)
     QVERIFY(!json.contains(QStringLiteral("autoContinuePrompt")));
 }
 
@@ -271,12 +266,9 @@ void ClaudeSessionStateTest::testAutoContinuePromptMissingFromJson()
     QJsonObject json;
     json[QStringLiteral("sessionName")] = QStringLiteral("konsolai-test-prompt04");
     json[QStringLiteral("sessionId")] = QStringLiteral("prompt04");
-    // No autoContinuePrompt key
 
     ClaudeSessionState state = ClaudeSessionState::fromJson(json);
-
     QVERIFY(state.isValid());
-    QVERIFY(state.autoContinuePrompt.isEmpty());
 }
 
 void ClaudeSessionStateTest::testYoloModeSerialization()
@@ -286,13 +278,11 @@ void ClaudeSessionStateTest::testYoloModeSerialization()
     state.sessionId = QStringLiteral("aabbccdd");
     state.yoloMode = true;
     state.doubleYoloMode = true;
-    state.tripleYoloMode = false;
 
     QJsonObject json = state.toJson();
 
     QCOMPARE(json[QStringLiteral("yoloMode")].toBool(), true);
     QCOMPARE(json[QStringLiteral("doubleYoloMode")].toBool(), true);
-    QCOMPARE(json[QStringLiteral("tripleYoloMode")].toBool(), false);
 }
 
 void ClaudeSessionStateTest::testYoloModeRoundTrip()
@@ -302,14 +292,12 @@ void ClaudeSessionStateTest::testYoloModeRoundTrip()
     original.sessionId = QStringLiteral("eeff0011");
     original.yoloMode = true;
     original.doubleYoloMode = false;
-    original.tripleYoloMode = true;
 
     QJsonObject json = original.toJson();
     ClaudeSessionState restored = ClaudeSessionState::fromJson(json);
 
     QCOMPARE(restored.yoloMode, true);
     QCOMPARE(restored.doubleYoloMode, false);
-    QCOMPARE(restored.tripleYoloMode, true);
 }
 
 void ClaudeSessionStateTest::testYoloModeDefaultsFalse()
@@ -323,7 +311,6 @@ void ClaudeSessionStateTest::testYoloModeDefaultsFalse()
 
     QCOMPARE(state.yoloMode, false);
     QCOMPARE(state.doubleYoloMode, false);
-    QCOMPARE(state.tripleYoloMode, false);
 }
 
 void ClaudeSessionStateTest::testTaskDescriptionRoundTrip()

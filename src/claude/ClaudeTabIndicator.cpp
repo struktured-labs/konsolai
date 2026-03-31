@@ -52,9 +52,6 @@ void ClaudeTabIndicator::setSession(ClaudeSession *session)
         connect(m_session, &ClaudeSession::doubleYoloModeChanged, this, [this](bool) {
             update();
         });
-        connect(m_session, &ClaudeSession::tripleYoloModeChanged, this, [this](bool) {
-            update();
-        });
         connect(m_session, &ClaudeSession::approvalCountChanged, this, [this]() {
             update();
         });
@@ -89,9 +86,7 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
     // Determine yolo level for border color
     int yoloLevel = 0;
     if (m_session) {
-        if (m_session->tripleYoloMode()) {
-            yoloLevel = 3;
-        } else if (m_session->doubleYoloMode()) {
+        if (m_session->doubleYoloMode()) {
             yoloLevel = 2;
         } else if (m_session->yoloMode()) {
             yoloLevel = 1;
@@ -129,9 +124,7 @@ void ClaudeTabIndicator::paintEvent(QPaintEvent *event)
     // Draw yolo mode border ring
     if (yoloLevel > 0) {
         QColor yoloColor;
-        if (yoloLevel == 3) {
-            yoloColor = QColor(170, 0, 255); // Purple for triple
-        } else if (yoloLevel == 2) {
+        if (yoloLevel == 2) {
             yoloColor = QColor(33, 150, 243); // Blue for double
         } else {
             yoloColor = QColor(255, 215, 0); // Gold for single

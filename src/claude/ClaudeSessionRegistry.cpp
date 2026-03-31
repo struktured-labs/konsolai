@@ -135,10 +135,8 @@ void ClaudeSessionRegistry::registerSession(ClaudeSession *session)
     state.lastAccessed = QDateTime::currentDateTime();
     state.isAttached = true;
     state.taskDescription = session->taskDescription();
-    state.autoContinuePrompt = session->autoContinuePrompt();
     state.yoloMode = session->yoloMode();
     state.doubleYoloMode = session->doubleYoloMode();
-    state.tripleYoloMode = session->tripleYoloMode();
 
     m_sessionStates.insert(name, state);
 
@@ -160,10 +158,8 @@ void ClaudeSessionRegistry::unregisterSession(ClaudeSession *session)
         m_sessionStates[name].isAttached = false;
         m_sessionStates[name].lastAccessed = QDateTime::currentDateTime();
         m_sessionStates[name].taskDescription = session->taskDescription();
-        m_sessionStates[name].autoContinuePrompt = session->autoContinuePrompt();
         m_sessionStates[name].yoloMode = session->yoloMode();
         m_sessionStates[name].doubleYoloMode = session->doubleYoloMode();
-        m_sessionStates[name].tripleYoloMode = session->tripleYoloMode();
     }
 
     Q_EMIT sessionUnregistered(name);
@@ -213,33 +209,6 @@ QList<ClaudeSessionState> ClaudeSessionRegistry::allSessionStates() const
 ClaudeSession* ClaudeSessionRegistry::findSession(const QString &sessionName) const
 {
     return m_activeSessions.value(sessionName, nullptr);
-}
-
-QString ClaudeSessionRegistry::lastAutoContinuePrompt(const QString &workingDirectory) const
-{
-    // Find the most recently accessed session with a matching working directory
-    // that has a custom prompt set
-    QDateTime newest;
-    QString result;
-
-    for (const ClaudeSessionState &state : m_sessionStates) {
-        if (state.workingDirectory == workingDirectory && !state.autoContinuePrompt.isEmpty()) {
-            if (!newest.isValid() || state.lastAccessed > newest) {
-                newest = state.lastAccessed;
-                result = state.autoContinuePrompt;
-            }
-        }
-    }
-
-    return result;
-}
-
-void ClaudeSessionRegistry::updateSessionPrompt(const QString &sessionName, const QString &prompt)
-{
-    if (m_sessionStates.contains(sessionName)) {
-        m_sessionStates[sessionName].autoContinuePrompt = prompt;
-        scheduleSaveState();
-    }
 }
 
 const ClaudeSessionState *ClaudeSessionRegistry::lastSessionState(const QString &workingDirectory) const

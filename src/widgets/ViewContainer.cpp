@@ -625,15 +625,6 @@ void TabbedViewContainer::openTabContextMenu(const QPoint &point)
             }
         });
 
-        auto *tripleYoloAction = claudeMenu.addAction(i18nc("@action:inmenu", "Triple Yolo"));
-        tripleYoloAction->setCheckable(true);
-        tripleYoloAction->setChecked(claudeSession->tripleYoloMode());
-        connect(tripleYoloAction, &QAction::triggered, this, [safeSession](bool checked) {
-            if (safeSession) {
-                safeSession->setTripleYoloMode(checked);
-            }
-        });
-
         claudeMenu.addSeparator();
 
         // Restart Claude

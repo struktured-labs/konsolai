@@ -14,19 +14,14 @@
 #include <KLocalizedString>
 #include <KNotifyConfigWidget>
 #include <QActionGroup>
-#include <QCheckBox>
-#include <QDialogButtonBox>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLabel>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
-#include <QPlainTextEdit>
 #include <QRegularExpression>
-#include <QVBoxLayout>
 
 namespace Konsolai
 {
@@ -62,9 +57,6 @@ ClaudeMenu::ClaudeMenu(QWidget *parent)
     if (settings) {
         m_yoloMode = settings->yoloMode();
         m_doubleYoloMode = settings->doubleYoloMode();
-        m_tripleYoloMode = settings->tripleYoloMode();
-        m_autoContinuePrompt = settings->autoContinuePrompt();
-        m_trySuggestionsFirst = settings->trySuggestionsFirst();
     }
 
     createActions();
@@ -132,19 +124,6 @@ void ClaudeMenu::createActions()
     m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
     m_doubleYoloModeAction->setToolTip(i18n("Automatically accept tab completions"));
     connect(m_doubleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onDoubleYoloModeToggled);
-
-    // Triple Yolo Mode - auto-continue with prompt (purple)
-    m_tripleYoloModeAction = addAction(coloredBoltIcon(QColor(0xAB, 0x47, 0xBC), 1), i18n("&Triple Yolo Mode (Auto-Continue)"));
-    m_tripleYoloModeAction->setObjectName(QStringLiteral("claudeTripleYolo"));
-    m_tripleYoloModeAction->setCheckable(true);
-    m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
-    m_tripleYoloModeAction->setToolTip(i18n("Automatically send continue prompt when Claude becomes idle"));
-    connect(m_tripleYoloModeAction, &QAction::toggled, this, &ClaudeMenu::onTripleYoloModeToggled);
-
-    // Set Auto-Continue Prompt
-    m_setPromptAction = addAction(i18n("Set Auto-Continue &Prompt..."));
-    m_setPromptAction->setToolTip(i18n("Configure the prompt sent when Triple Yolo auto-continues"));
-    connect(m_setPromptAction, &QAction::triggered, this, &ClaudeMenu::onSetAutoContinuePrompt);
 
     addSeparator();
 
@@ -236,14 +215,6 @@ void ClaudeMenu::setActiveSession(ClaudeSession *session)
                 m_doubleYoloModeAction->blockSignals(false);
             }
             m_doubleYoloMode = enabled;
-        });
-        connect(m_activeSession, &ClaudeSession::tripleYoloModeChanged, this, [this](bool enabled) {
-            if (m_tripleYoloModeAction) {
-                m_tripleYoloModeAction->blockSignals(true);
-                m_tripleYoloModeAction->setChecked(enabled);
-                m_tripleYoloModeAction->blockSignals(false);
-            }
-            m_tripleYoloMode = enabled;
         });
     }
 
@@ -451,117 +422,6 @@ void ClaudeMenu::setDoubleYoloMode(bool enabled)
     Q_EMIT doubleYoloModeChanged(enabled);
 }
 
-void ClaudeMenu::onTripleYoloModeToggled(bool checked)
-{
-    setTripleYoloMode(checked);
-}
-
-void ClaudeMenu::onSetAutoContinuePrompt()
-{
-    QDialog dialog(this);
-    dialog.setWindowTitle(i18n("Auto-Continue Settings"));
-    dialog.resize(480, 340);
-
-    auto *layout = new QVBoxLayout(&dialog);
-
-    auto *label = new QLabel(i18n("Enter the prompt to send when Claude becomes idle:"), &dialog);
-    layout->addWidget(label);
-
-    auto *textEdit = new QPlainTextEdit(&dialog);
-    textEdit->setPlainText(m_autoContinuePrompt);
-    layout->addWidget(textEdit);
-
-    auto *suggestionsCheckBox = new QCheckBox(i18n("Accept suggestions first (double yolo)"), &dialog);
-    suggestionsCheckBox->setToolTip(
-        i18n("When enabled, Tab+Enter fires before auto-continue. "
-             "If no suggestion is accepted, auto-continue follows as fallback."));
-    suggestionsCheckBox->setChecked(m_trySuggestionsFirst);
-    layout->addWidget(suggestionsCheckBox);
-
-    auto *globalCheckBox = new QCheckBox(i18n("Set as global default for new sessions"), &dialog);
-    globalCheckBox->setToolTip(i18n("When checked, also saves this prompt as the default for all new sessions."));
-    globalCheckBox->setChecked(false);
-    layout->addWidget(globalCheckBox);
-
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    layout->addWidget(buttons);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QString prompt = textEdit->toPlainText();
-        if (!prompt.isEmpty()) {
-            // Always update menu state and active session
-            m_autoContinuePrompt = prompt;
-            if (m_activeSession) {
-                m_activeSession->setAutoContinuePrompt(prompt);
-
-                // Persist per-session prompt in session registry
-                if (auto *reg = ClaudeSessionRegistry::instance()) {
-                    reg->updateSessionPrompt(m_activeSession->sessionName(), prompt);
-                }
-            }
-
-            // Only persist globally if the checkbox is checked
-            if (globalCheckBox->isChecked()) {
-                if (auto *s = KonsolaiSettings::instance()) {
-                    s->setAutoContinuePrompt(prompt);
-                    s->save();
-                }
-            }
-        }
-
-        bool trySuggestions = suggestionsCheckBox->isChecked();
-        if (m_trySuggestionsFirst != trySuggestions) {
-            m_trySuggestionsFirst = trySuggestions;
-            if (m_activeSession) {
-                m_activeSession->setTrySuggestionsFirst(trySuggestions);
-            }
-            if (auto *s = KonsolaiSettings::instance()) {
-                s->setTrySuggestionsFirst(trySuggestions);
-                s->save();
-            }
-        }
-    }
-}
-
-void ClaudeMenu::setTripleYoloMode(bool enabled)
-{
-    if (m_tripleYoloMode == enabled) {
-        return;
-    }
-
-    m_tripleYoloMode = enabled;
-
-    if (m_tripleYoloModeAction) {
-        m_tripleYoloModeAction->setChecked(enabled);
-    }
-
-    // Update per-session setting
-    if (m_activeSession) {
-        m_activeSession->setTripleYoloMode(enabled);
-    }
-
-    // Persist
-    if (auto *s = KonsolaiSettings::instance()) {
-        s->setTripleYoloMode(enabled);
-        s->save();
-    }
-
-    Q_EMIT tripleYoloModeChanged(enabled);
-}
-
-void ClaudeMenu::setAutoContinuePrompt(const QString &prompt)
-{
-    m_autoContinuePrompt = prompt;
-
-    // Update per-session setting only — not global.
-    // Global default is only changed via the dialog's "Set as global default" checkbox.
-    if (m_activeSession) {
-        m_activeSession->setAutoContinuePrompt(prompt);
-    }
-}
-
 void ClaudeMenu::syncYoloModesFromSession()
 {
     if (m_activeSession) {
@@ -569,8 +429,6 @@ void ClaudeMenu::syncYoloModesFromSession()
         // This ensures isYoloMode() etc. return the per-session value.
         m_yoloMode = m_activeSession->yoloMode();
         m_doubleYoloMode = m_activeSession->doubleYoloMode();
-        m_tripleYoloMode = m_activeSession->tripleYoloMode();
-        m_trySuggestionsFirst = m_activeSession->trySuggestionsFirst();
 
         if (m_yoloModeAction) {
             m_yoloModeAction->blockSignals(true);
@@ -582,12 +440,6 @@ void ClaudeMenu::syncYoloModesFromSession()
             m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
             m_doubleYoloModeAction->blockSignals(false);
         }
-        if (m_tripleYoloModeAction) {
-            m_tripleYoloModeAction->blockSignals(true);
-            m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
-            m_tripleYoloModeAction->blockSignals(false);
-        }
-        m_autoContinuePrompt = m_activeSession->autoContinuePrompt();
     } else {
         // No session - show global defaults
         if (m_yoloModeAction) {
@@ -599,11 +451,6 @@ void ClaudeMenu::syncYoloModesFromSession()
             m_doubleYoloModeAction->blockSignals(true);
             m_doubleYoloModeAction->setChecked(m_doubleYoloMode);
             m_doubleYoloModeAction->blockSignals(false);
-        }
-        if (m_tripleYoloModeAction) {
-            m_tripleYoloModeAction->blockSignals(true);
-            m_tripleYoloModeAction->setChecked(m_tripleYoloMode);
-            m_tripleYoloModeAction->blockSignals(false);
         }
     }
 }

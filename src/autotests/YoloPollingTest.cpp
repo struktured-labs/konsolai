@@ -201,16 +201,14 @@ void YoloPollingTest::testSetDoubleYoloMode_StopsIdlePolling()
 
 void YoloPollingTest::testSetDoubleYoloMode_KeepsIdlePollingWithTripleYolo()
 {
+    // Triple yolo removed. Verify that disabling double yolo stops idle polling.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
 
-    // Enable both double and triple yolo
     session.setDoubleYoloMode(true);
-    session.setTripleYoloMode(true);
     QVERIFY(hasActiveTimerWithInterval(&session, 2000));
 
-    // Disable double yolo — idle polling should remain for triple yolo
     session.setDoubleYoloMode(false);
-    QVERIFY2(hasActiveTimerWithInterval(&session, 2000), "Idle polling should remain active for triple yolo when double yolo disabled");
+    QVERIFY2(!hasActiveTimerWithInterval(&session, 2000), "Idle polling should stop when double yolo disabled");
 }
 
 void YoloPollingTest::testSetDoubleYoloMode_CancelsPendingTimers()
@@ -236,83 +234,54 @@ void YoloPollingTest::testSetDoubleYoloMode_CancelsPendingTimers()
 
 void YoloPollingTest::testSuggestionFallback_2000msInterval()
 {
+    // Suggestion fallback timer was removed with triple yolo.
+    // Verify double yolo alone creates the idle polling timer.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
-
-    // Enable double + triple yolo so fallback path is armed
     session.setDoubleYoloMode(true);
-    session.setTripleYoloMode(true);
-
-    // The suggestion fallback timer is created lazily in scheduleSuggestionFallback()
-    // which is called when idle is detected. We verify through the timer system.
-    // After enabling both modes, idle polling should be active at 2000ms.
     QVERIFY(hasActiveTimerWithInterval(&session, 2000));
 }
 
 // ============================================================
-// Level 3: Triple Yolo (Auto-Continue)
+// Level 3: Triple Yolo (Removed — stubs)
 // ============================================================
 
 void YoloPollingTest::testSetTripleYoloMode_StartsIdlePolling()
 {
+    // Triple yolo removed. Verify double yolo starts idle polling instead.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
-
     QVERIFY(!hasActiveTimerWithInterval(&session, 2000));
-
-    session.setTripleYoloMode(true);
-
-    QVERIFY2(hasActiveTimerWithInterval(&session, 2000), "Idle polling timer (2000ms) should be active after setTripleYoloMode(true)");
+    session.setDoubleYoloMode(true);
+    QVERIFY(hasActiveTimerWithInterval(&session, 2000));
 }
 
 void YoloPollingTest::testSetTripleYoloMode_StopsIdlePolling()
 {
+    // Triple yolo removed. Verify double yolo stops idle polling.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
-
-    session.setTripleYoloMode(true);
+    session.setDoubleYoloMode(true);
     QVERIFY(hasActiveTimerWithInterval(&session, 2000));
-
-    session.setTripleYoloMode(false);
-
-    QVERIFY2(!hasActiveTimerWithInterval(&session, 2000), "Idle polling should stop when triple yolo disabled (double yolo also off)");
+    session.setDoubleYoloMode(false);
+    QVERIFY(!hasActiveTimerWithInterval(&session, 2000));
 }
 
 void YoloPollingTest::testSetTripleYoloMode_KeepsIdlePollingWithDoubleYolo()
 {
+    // Triple yolo removed. Double yolo manages idle polling independently.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
-
-    // Enable both
-    session.setTripleYoloMode(true);
     session.setDoubleYoloMode(true);
     QVERIFY(hasActiveTimerWithInterval(&session, 2000));
-
-    // Disable triple — idle polling should remain for double yolo
-    session.setTripleYoloMode(false);
-    QVERIFY2(hasActiveTimerWithInterval(&session, 2000), "Idle polling should remain active for double yolo when triple yolo disabled");
 }
 
 void YoloPollingTest::testTripleYolo_UsesAutoContinuePrompt()
 {
-    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
-
-    // Default auto-continue prompt
-    QString defaultPrompt = session.autoContinuePrompt();
-    QVERIFY(!defaultPrompt.isEmpty());
-    QVERIFY(defaultPrompt.contains(QStringLiteral("Continue")));
+    // Triple yolo (auto-continue) removed. Test is now a no-op.
+    QVERIFY(true);
 }
 
 void YoloPollingTest::testTripleYolo_CustomPrompt()
 {
-    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
-
-    QString customPrompt = QStringLiteral("Keep going with tests and fixes.");
-    session.setAutoContinuePrompt(customPrompt);
-    QCOMPARE(session.autoContinuePrompt(), customPrompt);
-
-    // Verify it persists after mode changes
-    session.setTripleYoloMode(true);
-    QCOMPARE(session.autoContinuePrompt(), customPrompt);
-
-    session.setTripleYoloMode(false);
-    QCOMPARE(session.autoContinuePrompt(), customPrompt);
+    // Triple yolo (auto-continue) removed. Test is now a no-op.
+    QVERIFY(true);
 }
 
 // ============================================================
@@ -357,7 +326,6 @@ void YoloPollingTest::testPauseDisplayTimers_YoloTimersKeepRunning()
     // Enable all yolo levels
     session.setYoloMode(true);
     session.setDoubleYoloMode(true);
-    session.setTripleYoloMode(true);
 
     // Pause display timers
     session.pauseDisplayTimers();
@@ -399,15 +367,14 @@ void YoloPollingTest::testResumeDisplayTimers_Idempotent()
 
 void YoloPollingTest::testAllThreeLevels_ActiveSimultaneously()
 {
+    // Triple yolo removed. Test both remaining levels.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
 
     session.setYoloMode(true);
     session.setDoubleYoloMode(true);
-    session.setTripleYoloMode(true);
 
     QVERIFY(session.yoloMode());
     QVERIFY(session.doubleYoloMode());
-    QVERIFY(session.tripleYoloMode());
 
     // Both timer systems should be active
     QVERIFY(hasActiveTimerWithInterval(&session, 300)); // permission polling
@@ -416,11 +383,9 @@ void YoloPollingTest::testAllThreeLevels_ActiveSimultaneously()
     // Disable all
     session.setYoloMode(false);
     session.setDoubleYoloMode(false);
-    session.setTripleYoloMode(false);
 
     QVERIFY(!session.yoloMode());
     QVERIFY(!session.doubleYoloMode());
-    QVERIFY(!session.tripleYoloMode());
 
     // All polling timers should be stopped
     QVERIFY(!hasActiveTimerWithInterval(&session, 300));
@@ -429,23 +394,14 @@ void YoloPollingTest::testAllThreeLevels_ActiveSimultaneously()
 
 void YoloPollingTest::testDoubleAndTripleYolo_ShareIdlePolling()
 {
+    // Triple yolo removed. Double yolo manages idle polling alone.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
 
-    // Enable double yolo — starts idle polling
     session.setDoubleYoloMode(true);
     QVERIFY(hasActiveTimerWithInterval(&session, 2000));
-
-    // Enable triple yolo — idle polling should already be active (shared)
-    session.setTripleYoloMode(true);
-    // There should still be exactly one idle polling timer
     QCOMPARE(countActiveTimersByInterval(&session, 2000), 1);
 
-    // Disable double — idle polling stays for triple
     session.setDoubleYoloMode(false);
-    QVERIFY(hasActiveTimerWithInterval(&session, 2000));
-
-    // Disable triple — now idle polling stops
-    session.setTripleYoloMode(false);
     QVERIFY(!hasActiveTimerWithInterval(&session, 2000));
 }
 
@@ -467,7 +423,6 @@ void YoloPollingTest::testPollForIdle_BailsWhenBothOff()
 
     // Neither double nor triple yolo enabled — no idle polling
     QVERIFY(!session.doubleYoloMode());
-    QVERIFY(!session.tripleYoloMode());
     QVERIFY(!hasActiveTimerWithInterval(&session, 2000));
 }
 
@@ -543,22 +498,17 @@ void YoloPollingTest::testApprovalCounts_IncrementCorrectly()
     session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
     session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
 
-    // Level 3 approvals
-    session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
-
     QCOMPARE(session.yoloApprovalCount(), 3);
     QCOMPARE(session.doubleYoloApprovalCount(), 2);
-    QCOMPARE(session.tripleYoloApprovalCount(), 1);
-    QCOMPARE(session.totalApprovalCount(), 6);
-    QCOMPARE(countSpy.count(), 6);
+    QCOMPARE(session.totalApprovalCount(), 5);
+    QCOMPARE(countSpy.count(), 5);
 
     // Approval log should have all entries
-    QCOMPARE(session.approvalLog().size(), 6);
+    QCOMPARE(session.approvalLog().size(), 5);
 
     // Verify entry details
     QCOMPARE(session.approvalLog().at(0).yoloLevel, 1);
     QCOMPARE(session.approvalLog().at(3).yoloLevel, 2);
-    QCOMPARE(session.approvalLog().at(5).yoloLevel, 3);
 }
 
 void YoloPollingTest::testTrySuggestionsFirst_ControlsPrecedence()
@@ -589,76 +539,51 @@ void YoloPollingTest::testTrySuggestionsFirst_DefaultTrue()
 
 void YoloPollingTest::testTripleYolo_IsolatedTimers()
 {
+    // Triple yolo removed. Test double yolo timer isolation instead.
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    // Enable triple yolo on A only
-    sessionA.setTripleYoloMode(true);
+    sessionA.setDoubleYoloMode(true);
 
-    // A should have idle polling timer
-    QVERIFY2(hasActiveTimerWithInterval(&sessionA, 2000), "Session A should have idle polling after enabling triple yolo");
-
-    // B should NOT have idle polling timer
-    QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 2000), "Session B must NOT have idle polling — triple yolo was only enabled on A");
+    QVERIFY2(hasActiveTimerWithInterval(&sessionA, 2000), "Session A should have idle polling after enabling double yolo");
+    QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 2000), "Session B must NOT have idle polling");
 }
 
 void YoloPollingTest::testTripleYolo_IsolatedState()
 {
+    // Triple yolo removed. Test double yolo isolation instead.
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    sessionA.setTripleYoloMode(true);
+    sessionA.setDoubleYoloMode(true);
+    QVERIFY(sessionA.doubleYoloMode());
+    QVERIFY2(!sessionB.doubleYoloMode(), "Session B must remain false when only A is enabled");
 
-    QVERIFY(sessionA.tripleYoloMode());
-    QVERIFY2(!sessionB.tripleYoloMode(), "Session B's triple yolo must remain false when only A is enabled");
+    sessionB.setDoubleYoloMode(true);
+    QVERIFY(sessionB.doubleYoloMode());
 
-    // Enable on B too
-    sessionB.setTripleYoloMode(true);
-    QVERIFY(sessionB.tripleYoloMode());
-
-    // Disable on A
-    sessionA.setTripleYoloMode(false);
-    QVERIFY(!sessionA.tripleYoloMode());
-    QVERIFY2(sessionB.tripleYoloMode(), "Session B's triple yolo must stay enabled after disabling A");
+    sessionA.setDoubleYoloMode(false);
+    QVERIFY(!sessionA.doubleYoloMode());
+    QVERIFY2(sessionB.doubleYoloMode(), "Session B must stay enabled after disabling A");
 }
 
 void YoloPollingTest::testTripleYolo_IsolatedPrompt()
 {
-    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
-    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
-
-    // Both start with the same default prompt
-    QString defaultPrompt = sessionA.autoContinuePrompt();
-    QCOMPARE(sessionB.autoContinuePrompt(), defaultPrompt);
-
-    // Customize A's prompt
-    QString customPrompt = QStringLiteral("Session A custom prompt");
-    sessionA.setAutoContinuePrompt(customPrompt);
-
-    QCOMPARE(sessionA.autoContinuePrompt(), customPrompt);
-    QVERIFY2(sessionB.autoContinuePrompt() != customPrompt, "Session B's prompt must not be affected by changing A's prompt");
-    QCOMPARE(sessionB.autoContinuePrompt(), defaultPrompt);
+    // Triple yolo (auto-continue prompt) removed. Test is now a no-op.
+    QVERIFY(true);
 }
 
 void YoloPollingTest::testTripleYolo_IsolatedApprovalCounts()
 {
+    // Test approval count isolation between sessions (using level 1 and 2).
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    // Log approvals to session A
-    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
-    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
-    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
+    sessionA.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    sessionA.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
+    sessionB.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
 
-    // Log one approval to session B
-    sessionB.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
-
-    QCOMPARE(sessionA.tripleYoloApprovalCount(), 3);
-    QCOMPARE(sessionB.tripleYoloApprovalCount(), 1);
-    QVERIFY2(sessionA.tripleYoloApprovalCount() != sessionB.tripleYoloApprovalCount(), "Approval counts must be independent per-session");
-
-    // Also verify total counts
-    QCOMPARE(sessionA.totalApprovalCount(), 3);
+    QCOMPARE(sessionA.totalApprovalCount(), 2);
     QCOMPARE(sessionB.totalApprovalCount(), 1);
 }
 
@@ -667,30 +592,26 @@ void YoloPollingTest::testTripleYolo_IsolatedTmuxManagers()
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    // Each session must have its own TmuxManager instance
     QVERIFY(sessionA.tmuxManager() != nullptr);
     QVERIFY(sessionB.tmuxManager() != nullptr);
-    QVERIFY2(sessionA.tmuxManager() != sessionB.tmuxManager(),
-             "Each session must have its own TmuxManager — shared instances would route prompts to wrong session");
+    QVERIFY2(sessionA.tmuxManager() != sessionB.tmuxManager(), "Each session must have its own TmuxManager");
 }
 
 void YoloPollingTest::testTripleYolo_DisableOneKeepsOther()
 {
+    // Test with double yolo instead.
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    // Enable triple yolo on both
-    sessionA.setTripleYoloMode(true);
-    sessionB.setTripleYoloMode(true);
+    sessionA.setDoubleYoloMode(true);
+    sessionB.setDoubleYoloMode(true);
 
     QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
     QVERIFY(hasActiveTimerWithInterval(&sessionB, 2000));
 
-    // Disable on A only
-    sessionA.setTripleYoloMode(false);
-
-    QVERIFY2(!hasActiveTimerWithInterval(&sessionA, 2000), "Session A's idle polling must stop after disabling triple yolo");
-    QVERIFY2(hasActiveTimerWithInterval(&sessionB, 2000), "Session B's idle polling must continue — only A was disabled");
+    sessionA.setDoubleYoloMode(false);
+    QVERIFY2(!hasActiveTimerWithInterval(&sessionA, 2000), "Session A's idle polling must stop");
+    QVERIFY2(hasActiveTimerWithInterval(&sessionB, 2000), "Session B's idle polling must continue");
 }
 
 void YoloPollingTest::testTripleYolo_IsolatedIdlePolling()
@@ -698,51 +619,40 @@ void YoloPollingTest::testTripleYolo_IsolatedIdlePolling()
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    // Enable double on A, triple on B — both use idle polling
     sessionA.setDoubleYoloMode(true);
-    sessionB.setTripleYoloMode(true);
+    sessionB.setDoubleYoloMode(true);
 
-    // Both should have idle polling but independent timers
     QTimer *timerA = findTimerByInterval(&sessionA, 2000);
     QTimer *timerB = findTimerByInterval(&sessionB, 2000);
 
     QVERIFY(timerA);
     QVERIFY(timerB);
     QVERIFY2(timerA != timerB, "Idle polling timers must be separate objects");
-
-    // Timer A is owned by session A
     QCOMPARE(timerA->parent(), &sessionA);
-    // Timer B is owned by session B
     QCOMPARE(timerB->parent(), &sessionB);
 }
 
 void YoloPollingTest::testTripleYolo_FullIsolationAllLevels()
 {
+    // Test with remaining levels (1 and 2).
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    // Enable all three yolo levels on session A
     sessionA.setYoloMode(true);
     sessionA.setDoubleYoloMode(true);
-    sessionA.setTripleYoloMode(true);
 
-    // Session B should have NO yolo activity
     QVERIFY(!sessionB.yoloMode());
     QVERIFY(!sessionB.doubleYoloMode());
-    QVERIFY(!sessionB.tripleYoloMode());
     QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 300), "Session B must have no permission polling");
     QVERIFY2(!hasActiveTimerWithInterval(&sessionB, 2000), "Session B must have no idle polling");
 
-    // Session A should have all timers
     QVERIFY(hasActiveTimerWithInterval(&sessionA, 300));
     QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
 
-    // Log approvals to A
     sessionA.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
     sessionA.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
-    sessionA.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
 
-    QCOMPARE(sessionA.totalApprovalCount(), 3);
+    QCOMPARE(sessionA.totalApprovalCount(), 2);
     QCOMPARE(sessionB.totalApprovalCount(), 0);
 }
 
@@ -751,40 +661,22 @@ void YoloPollingTest::testTripleYolo_DestroyOneSessionKeepsOther()
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     auto *sessionB = new ClaudeSession(QStringLiteral("test-b"), QDir::tempPath());
 
-    sessionA.setTripleYoloMode(true);
-    sessionB->setTripleYoloMode(true);
+    sessionA.setDoubleYoloMode(true);
+    sessionB->setDoubleYoloMode(true);
 
     QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
     QVERIFY(hasActiveTimerWithInterval(sessionB, 2000));
 
-    // Destroy session B
     delete sessionB;
 
-    // Session A's timer must survive
     QVERIFY2(hasActiveTimerWithInterval(&sessionA, 2000), "Session A's idle polling must survive destruction of session B");
-    QVERIFY(sessionA.tripleYoloMode());
+    QVERIFY(sessionA.doubleYoloMode());
 }
 
 void YoloPollingTest::testTripleYolo_CustomPromptIsolation()
 {
-    ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
-    ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
-    ClaudeSession sessionC(QStringLiteral("test-c"), QDir::tempPath());
-
-    // Set different prompts on each session
-    sessionA.setAutoContinuePrompt(QStringLiteral("Keep going A"));
-    sessionB.setAutoContinuePrompt(QStringLiteral("Continue B"));
-    // C keeps default
-
-    QCOMPARE(sessionA.autoContinuePrompt(), QStringLiteral("Keep going A"));
-    QCOMPARE(sessionB.autoContinuePrompt(), QStringLiteral("Continue B"));
-    QVERIFY(sessionC.autoContinuePrompt() != QStringLiteral("Keep going A"));
-    QVERIFY(sessionC.autoContinuePrompt() != QStringLiteral("Continue B"));
-
-    // Changing A's prompt again doesn't affect B or C
-    sessionA.setAutoContinuePrompt(QStringLiteral("New prompt A"));
-    QCOMPARE(sessionA.autoContinuePrompt(), QStringLiteral("New prompt A"));
-    QCOMPARE(sessionB.autoContinuePrompt(), QStringLiteral("Continue B"));
+    // Triple yolo (auto-continue prompt) removed. Test is now a no-op.
+    QVERIFY(true);
 }
 
 void YoloPollingTest::testTripleYolo_HookDeliveredIdleIsolation()
@@ -792,20 +684,17 @@ void YoloPollingTest::testTripleYolo_HookDeliveredIdleIsolation()
     ClaudeSession sessionA(QStringLiteral("test-a"), QDir::tempPath());
     ClaudeSession sessionB(QStringLiteral("test-b"), QDir::tempPath());
 
-    sessionA.setTripleYoloMode(true);
-    sessionB.setTripleYoloMode(true);
+    sessionA.setDoubleYoloMode(true);
+    sessionB.setDoubleYoloMode(true);
 
-    // Simulate hook-delivered idle on session A only
     auto *processA = sessionA.claudeProcess();
     processA->handleHookEvent(QStringLiteral("PreToolUse"), QStringLiteral("{}"));
     processA->handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
     QCOMPARE(processA->state(), ClaudeProcess::State::Idle);
 
-    // Session B's process should still be in initial state (NotRunning)
     auto *processB = sessionB.claudeProcess();
     QVERIFY2(processB->state() != ClaudeProcess::State::Idle, "Session B's state must not be affected by hook events on session A");
 
-    // Both sessions should have their idle polling timers running independently
     QVERIFY(hasActiveTimerWithInterval(&sessionA, 2000));
     QVERIFY(hasActiveTimerWithInterval(&sessionB, 2000));
 }
@@ -815,23 +704,21 @@ void YoloPollingTest::testTripleYolo_MetadataPersistenceIsolation()
     // Verify that SessionMetadata yolo fields are independent per-session
     SessionMetadata metaA;
     metaA.sessionId = QStringLiteral("session-a");
-    metaA.tripleYoloMode = true;
-    metaA.tripleYoloApprovalCount = 42;
+    metaA.doubleYoloMode = true;
+    metaA.doubleYoloApprovalCount = 42;
 
     SessionMetadata metaB;
     metaB.sessionId = QStringLiteral("session-b");
-    metaB.tripleYoloMode = false;
-    metaB.tripleYoloApprovalCount = 0;
+    metaB.doubleYoloMode = false;
+    metaB.doubleYoloApprovalCount = 0;
 
-    // Verify they don't share state
-    QVERIFY(metaA.tripleYoloMode);
-    QVERIFY(!metaB.tripleYoloMode);
-    QCOMPARE(metaA.tripleYoloApprovalCount, 42);
-    QCOMPARE(metaB.tripleYoloApprovalCount, 0);
+    QVERIFY(metaA.doubleYoloMode);
+    QVERIFY(!metaB.doubleYoloMode);
+    QCOMPARE(metaA.doubleYoloApprovalCount, 42);
+    QCOMPARE(metaB.doubleYoloApprovalCount, 0);
 
-    // Modifying A doesn't affect B
-    metaA.tripleYoloApprovalCount = 100;
-    QCOMPARE(metaB.tripleYoloApprovalCount, 0);
+    metaA.doubleYoloApprovalCount = 100;
+    QCOMPARE(metaB.doubleYoloApprovalCount, 0);
 }
 
 QTEST_GUILESS_MAIN(YoloPollingTest)

@@ -68,14 +68,6 @@ public:
     {
         return m_doubleYoloModeAction;
     }
-    QAction *tripleYoloModeAction() const
-    {
-        return m_tripleYoloModeAction;
-    }
-    QAction *setPromptAction() const
-    {
-        return m_setPromptAction;
-    }
     QAction *archiveAllAction() const
     {
         return m_archiveAllAction;
@@ -102,22 +94,6 @@ public:
     }
 
     /**
-     * Check if Triple Yolo Mode is enabled (auto-continue prompts)
-     */
-    bool isTripleYoloMode() const
-    {
-        return m_tripleYoloMode;
-    }
-
-    /**
-     * Get the auto-continue prompt
-     */
-    QString autoContinuePrompt() const
-    {
-        return m_autoContinuePrompt;
-    }
-
-    /**
      * Set Yolo Mode state
      */
     void setYoloMode(bool enabled);
@@ -126,16 +102,6 @@ public:
      * Set Double Yolo Mode state
      */
     void setDoubleYoloMode(bool enabled);
-
-    /**
-     * Set Triple Yolo Mode state
-     */
-    void setTripleYoloMode(bool enabled);
-
-    /**
-     * Set the auto-continue prompt
-     */
-    void setAutoContinuePrompt(const QString &prompt);
 
 Q_SIGNALS:
     /**
@@ -158,11 +124,6 @@ Q_SIGNALS:
      */
     void doubleYoloModeChanged(bool enabled);
 
-    /**
-     * Emitted when Triple Yolo Mode state changes
-     */
-    void tripleYoloModeChanged(bool enabled);
-
 private Q_SLOTS:
     void onApprove();
     void onDeny();
@@ -177,8 +138,6 @@ private Q_SLOTS:
     void updateActionStates();
     void onYoloModeToggled(bool checked);
     void onDoubleYoloModeToggled(bool checked);
-    void onTripleYoloModeToggled(bool checked);
-    void onSetAutoContinuePrompt();
     void onArchiveAll();
     void onArchiveSession();
     void onClearStaleHooks();
@@ -211,19 +170,9 @@ private:
     // Yolo mode actions
     QAction *m_yoloModeAction = nullptr;
     QAction *m_doubleYoloModeAction = nullptr;
-    QAction *m_tripleYoloModeAction = nullptr;
-    QAction *m_setPromptAction = nullptr;
-
     // Yolo mode state
     bool m_yoloMode = false;
     bool m_doubleYoloMode = false;
-    bool m_tripleYoloMode = false;
-
-    // Auto-continue prompt for Triple Yolo
-    QString m_autoContinuePrompt = QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable.");
-
-    // Whether double yolo fires before triple yolo
-    bool m_trySuggestionsFirst = true;
 
     // Notification submenu
     QMenu *m_notificationMenu = nullptr;

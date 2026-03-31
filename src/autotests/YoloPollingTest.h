@@ -54,24 +54,16 @@ private Q_SLOTS:
     // When double yolo disabled, pending suggestion timers are cancelled
     void testSetDoubleYoloMode_CancelsPendingTimers();
 
-    // Suggestion fallback timer is single-shot with 2000ms interval
+    // Suggestion fallback timer (removed with triple yolo - now a no-op test)
     void testSuggestionFallback_2000msInterval();
 
-    // ========== Level 3: Triple Yolo (Auto-Continue) ==========
+    // ========== Level 3: Triple Yolo (Removed) ==========
+    // These tests remain as stubs since they are registered by the Q_OBJECT macro.
 
-    // setTripleYoloMode(true) starts idle polling
     void testSetTripleYoloMode_StartsIdlePolling();
-
-    // setTripleYoloMode(false) stops idle polling (when double not active)
     void testSetTripleYoloMode_StopsIdlePolling();
-
-    // setTripleYoloMode(false) keeps idle polling if double yolo is on
     void testSetTripleYoloMode_KeepsIdlePollingWithDoubleYolo();
-
-    // Auto-continue uses m_autoContinuePrompt text
     void testTripleYolo_UsesAutoContinuePrompt();
-
-    // Custom auto-continue prompt is preserved
     void testTripleYolo_CustomPrompt();
 
     // ========== Timer Pause/Resume ==========

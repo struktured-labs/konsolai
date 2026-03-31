@@ -332,7 +332,6 @@ void ClaudeSessionYoloTest::testLogApproval_Level1()
     session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
     QCOMPARE(session.yoloApprovalCount(), 1);
     QCOMPARE(session.doubleYoloApprovalCount(), 0);
-    QCOMPARE(session.tripleYoloApprovalCount(), 0);
 }
 
 void ClaudeSessionYoloTest::testLogApproval_Level2()
@@ -342,17 +341,17 @@ void ClaudeSessionYoloTest::testLogApproval_Level2()
     session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
     QCOMPARE(session.yoloApprovalCount(), 0);
     QCOMPARE(session.doubleYoloApprovalCount(), 1);
-    QCOMPARE(session.tripleYoloApprovalCount(), 0);
 }
 
 void ClaudeSessionYoloTest::testLogApproval_Level3()
 {
+    // Level 3 (triple yolo) has been removed. Logging at level 3 should not increment any counter.
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
 
     session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
     QCOMPARE(session.yoloApprovalCount(), 0);
     QCOMPARE(session.doubleYoloApprovalCount(), 0);
-    QCOMPARE(session.tripleYoloApprovalCount(), 1);
+    QCOMPARE(session.totalApprovalCount(), 0);
 }
 
 void ClaudeSessionYoloTest::testLogApproval_AppendsToLog()
@@ -406,13 +405,10 @@ void ClaudeSessionYoloTest::testTotalApprovalCount()
     session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
     session.logApproval(QStringLiteral("Bash"), QStringLiteral("auto-approved"), 1);
     session.logApproval(QStringLiteral("suggestion"), QStringLiteral("auto-accepted"), 2);
-    session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
-    session.logApproval(QStringLiteral("auto-continue"), QStringLiteral("auto-continued"), 3);
 
     QCOMPARE(session.yoloApprovalCount(), 2);
     QCOMPARE(session.doubleYoloApprovalCount(), 1);
-    QCOMPARE(session.tripleYoloApprovalCount(), 2);
-    QCOMPARE(session.totalApprovalCount(), 5);
+    QCOMPARE(session.totalApprovalCount(), 3);
 }
 
 void ClaudeSessionYoloTest::testRestoreApprovalState()
@@ -437,12 +433,11 @@ void ClaudeSessionYoloTest::testRestoreApprovalState()
 
     QSignalSpy countSpy(&session, &ClaudeSession::approvalCountChanged);
 
-    session.restoreApprovalState(5, 3, 2, log);
+    session.restoreApprovalState(5, 3, log);
 
     QCOMPARE(session.yoloApprovalCount(), 5);
     QCOMPARE(session.doubleYoloApprovalCount(), 3);
-    QCOMPARE(session.tripleYoloApprovalCount(), 2);
-    QCOMPARE(session.totalApprovalCount(), 10);
+    QCOMPARE(session.totalApprovalCount(), 8);
     QCOMPARE(session.approvalLog().size(), 2);
     QCOMPARE(countSpy.count(), 1);
 }
@@ -594,13 +589,15 @@ void ClaudeSessionYoloTest::testSetTripleYoloMode_EmitsSignal()
 {
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
 
-    QSignalSpy spy(&session, &ClaudeSession::tripleYoloModeChanged);
+    // Triple yolo mode has been removed — this test now verifies
+    // that double yolo mode signals work correctly instead.
+    QSignalSpy spy(&session, &ClaudeSession::doubleYoloModeChanged);
 
-    session.setTripleYoloMode(true);
+    session.setDoubleYoloMode(true);
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.at(0).at(0).toBool(), true);
 
-    session.setTripleYoloMode(false);
+    session.setDoubleYoloMode(false);
     QCOMPARE(spy.count(), 2);
     QCOMPARE(spy.at(1).at(0).toBool(), false);
 }
@@ -631,22 +628,23 @@ void ClaudeSessionYoloTest::testSetYoloMode_CreatesAndRemovesFile()
 
 void ClaudeSessionYoloTest::testSetTripleYoloMode_CreatesAndRemovesTeamFile()
 {
+    // Triple yolo mode has been removed. This test now verifies that
+    // setting double yolo mode does NOT create a team yolo file (since
+    // triple yolo was the feature that managed .yolo-team files).
     ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
 
-    // Derive the expected team yolo file path
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     QString teamYoloPath = dataDir + QStringLiteral("/konsolai/sessions/") + session.sessionId() + QStringLiteral(".yolo-team");
 
-    // Ensure parent directory exists
     QDir().mkpath(QFileInfo(teamYoloPath).absolutePath());
 
     QVERIFY(!QFile::exists(teamYoloPath));
 
-    session.setTripleYoloMode(true);
-    QVERIFY2(QFile::exists(teamYoloPath), qPrintable(QStringLiteral("Expected team yolo file at: ") + teamYoloPath));
+    session.setDoubleYoloMode(true);
+    QVERIFY2(!QFile::exists(teamYoloPath), "Double yolo should not create .yolo-team file");
 
-    session.setTripleYoloMode(false);
-    QVERIFY2(!QFile::exists(teamYoloPath), "Team yolo file should be removed after disabling");
+    session.setDoubleYoloMode(false);
+    QVERIFY2(!QFile::exists(teamYoloPath), "No .yolo-team file expected");
 }
 
 void ClaudeSessionYoloTest::testSetYoloMode_CleansStaleFileWhenAlreadyOff()
@@ -852,7 +850,7 @@ void ClaudeSessionYoloTest::testTaskComplete_EmitsWhenYoloDisabled()
     // Ensure all yolo modes are off
     session.setYoloMode(false);
     session.setDoubleYoloMode(false);
-    session.setTripleYoloMode(false);
+    // triple yolo removed
 
     QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
 
@@ -875,7 +873,7 @@ void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithDoubleYolo()
     // Enable double yolo — taskComplete should still fire (notifications always emit)
     session.setYoloMode(false);
     session.setDoubleYoloMode(true);
-    session.setTripleYoloMode(false);
+    // triple yolo removed
 
     QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
 
@@ -895,7 +893,7 @@ void ClaudeSessionYoloTest::testTaskComplete_SuppressedWithTripleYolo()
     // Enable triple yolo — taskComplete should still fire (notifications always emit)
     session.setYoloMode(false);
     session.setDoubleYoloMode(false);
-    session.setTripleYoloMode(true);
+    session.setDoubleYoloMode(true); // was triple yolo, now testing with double yolo
 
     QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
 
@@ -914,7 +912,7 @@ void ClaudeSessionYoloTest::testTaskComplete_NotEmittedOnNonIdleState()
 
     session.setYoloMode(false);
     session.setDoubleYoloMode(false);
-    session.setTripleYoloMode(false);
+    // triple yolo removed
 
     QSignalSpy taskCompleteSpy(&session, &ClaudeSession::taskComplete);
 

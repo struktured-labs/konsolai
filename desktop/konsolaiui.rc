@@ -1,12 +1,13 @@
 <?xml version="1.0"?>
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
 
-<gui name="konsolai" version="23">
+<gui name="konsolai" version="24">
     <MenuBar>
         <Menu name="file"><text>File</text>
-            <Action name="new-window"/>
+            <Action name="new-claude-session"/>
             <Action name="new-tab"/>
             <Action name="clone-tab"/>
+            <Action name="new-window"/>
             <Separator/>
             <DefineGroup name="session-operations"/>
             <Separator/>
@@ -25,8 +26,6 @@
             <Separator/>
             <Action name="claude-yolo-mode"/>
             <Action name="claude-double-yolo-mode"/>
-            <Action name="claude-triple-yolo-mode"/>
-            <Action name="claude-set-prompt"/>
             <Separator/>
             <Action name="claude-detach"/>
             <Action name="claude-kill"/>
@@ -80,6 +79,5 @@
         <text>Main Toolbar</text>
         <index>0</index>
         <Action name="new-tab"/>
-        <Action name="split-view"/>
     </ToolBar>
 </gui>

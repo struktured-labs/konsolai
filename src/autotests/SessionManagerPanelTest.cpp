@@ -325,7 +325,6 @@ void SessionManagerPanelTest::testMetadataYoloPersistence()
     QJsonObject s = makeSession(QStringLiteral("yol11111"), QStringLiteral("konsolai-test-yol11111"));
     s[QStringLiteral("yoloMode")] = true;
     s[QStringLiteral("doubleYoloMode")] = true;
-    s[QStringLiteral("tripleYoloMode")] = false;
     sessions.append(s);
     writeTestSessions(sessions);
 
@@ -334,7 +333,6 @@ void SessionManagerPanelTest::testMetadataYoloPersistence()
     QCOMPARE(all.size(), 1);
     QVERIFY(all[0].yoloMode);
     QVERIFY(all[0].doubleYoloMode);
-    QVERIFY(!all[0].tripleYoloMode);
 }
 
 void SessionManagerPanelTest::testMetadataSshFields()
@@ -557,7 +555,6 @@ void SessionManagerPanelTest::testMetadataApprovalCountPersistence()
     QJsonObject s = makeSession(QStringLiteral("apv11111"), QStringLiteral("konsolai-test-apv11111"));
     s[QStringLiteral("yoloApprovalCount")] = 42;
     s[QStringLiteral("doubleYoloApprovalCount")] = 7;
-    s[QStringLiteral("tripleYoloApprovalCount")] = 3;
     sessions.append(s);
     writeTestSessions(sessions);
 
@@ -566,7 +563,6 @@ void SessionManagerPanelTest::testMetadataApprovalCountPersistence()
     QCOMPARE(all.size(), 1);
     QCOMPARE(all[0].yoloApprovalCount, 42);
     QCOMPARE(all[0].doubleYoloApprovalCount, 7);
-    QCOMPARE(all[0].tripleYoloApprovalCount, 3);
 }
 
 // ============================================================
@@ -596,11 +592,9 @@ void SessionManagerPanelTest::testMetadataAllFieldsRoundTrip()
     // Yolo fields
     s[QStringLiteral("yoloMode")] = true;
     s[QStringLiteral("doubleYoloMode")] = true;
-    s[QStringLiteral("tripleYoloMode")] = true;
     // Approval counts
     s[QStringLiteral("yoloApprovalCount")] = 100;
     s[QStringLiteral("doubleYoloApprovalCount")] = 50;
-    s[QStringLiteral("tripleYoloApprovalCount")] = 25;
     // Budget fields
     s[QStringLiteral("budgetTimeLimitMinutes")] = 120;
     s[QStringLiteral("budgetCostCeilingUSD")] = 10.99;
@@ -630,10 +624,10 @@ void SessionManagerPanelTest::testMetadataAllFieldsRoundTrip()
         QCOMPARE(m.sshPort, 2222);
         QVERIFY(m.yoloMode);
         QVERIFY(m.doubleYoloMode);
-        QVERIFY(m.tripleYoloMode);
+        // tripleYoloMode removed
         QCOMPARE(m.yoloApprovalCount, 100);
         QCOMPARE(m.doubleYoloApprovalCount, 50);
-        QCOMPARE(m.tripleYoloApprovalCount, 25);
+        // tripleYoloApprovalCount removed
         QCOMPARE(m.budgetTimeLimitMinutes, 120);
         QCOMPARE(m.budgetCostCeilingUSD, 10.99);
         QCOMPARE(m.budgetTokenCeiling, static_cast<quint64>(500000));
@@ -655,10 +649,10 @@ void SessionManagerPanelTest::testMetadataAllFieldsRoundTrip()
         QCOMPARE(m.sshPort, 2222);
         QVERIFY(m.yoloMode);
         QVERIFY(m.doubleYoloMode);
-        QVERIFY(m.tripleYoloMode);
+        // tripleYoloMode removed
         QCOMPARE(m.yoloApprovalCount, 100);
         QCOMPARE(m.doubleYoloApprovalCount, 50);
-        QCOMPARE(m.tripleYoloApprovalCount, 25);
+        // tripleYoloApprovalCount removed
         QCOMPARE(m.budgetTimeLimitMinutes, 120);
         QCOMPARE(m.budgetCostCeilingUSD, 10.99);
         QCOMPARE(m.budgetTokenCeiling, static_cast<quint64>(500000));

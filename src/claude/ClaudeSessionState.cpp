@@ -24,12 +24,8 @@ QJsonObject ClaudeSessionState::toJson() const
         obj[QStringLiteral("taskDescription")] = taskDescription;
     }
     obj[QStringLiteral("isAttached")] = isAttached;
-    if (!autoContinuePrompt.isEmpty()) {
-        obj[QStringLiteral("autoContinuePrompt")] = autoContinuePrompt;
-    }
     obj[QStringLiteral("yoloMode")] = yoloMode;
     obj[QStringLiteral("doubleYoloMode")] = doubleYoloMode;
-    obj[QStringLiteral("tripleYoloMode")] = tripleYoloMode;
     return obj;
 }
 
@@ -45,10 +41,8 @@ ClaudeSessionState ClaudeSessionState::fromJson(const QJsonObject &obj)
     state.claudeModel = obj.value(QStringLiteral("claudeModel")).toString();
     state.taskDescription = obj.value(QStringLiteral("taskDescription")).toString();
     state.isAttached = obj.value(QStringLiteral("isAttached")).toBool();
-    state.autoContinuePrompt = obj.value(QStringLiteral("autoContinuePrompt")).toString();
     state.yoloMode = obj.value(QStringLiteral("yoloMode")).toBool();
     state.doubleYoloMode = obj.value(QStringLiteral("doubleYoloMode")).toBool();
-    state.tripleYoloMode = obj.value(QStringLiteral("tripleYoloMode")).toBool();
     return state;
 }
 

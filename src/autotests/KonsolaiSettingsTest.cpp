@@ -88,14 +88,18 @@ void KonsolaiSettingsTest::testDefaultDoubleYoloMode()
 
 void KonsolaiSettingsTest::testDefaultTripleYoloMode()
 {
+    // Triple yolo mode has been removed. This test now verifies
+    // that trySuggestionsFirst has a default value.
     KonsolaiSettings settings;
-    QCOMPARE(settings.tripleYoloMode(), false);
+    QCOMPARE(settings.trySuggestionsFirst(), true);
 }
 
 void KonsolaiSettingsTest::testDefaultAutoContinuePrompt()
 {
+    // autoContinuePrompt was removed with triple yolo.
+    // Verify settings instance is valid.
     KonsolaiSettings settings;
-    QCOMPARE(settings.autoContinuePrompt(), QStringLiteral("Continue improving, debugging, fixing, adding features, or introducing tests where applicable."));
+    QVERIFY(KonsolaiSettings::instance() != nullptr);
 }
 
 void KonsolaiSettingsTest::testDefaultTrySuggestionsFirst()
@@ -218,9 +222,6 @@ void KonsolaiSettingsTest::testRoundTripStringSettings()
     settings.setDefaultModel(QStringLiteral("claude-opus-4"));
     QCOMPARE(settings.defaultModel(), QStringLiteral("claude-opus-4"));
 
-    settings.setAutoContinuePrompt(QStringLiteral("Keep going!"));
-    QCOMPARE(settings.autoContinuePrompt(), QStringLiteral("Keep going!"));
-
     settings.setWorktreeSourceRepo(QStringLiteral("/home/user/repos/main"));
     QCOMPARE(settings.worktreeSourceRepo(), QStringLiteral("/home/user/repos/main"));
 
@@ -242,9 +243,6 @@ void KonsolaiSettingsTest::testRoundTripBoolSettings()
 
     settings.setDoubleYoloMode(true);
     QCOMPARE(settings.doubleYoloMode(), true);
-
-    settings.setTripleYoloMode(true);
-    QCOMPARE(settings.tripleYoloMode(), true);
 
     settings.setTrySuggestionsFirst(false);
     QCOMPARE(settings.trySuggestionsFirst(), false);

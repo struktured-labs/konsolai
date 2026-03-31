@@ -182,7 +182,6 @@ void ClaudeStatusWidget::updateDisplay()
     if (session) {
         int yoloCount = session->yoloApprovalCount();
         int doubleCount = session->doubleYoloApprovalCount();
-        int tripleCount = session->tripleYoloApprovalCount();
         QString bolts;
         if (session->yoloMode() || yoloCount > 0) {
             bolts += QStringLiteral("<span style='color:#FFB300'>ϟ</span>");
@@ -195,13 +194,6 @@ void ClaudeStatusWidget::updateDisplay()
             bolts += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>");
             if (doubleCount > 0) {
                 bolts += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
-            }
-        }
-        if (session->tripleYoloMode() || tripleCount > 0) {
-            if (!bolts.isEmpty()) bolts += QStringLiteral(" ");
-            bolts += QStringLiteral("<span style='color:#AB47BC'>ϟ</span>");
-            if (tripleCount > 0) {
-                bolts += QStringLiteral("<span style='color:#AB47BC'>[%1]</span>").arg(tripleCount);
             }
         }
         if (!bolts.isEmpty()) {

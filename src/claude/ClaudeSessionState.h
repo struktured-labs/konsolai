@@ -50,10 +50,8 @@ public:
     bool isAttached = false;    // Whether Konsolai is currently attached
 
     // Per-session settings
-    QString autoContinuePrompt; // empty = use global default
     bool yoloMode = false;
     bool doubleYoloMode = false;
-    bool tripleYoloMode = false;
 
     /**
      * Check if this is a valid session state

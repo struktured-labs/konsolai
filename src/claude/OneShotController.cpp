@@ -69,7 +69,6 @@ void OneShotController::attachToSession(ClaudeSession *session)
     // Set yolo levels on the session
     session->setYoloMode(m_config.yoloLevel >= 1);
     session->setDoubleYoloMode(m_config.yoloLevel >= 2);
-    session->setTripleYoloMode(m_config.yoloLevel >= 3);
 
     qDebug() << "OneShotController: attached to session" << session->sessionName() << "yoloLevel:" << m_config.yoloLevel;
 }
@@ -187,10 +186,6 @@ QString OneShotController::formatStateLabel() const
         if (m_session->doubleYoloMode()) {
             bolts += QStringLiteral("\u03DF");
         }
-        if (m_session->tripleYoloMode()) {
-            bolts += QStringLiteral("\u03DF");
-        }
-
         QString label = QStringLiteral("Working");
         if (!bolts.isEmpty()) {
             label += QStringLiteral(" %1").arg(bolts);

@@ -59,12 +59,10 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     // Per-session yolo mode settings (persisted across restarts)
     bool yoloMode = false;
     bool doubleYoloMode = false;
-    bool tripleYoloMode = false;
 
     // Approval counts (persisted across restarts)
     int yoloApprovalCount = 0;
     int doubleYoloApprovalCount = 0;
-    int tripleYoloApprovalCount = 0;
 
     // Approval log entries (persisted across restarts)
     QVector<ApprovalLogEntry> approvalLog;
@@ -353,6 +351,7 @@ private:
     QTreeWidgetItem *findTreeItem(const QString &sessionId);
     void applyFilter(const QString &text);
     void updateDurationLabels(); // In-place duration label updates without full rebuild
+    void refreshSessionItemLabel(const QString &sessionId); // In-place label/icon update for one item
 
     // Tree expansion state preservation
     void saveTreeState();
