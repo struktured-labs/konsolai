@@ -1536,6 +1536,25 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         return;
     }
 
+    // Group items — provide expand/collapse context menu
+    QString compositeKey = item->data(0, Qt::UserRole + 6).toString();
+    if (compositeKey.startsWith(QStringLiteral("group:"))) {
+        QMenu menu(this);
+        QAction *expandAction = menu.addAction(i18n("Expand All"));
+        connect(expandAction, &QAction::triggered, this, [item]() {
+            item->setExpanded(true);
+            for (int i = 0; i < item->childCount(); ++i) {
+                item->child(i)->setExpanded(true);
+            }
+        });
+        QAction *collapseAction = menu.addAction(i18n("Collapse All"));
+        connect(collapseAction, &QAction::triggered, this, [item]() {
+            item->setExpanded(false);
+        });
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        return;
+    }
+
     // Category header context menus — bulk actions
     if (item == m_pinnedCategory || item == m_activeCategory || item == m_detachedCategory
         || item == m_closedCategory || item == m_archivedCategory || item == m_dismissedCategory
