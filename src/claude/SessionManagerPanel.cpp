@@ -2835,22 +2835,29 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         return a.lastAccessed > b.lastAccessed;
     });
 
-    // Resolve project root: worktree paths (containing /.claude/worktrees/) resolve
-    // to the parent project; other paths are used as-is.
-    auto resolveProjectRoot = [](const QString &workDir) -> QString {
+    // --- Session grouping ---
+    // Two-tier auto-grouping:
+    //  1. Worktree: paths containing /.claude/worktrees/ resolve to the parent project
+    //  2. Prefix:   directory basenames sharing a 4+ char prefix cluster together
+    // Worktree groups show 🌳, prefix groups show 📁.
+
+    // Resolve worktree root (tier 1): strip /.claude/worktrees/... suffix
+    auto resolveWorktreeRoot = [](const QString &workDir) -> QString {
         int idx = workDir.indexOf(QStringLiteral("/.claude/worktrees/"));
         if (idx > 0) {
             return workDir.left(idx);
         }
-        return workDir;
+        return QString(); // not a worktree
     };
 
     // Pre-pass 1: determine each session's category
     struct SessionEntry {
         SessionMetadata meta;
         QString cat;
-        QTreeWidgetItem *parent = nullptr;
-        QString projectRoot;
+        QTreeWidgetItem *categoryItem = nullptr;
+        QString dirName; // basename of workingDirectory
+        QString groupKey; // resolved group key (worktree root or prefix cluster)
+        bool isWorktreeGrouped = false;
     };
     QList<SessionEntry> entries;
     entries.reserve(sortedMeta.size());
@@ -2866,67 +2873,153 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 
         SessionEntry e;
         e.meta = meta;
-        e.projectRoot = resolveProjectRoot(meta.workingDirectory);
+        e.dirName = QDir(meta.workingDirectory).dirName();
         if (meta.isDismissed) {
             e.cat = QStringLiteral("dismissed");
-            e.parent = m_dismissedCategory;
+            e.categoryItem = m_dismissedCategory;
         } else if (meta.isArchived) {
             e.cat = QStringLiteral("archived");
-            e.parent = m_archivedCategory;
+            e.categoryItem = m_archivedCategory;
         } else if (meta.isPinned) {
             e.cat = QStringLiteral("pinned");
-            e.parent = m_pinnedCategory;
+            e.categoryItem = m_pinnedCategory;
         } else if (isAct) {
             e.cat = QStringLiteral("active");
-            e.parent = m_activeCategory;
+            e.categoryItem = m_activeCategory;
         } else if (alive && !wasClosed) {
             e.cat = QStringLiteral("detached");
-            e.parent = m_detachedCategory;
+            e.categoryItem = m_detachedCategory;
         } else {
             e.cat = QStringLiteral("closed");
-            e.parent = m_closedCategory;
+            e.categoryItem = m_closedCategory;
+        }
+
+        // Tier 1: worktree grouping
+        QString wtRoot = resolveWorktreeRoot(meta.workingDirectory);
+        if (!wtRoot.isEmpty()) {
+            e.groupKey = wtRoot;
+            e.isWorktreeGrouped = true;
         }
         entries.append(e);
     }
 
-    // Pre-pass 2: count sessions per (projectRoot, category) for grouping and sibling detection
-    QHash<QString, int> rootCategoryCount; // "projectRoot|cat" → count
+    // Tier 2: prefix-based clustering for sessions NOT already worktree-grouped.
+    // Within each category, find directory basenames sharing a 4+ char prefix.
+    // Group key = the shared prefix (trimmed of trailing hyphens/underscores).
+    {
+        // Collect (cat, dirName) → list of entry indices for non-worktree sessions
+        QHash<QString, QList<int>> catDirNames; // cat → [entry indices]
+        for (int i = 0; i < entries.size(); ++i) {
+            if (!entries[i].isWorktreeGrouped) {
+                catDirNames[entries[i].cat].append(i);
+            }
+        }
+
+        static constexpr int MIN_PREFIX_LEN = 4;
+
+        for (auto it = catDirNames.constBegin(); it != catDirNames.constEnd(); ++it) {
+            const QList<int> &indices = it.value();
+            if (indices.size() < 2) {
+                continue;
+            }
+
+            // Sort indices by dirName for prefix comparison
+            QList<int> sorted = indices;
+            std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+                return entries[a].dirName < entries[b].dirName;
+            });
+
+            // Greedy prefix clustering: walk sorted names, extend cluster while
+            // adjacent names share a 4+ char prefix with the cluster seed.
+            auto commonPrefix = [](const QString &a, const QString &b) -> QString {
+                int len = qMin(a.size(), b.size());
+                int i = 0;
+                while (i < len && a[i] == b[i]) {
+                    ++i;
+                }
+                return a.left(i);
+            };
+
+            int ci = 0;
+            while (ci < sorted.size()) {
+                // Start a new cluster with sorted[ci]
+                QString seed = entries[sorted[ci]].dirName;
+                QString prefix = seed;
+                QList<int> cluster = {sorted[ci]};
+                int cj = ci + 1;
+                while (cj < sorted.size()) {
+                    QString shared = commonPrefix(prefix, entries[sorted[cj]].dirName);
+                    if (shared.size() >= MIN_PREFIX_LEN) {
+                        prefix = shared;
+                        cluster.append(sorted[cj]);
+                        ++cj;
+                    } else {
+                        break;
+                    }
+                }
+
+                if (cluster.size() >= 2) {
+                    // Trim trailing hyphens/underscores from prefix for display
+                    while (prefix.endsWith(QLatin1Char('-')) || prefix.endsWith(QLatin1Char('_'))) {
+                        prefix.chop(1);
+                    }
+                    for (int idx : cluster) {
+                        entries[idx].groupKey = prefix;
+                    }
+                }
+                ci = cj;
+            }
+        }
+    }
+
+    // Pre-pass 2: count sessions per (groupKey, category) for grouping and sibling detection
+    QHash<QString, int> groupCategoryCount; // "groupKey|cat" → count
     QHash<QString, int> dirCategoryCount; // "workDir|cat" → count
+    QHash<QString, bool> groupIsWorktree; // "groupKey|cat" → is worktree-based
     for (const auto &e : entries) {
-        rootCategoryCount[e.projectRoot + QStringLiteral("|") + e.cat]++;
+        if (!e.groupKey.isEmpty()) {
+            QString gk = e.groupKey + QStringLiteral("|") + e.cat;
+            groupCategoryCount[gk]++;
+            if (e.isWorktreeGrouped) {
+                groupIsWorktree[gk] = true;
+            }
+        }
         dirCategoryCount[e.meta.workingDirectory + QStringLiteral("|") + e.cat]++;
     }
 
-    // Create group headers for project roots with 2+ sessions in the same category
-    QHash<QString, QTreeWidgetItem *> groupItems; // "projectRoot|cat" → group item
-    for (auto it = rootCategoryCount.constBegin(); it != rootCategoryCount.constEnd(); ++it) {
+    // Create group headers for groups with 2+ sessions in the same category
+    auto categoryItemFor = [&](const QString &cat) -> QTreeWidgetItem * {
+        if (cat == QStringLiteral("dismissed"))
+            return m_dismissedCategory;
+        if (cat == QStringLiteral("archived"))
+            return m_archivedCategory;
+        if (cat == QStringLiteral("pinned"))
+            return m_pinnedCategory;
+        if (cat == QStringLiteral("active"))
+            return m_activeCategory;
+        if (cat == QStringLiteral("detached"))
+            return m_detachedCategory;
+        return m_closedCategory;
+    };
+
+    QHash<QString, QTreeWidgetItem *> groupItems; // "groupKey|cat" → group item
+    for (auto it = groupCategoryCount.constBegin(); it != groupCategoryCount.constEnd(); ++it) {
         if (it.value() < 2) {
             continue;
         }
-        // Extract root and cat from the composite key
         int sep = it.key().lastIndexOf(QLatin1Char('|'));
-        QString root = it.key().left(sep);
+        QString key = it.key().left(sep);
         QString cat = it.key().mid(sep + 1);
-        QTreeWidgetItem *categoryItem = nullptr;
-        if (cat == QStringLiteral("dismissed"))
-            categoryItem = m_dismissedCategory;
-        else if (cat == QStringLiteral("archived"))
-            categoryItem = m_archivedCategory;
-        else if (cat == QStringLiteral("pinned"))
-            categoryItem = m_pinnedCategory;
-        else if (cat == QStringLiteral("active"))
-            categoryItem = m_activeCategory;
-        else if (cat == QStringLiteral("detached"))
-            categoryItem = m_detachedCategory;
-        else
-            categoryItem = m_closedCategory;
+        bool isWT = groupIsWorktree.value(it.key(), false);
 
-        auto *groupItem = new QTreeWidgetItem(categoryItem);
-        QString groupName = QDir(root).dirName();
-        groupItem->setText(0, QStringLiteral("%1 (%2)").arg(groupName).arg(it.value()));
-        groupItem->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-open")));
+        auto *groupItem = new QTreeWidgetItem(categoryItemFor(cat));
+        QString groupName = isWT ? QDir(key).dirName() : key;
+        QString icon = isWT ? QStringLiteral("folder-sync") : QStringLiteral("folder-open");
+        QString badge = isWT ? QStringLiteral("\xf0\x9f\x8c\xb3") : QStringLiteral("\xf0\x9f\x93\x81");
+        groupItem->setText(0, QStringLiteral("%1 %2 (%3)").arg(badge, groupName).arg(it.value()));
+        groupItem->setIcon(0, QIcon::fromTheme(icon, QIcon::fromTheme(QStringLiteral("folder-open"))));
         groupItem->setFlags(Qt::ItemIsEnabled);
-        // Composite key for expansion state persistence (same role as session items)
+        groupItem->setToolTip(0, isWT ? i18n("Worktree group: %1", key) : i18n("Prefix group: %1*", key));
         QString expandKey = QStringLiteral("group:") + it.key();
         groupItem->setData(0, Qt::UserRole + 6, expandKey);
         groupItem->setExpanded(m_expansionState.value(expandKey, true));
@@ -2935,8 +3028,13 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 
     // Add sessions to appropriate categories (under group headers when applicable)
     for (const auto &e : entries) {
-        QString rootKey = e.projectRoot + QStringLiteral("|") + e.cat;
-        QTreeWidgetItem *parent = groupItems.value(rootKey, e.parent);
+        QTreeWidgetItem *parent = e.categoryItem;
+        if (!e.groupKey.isEmpty()) {
+            QString gk = e.groupKey + QStringLiteral("|") + e.cat;
+            if (groupItems.contains(gk)) {
+                parent = groupItems[gk];
+            }
+        }
         bool hasSiblings = dirCategoryCount.value(e.meta.workingDirectory + QStringLiteral("|") + e.cat, 0) > 1;
         addSessionToTree(e.meta, parent, hasSiblings);
     }
