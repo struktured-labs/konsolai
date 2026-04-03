@@ -3430,7 +3430,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             int doubleCount = session->doubleYoloApprovalCount();
 
             if (session->yoloMode() || yoloCount > 0) {
-                boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xCF\x9F</span>");
+                boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xE2\x9A\xA1</span>");
                 if (yoloCount > 0) {
                     boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
                 }
@@ -3439,7 +3439,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!boltsHtml.isEmpty()) {
                     boltsHtml += QStringLiteral(" ");
                 }
-                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xCF\x9F</span>");
+                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xE2\x9A\xA1</span>");
                 if (doubleCount > 0) {
                     boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
                 }
@@ -4318,7 +4318,7 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
     int doubleCount = session->doubleYoloApprovalCount();
 
     if (session->yoloMode() || yoloCount > 0) {
-        boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xCF\x9F</span>");
+        boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xE2\x9A\xA1</span>");
         if (yoloCount > 0) {
             boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
         }
@@ -4327,7 +4327,7 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
         if (!boltsHtml.isEmpty()) {
             boltsHtml += QStringLiteral(" ");
         }
-        boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xCF\x9F</span>");
+        boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xE2\x9A\xA1</span>");
         if (doubleCount > 0) {
             boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
         }
