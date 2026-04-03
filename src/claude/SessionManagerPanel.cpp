@@ -3422,30 +3422,30 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {
-            // Build rich text: gold bolt [yolo count]  blue bolt [double count]
-            QString boltsHtml;
+            // Build plain text for column 1: unicode bolts + counts + budget
+            // Using setText instead of setItemWidget avoids QLabel widgets
+            // intercepting mouse events (which breaks right-click context menus).
+            QString col1;
             int yoloCount = session->yoloApprovalCount();
             int doubleCount = session->doubleYoloApprovalCount();
 
             if (session->yoloMode() || yoloCount > 0) {
-                boltsHtml += QStringLiteral("<span style='color:#FFB300'>ϟ</span>"); // Gold
+                col1 += QStringLiteral("\xCF\x9F"); // ϟ bolt
                 if (yoloCount > 0) {
-                    boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
+                    col1 += QStringLiteral("[%1]").arg(yoloCount);
                 }
             }
             if (session->doubleYoloMode() || doubleCount > 0) {
-                if (!boltsHtml.isEmpty()) {
-                    boltsHtml += QStringLiteral(" ");
+                if (!col1.isEmpty()) {
+                    col1 += QStringLiteral(" ");
                 }
-                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>ϟ</span>"); // Blue
+                col1 += QStringLiteral("\xCF\x9F\xCF\x9F"); // ϟϟ double bolt
                 if (doubleCount > 0) {
-                    boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
+                    col1 += QStringLiteral("[%1]").arg(doubleCount);
                 }
             }
-            // Add velocity + budget ETA when budget controller is active
             if (auto *bc = session->budgetController()) {
                 if (bc->budget().hasAnyLimit()) {
-                    // Show budget progress: elapsed/limit time | $current/$ceiling
                     QString budgetInfo;
                     if (bc->budget().timeLimitMinutes > 0) {
                         int elapsed = bc->budget().elapsedMinutes();
@@ -3459,34 +3459,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
                     }
                     if (!budgetInfo.isEmpty()) {
-                        boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
+                        col1 += budgetInfo;
                     }
                 }
-                // Show velocity if available
                 const auto &vel = bc->velocity();
                 if (vel.tokensPerMinute() > 0) {
-                    boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
+                    col1 += QStringLiteral(" ") + vel.formatVelocity();
                 }
             }
-
-            // Add observer warning badge
             if (auto *obs = session->sessionObserver()) {
                 int severity = obs->composedSeverity();
                 if (severity >= 5) {
-                    boltsHtml += QStringLiteral(" <span style='color:#F44336'>⚠ CRITICAL</span>");
+                    col1 += QStringLiteral(" \xe2\x9a\xa0 CRITICAL");
                 } else if (severity >= 3) {
-                    boltsHtml += QStringLiteral(" <span style='color:#FF9800'>⚠</span>");
+                    col1 += QStringLiteral(" \xe2\x9a\xa0");
                 } else if (severity > 0) {
-                    boltsHtml += QStringLiteral(" <span style='color:#FFC107'>⚠</span>");
+                    col1 += QStringLiteral(" \xe2\x9a\xa0");
                 }
             }
-
-            if (!boltsHtml.isEmpty()) {
-                auto *label = new QLabel(boltsHtml);
-                label->setTextFormat(Qt::RichText);
-                label->setAttribute(Qt::WA_TransparentForMouseEvents);
-                m_treeWidget->setItemWidget(item, 1, label);
-            }
+            item->setText(1, col1);
         }
     }
 
@@ -3613,7 +3604,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!elapsed.isEmpty()) {
                     auto *durationLabel = new QLabel(elapsed);
                     durationLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
-                    durationLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+                    durationLabel->setContextMenuPolicy(Qt::NoContextMenu);
                     m_treeWidget->setItemWidget(childItem, 1, durationLabel);
                 }
 
@@ -3679,7 +3670,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!col1.isEmpty()) {
                     auto *statsLabel = new QLabel(col1);
                     statsLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
-                    statsLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+                    statsLabel->setContextMenuPolicy(Qt::NoContextMenu);
                     m_treeWidget->setItemWidget(childItem, 1, statsLabel);
                 }
 
@@ -4316,24 +4307,25 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
         return;
     }
 
-    // Rebuild the column-1 rich-text label in-place (bolts, budget, observer badges)
-    QString boltsHtml;
+    // Rebuild column-1 plain text in-place (bolts, budget, observer badges).
+    // Using setText instead of setItemWidget to avoid QLabel intercepting mouse events.
+    QString col1;
     int yoloCount = session->yoloApprovalCount();
     int doubleCount = session->doubleYoloApprovalCount();
 
     if (session->yoloMode() || yoloCount > 0) {
-        boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xCF\x9F</span>");
+        col1 += QStringLiteral("\xCF\x9F");
         if (yoloCount > 0) {
-            boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
+            col1 += QStringLiteral("[%1]").arg(yoloCount);
         }
     }
     if (session->doubleYoloMode() || doubleCount > 0) {
-        if (!boltsHtml.isEmpty()) {
-            boltsHtml += QStringLiteral(" ");
+        if (!col1.isEmpty()) {
+            col1 += QStringLiteral(" ");
         }
-        boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xCF\x9F</span>");
+        col1 += QStringLiteral("\xCF\x9F\xCF\x9F");
         if (doubleCount > 0) {
-            boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
+            col1 += QStringLiteral("[%1]").arg(doubleCount);
         }
     }
     if (auto *bc = session->budgetController()) {
@@ -4351,39 +4343,25 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
                 budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
             }
             if (!budgetInfo.isEmpty()) {
-                boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
+                col1 += budgetInfo;
             }
         }
         const auto &vel = bc->velocity();
         if (vel.tokensPerMinute() > 0) {
-            boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
+            col1 += QStringLiteral(" ") + vel.formatVelocity();
         }
     }
     if (auto *obs = session->sessionObserver()) {
         int severity = obs->composedSeverity();
         if (severity >= 5) {
-            boltsHtml += QStringLiteral(" <span style='color:#F44336'>\xe2\x9a\xa0 CRITICAL</span>");
+            col1 += QStringLiteral(" \xe2\x9a\xa0 CRITICAL");
         } else if (severity >= 3) {
-            boltsHtml += QStringLiteral(" <span style='color:#FF9800'>\xe2\x9a\xa0</span>");
+            col1 += QStringLiteral(" \xe2\x9a\xa0");
         } else if (severity > 0) {
-            boltsHtml += QStringLiteral(" <span style='color:#FFC107'>\xe2\x9a\xa0</span>");
+            col1 += QStringLiteral(" \xe2\x9a\xa0");
         }
     }
-
-    // Update or create the label widget
-    auto *existing = qobject_cast<QLabel *>(m_treeWidget->itemWidget(item, 1));
-    if (!boltsHtml.isEmpty()) {
-        if (existing) {
-            existing->setText(boltsHtml);
-        } else {
-            auto *label = new QLabel(boltsHtml);
-            label->setTextFormat(Qt::RichText);
-            label->setAttribute(Qt::WA_TransparentForMouseEvents);
-            m_treeWidget->setItemWidget(item, 1, label);
-        }
-    } else if (existing) {
-        m_treeWidget->removeItemWidget(item, 1);
-    }
+    item->setText(1, col1);
 }
 
 void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
