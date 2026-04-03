@@ -1940,6 +1940,8 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
 
     QString sessionId = item->data(0, Qt::UserRole).toString();
     if (sessionId.isEmpty()) {
+        qDebug() << "SessionManagerPanel::onContextMenu - empty sessionId, item text:" << item->text(0)
+                 << "parent:" << (item->parent() ? item->parent()->text(0) : QStringLiteral("null"));
         return;
     }
 
@@ -2014,6 +2016,7 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     }
 
     if (!m_metadata.contains(sessionId)) {
+        qDebug() << "SessionManagerPanel::onContextMenu - no metadata for sessionId:" << sessionId << "item text:" << item->text(0);
         return;
     }
 
@@ -3481,6 +3484,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             if (!boltsHtml.isEmpty()) {
                 auto *label = new QLabel(boltsHtml);
                 label->setTextFormat(Qt::RichText);
+                label->setAttribute(Qt::WA_TransparentForMouseEvents);
                 m_treeWidget->setItemWidget(item, 1, label);
             }
         }
@@ -3609,6 +3613,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!elapsed.isEmpty()) {
                     auto *durationLabel = new QLabel(elapsed);
                     durationLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
+                    durationLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
                     m_treeWidget->setItemWidget(childItem, 1, durationLabel);
                 }
 
@@ -3674,6 +3679,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!col1.isEmpty()) {
                     auto *statsLabel = new QLabel(col1);
                     statsLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
+                    statsLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
                     m_treeWidget->setItemWidget(childItem, 1, statsLabel);
                 }
 
@@ -4372,6 +4378,7 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
         } else {
             auto *label = new QLabel(boltsHtml);
             label->setTextFormat(Qt::RichText);
+            label->setAttribute(Qt::WA_TransparentForMouseEvents);
             m_treeWidget->setItemWidget(item, 1, label);
         }
     } else if (existing) {
