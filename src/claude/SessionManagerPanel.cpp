@@ -5263,14 +5263,11 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
                 scheduleTreeUpdate();
             }
         }
-        // Intercept right-click on viewport to guarantee context menu fires.
-        if ((watched == m_treeWidget->viewport() || watched == m_treeWidget) && event->type() == QEvent::ContextMenu) {
+        // Intercept right-click on viewport only (not tree widget itself — prevents double-fire
+        // where the first menu.exec() is immediately closed by the second ContextMenu event).
+        if (watched == m_treeWidget->viewport() && event->type() == QEvent::ContextMenu) {
             auto *ce = static_cast<QContextMenuEvent *>(event);
-            QPoint pos = (watched == m_treeWidget) ? m_treeWidget->viewport()->mapFrom(m_treeWidget, ce->pos()) : ce->pos();
-            QTreeWidgetItem *hitItem = m_treeWidget->itemAt(pos);
-            qDebug() << "SessionManagerPanel: ContextMenu event on" << (watched == m_treeWidget ? "tree" : "viewport") << "pos:" << pos
-                     << "item:" << (hitItem ? hitItem->text(0) : QStringLiteral("NULL"));
-            onContextMenu(pos);
+            onContextMenu(ce->pos());
             return true;
         }
     }
