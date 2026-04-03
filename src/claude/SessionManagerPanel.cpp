@@ -3419,30 +3419,29 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     }
     item->setToolTip(0, tooltip);
 
-    // Add yolo mode and approval count indicators in column 1 (always visible)
+    // Add yolo mode and approval count indicators in column 1 (always visible).
+    // Uses QLabel with rich HTML for colored bolts. Right-click is handled by
+    // the viewport event filter intercepting QEvent::ContextMenu directly.
     if (isActive) {
         ClaudeSession *session = m_activeSessions[meta.sessionId];
         if (session) {
-            // Build plain text for column 1: unicode bolts + counts + budget
-            // Using setText instead of setItemWidget avoids QLabel widgets
-            // intercepting mouse events (which breaks right-click context menus).
-            QString col1;
+            QString boltsHtml;
             int yoloCount = session->yoloApprovalCount();
             int doubleCount = session->doubleYoloApprovalCount();
 
             if (session->yoloMode() || yoloCount > 0) {
-                col1 += QStringLiteral("\xCF\x9F"); // ϟ bolt
+                boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xCF\x9F</span>");
                 if (yoloCount > 0) {
-                    col1 += QStringLiteral("[%1]").arg(yoloCount);
+                    boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
                 }
             }
             if (session->doubleYoloMode() || doubleCount > 0) {
-                if (!col1.isEmpty()) {
-                    col1 += QStringLiteral(" ");
+                if (!boltsHtml.isEmpty()) {
+                    boltsHtml += QStringLiteral(" ");
                 }
-                col1 += QStringLiteral("\xCF\x9F\xCF\x9F"); // ϟϟ double bolt
+                boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xCF\x9F</span>");
                 if (doubleCount > 0) {
-                    col1 += QStringLiteral("[%1]").arg(doubleCount);
+                    boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
                 }
             }
             if (auto *bc = session->budgetController()) {
@@ -3460,25 +3459,29 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                         budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
                     }
                     if (!budgetInfo.isEmpty()) {
-                        col1 += budgetInfo;
+                        boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
                     }
                 }
                 const auto &vel = bc->velocity();
                 if (vel.tokensPerMinute() > 0) {
-                    col1 += QStringLiteral(" ") + vel.formatVelocity();
+                    boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
                 }
             }
             if (auto *obs = session->sessionObserver()) {
                 int severity = obs->composedSeverity();
                 if (severity >= 5) {
-                    col1 += QStringLiteral(" \xe2\x9a\xa0 CRITICAL");
+                    boltsHtml += QStringLiteral(" <span style='color:#F44336'>\xe2\x9a\xa0 CRITICAL</span>");
                 } else if (severity >= 3) {
-                    col1 += QStringLiteral(" \xe2\x9a\xa0");
+                    boltsHtml += QStringLiteral(" <span style='color:#FF9800'>\xe2\x9a\xa0</span>");
                 } else if (severity > 0) {
-                    col1 += QStringLiteral(" \xe2\x9a\xa0");
+                    boltsHtml += QStringLiteral(" <span style='color:#FFC107'>\xe2\x9a\xa0</span>");
                 }
             }
-            item->setText(1, col1);
+            if (!boltsHtml.isEmpty()) {
+                auto *label = new QLabel(boltsHtml);
+                label->setTextFormat(Qt::RichText);
+                m_treeWidget->setItemWidget(item, 1, label);
+            }
         }
     }
 
@@ -4308,25 +4311,25 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
         return;
     }
 
-    // Rebuild column-1 plain text in-place (bolts, budget, observer badges).
-    // Using setText instead of setItemWidget to avoid QLabel intercepting mouse events.
-    QString col1;
+    // Rebuild column-1 QLabel in-place (bolts, budget, observer badges).
+    // Right-click is handled by viewport event filter, not customContextMenuRequested.
+    QString boltsHtml;
     int yoloCount = session->yoloApprovalCount();
     int doubleCount = session->doubleYoloApprovalCount();
 
     if (session->yoloMode() || yoloCount > 0) {
-        col1 += QStringLiteral("\xCF\x9F");
+        boltsHtml += QStringLiteral("<span style='color:#FFB300'>\xCF\x9F</span>");
         if (yoloCount > 0) {
-            col1 += QStringLiteral("[%1]").arg(yoloCount);
+            boltsHtml += QStringLiteral("<span style='color:#FFB300'>[%1]</span>").arg(yoloCount);
         }
     }
     if (session->doubleYoloMode() || doubleCount > 0) {
-        if (!col1.isEmpty()) {
-            col1 += QStringLiteral(" ");
+        if (!boltsHtml.isEmpty()) {
+            boltsHtml += QStringLiteral(" ");
         }
-        col1 += QStringLiteral("\xCF\x9F\xCF\x9F");
+        boltsHtml += QStringLiteral("<span style='color:#42A5F5'>\xCF\x9F</span>");
         if (doubleCount > 0) {
-            col1 += QStringLiteral("[%1]").arg(doubleCount);
+            boltsHtml += QStringLiteral("<span style='color:#42A5F5'>[%1]</span>").arg(doubleCount);
         }
     }
     if (auto *bc = session->budgetController()) {
@@ -4344,25 +4347,36 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
                 budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
             }
             if (!budgetInfo.isEmpty()) {
-                col1 += budgetInfo;
+                boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
             }
         }
         const auto &vel = bc->velocity();
         if (vel.tokensPerMinute() > 0) {
-            col1 += QStringLiteral(" ") + vel.formatVelocity();
+            boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
         }
     }
     if (auto *obs = session->sessionObserver()) {
         int severity = obs->composedSeverity();
         if (severity >= 5) {
-            col1 += QStringLiteral(" \xe2\x9a\xa0 CRITICAL");
+            boltsHtml += QStringLiteral(" <span style='color:#F44336'>\xe2\x9a\xa0 CRITICAL</span>");
         } else if (severity >= 3) {
-            col1 += QStringLiteral(" \xe2\x9a\xa0");
+            boltsHtml += QStringLiteral(" <span style='color:#FF9800'>\xe2\x9a\xa0</span>");
         } else if (severity > 0) {
-            col1 += QStringLiteral(" \xe2\x9a\xa0");
+            boltsHtml += QStringLiteral(" <span style='color:#FFC107'>\xe2\x9a\xa0</span>");
         }
     }
-    item->setText(1, col1);
+    auto *existing = qobject_cast<QLabel *>(m_treeWidget->itemWidget(item, 1));
+    if (!boltsHtml.isEmpty()) {
+        if (existing) {
+            existing->setText(boltsHtml);
+        } else {
+            auto *label = new QLabel(boltsHtml);
+            label->setTextFormat(Qt::RichText);
+            m_treeWidget->setItemWidget(item, 1, label);
+        }
+    } else if (existing) {
+        m_treeWidget->removeItemWidget(item, 1);
+    }
 }
 
 void SessionManagerPanel::showApprovalLog(ClaudeSession *session)
@@ -5250,12 +5264,14 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
             }
         }
         // Intercept right-click on viewport to guarantee context menu fires.
-        // QTreeWidget::customContextMenuRequested can fail when item widgets
-        // or focus state interfere with event dispatch.
-        if (watched == m_treeWidget->viewport() && event->type() == QEvent::ContextMenu) {
+        if ((watched == m_treeWidget->viewport() || watched == m_treeWidget) && event->type() == QEvent::ContextMenu) {
             auto *ce = static_cast<QContextMenuEvent *>(event);
-            onContextMenu(ce->pos());
-            return true; // consumed
+            QPoint pos = (watched == m_treeWidget) ? m_treeWidget->viewport()->mapFrom(m_treeWidget, ce->pos()) : ce->pos();
+            QTreeWidgetItem *hitItem = m_treeWidget->itemAt(pos);
+            qDebug() << "SessionManagerPanel: ContextMenu event on" << (watched == m_treeWidget ? "tree" : "viewport") << "pos:" << pos
+                     << "item:" << (hitItem ? hitItem->text(0) : QStringLiteral("NULL"));
+            onContextMenu(pos);
+            return true;
         }
     }
     return QWidget::eventFilter(watched, event);
