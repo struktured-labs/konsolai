@@ -20,6 +20,7 @@
 #include <QClipboard>
 #include <QColor>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -5247,6 +5248,14 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
                 m_pendingUpdate = false;
                 scheduleTreeUpdate();
             }
+        }
+        // Intercept right-click on viewport to guarantee context menu fires.
+        // QTreeWidget::customContextMenuRequested can fail when item widgets
+        // or focus state interfere with event dispatch.
+        if (watched == m_treeWidget->viewport() && event->type() == QEvent::ContextMenu) {
+            auto *ce = static_cast<QContextMenuEvent *>(event);
+            onContextMenu(ce->pos());
+            return true; // consumed
         }
     }
     return QWidget::eventFilter(watched, event);
