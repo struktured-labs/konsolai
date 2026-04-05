@@ -5280,7 +5280,7 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
     // Map the label's position back to viewport coordinates for itemAt().
     if (event->type() == QEvent::ContextMenu) {
         auto *widget = qobject_cast<QWidget *>(watched);
-        if (widget && m_treeWidget && widget->parent() == m_treeWidget->viewport()) {
+        if (widget && m_treeWidget && widget->isVisible() && m_treeWidget->isAncestorOf(widget)) {
             auto *ce = static_cast<QContextMenuEvent *>(event);
             QPoint viewportPos = widget->mapTo(m_treeWidget->viewport(), ce->pos());
             onContextMenu(viewportPos);
