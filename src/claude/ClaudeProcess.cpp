@@ -55,21 +55,14 @@ QString ClaudeProcess::executablePath()
         return path;
     }
 
-    // Check common installation locations
-    const QStringList commonPaths = {
-        QStringLiteral("/usr/local/bin/claude"),
-        QStringLiteral("/usr/bin/claude"),
-        QDir::homePath() + QStringLiteral("/.local/bin/claude"),
-        QDir::homePath() + QStringLiteral("/.claude/local/claude"),
+    // Search additional common installation directories
+    const QStringList additionalDirs = {
+        QDir::homePath() + QStringLiteral("/.local/bin"),
+        QDir::homePath() + QStringLiteral("/.claude/local"),
     };
 
-    for (const QString &p : commonPaths) {
-        if (QFile::exists(p)) {
-            return p;
-        }
-    }
-
-    return QString();
+    path = QStandardPaths::findExecutable(QStringLiteral("claude"), additionalDirs);
+    return path;
 }
 
 QString ClaudeProcess::modelName(Model model)

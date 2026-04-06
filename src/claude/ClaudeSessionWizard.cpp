@@ -1112,7 +1112,15 @@ void ClaudeSessionWizard::updateRemoteProjectRoot()
     if (user.isEmpty()) {
         user = QString::fromLocal8Bit(qgetenv("USER"));
     }
-    m_projectRootEdit->setText(QStringLiteral("/home/%1/projects").arg(user));
+    // Check common project directories on the remote host
+    const QStringList candidates = {
+        QStringLiteral("/home/%1/projects").arg(user),
+        QStringLiteral("/home/%1/code").arg(user),
+        QStringLiteral("/home/%1/workspace").arg(user),
+        QStringLiteral("/home/%1/src").arg(user),
+    };
+    // Default to the first candidate (remote dirs can't be stat'd locally)
+    m_projectRootEdit->setText(candidates.first());
 }
 
 void ClaudeSessionWizard::onTestConnectionClicked()

@@ -41,8 +41,27 @@ KonsolaiSettings::~KonsolaiSettings()
 QString KonsolaiSettings::projectRoot() const
 {
     KConfigGroup group(m_config, QStringLiteral("General"));
-    QString defaultRoot = QDir::homePath() + QStringLiteral("/projects");
+    QString defaultRoot = detectDefaultProjectRoot();
     return group.readEntry("ProjectRoot", defaultRoot);
+}
+
+QString KonsolaiSettings::detectDefaultProjectRoot()
+{
+    const QString home = QDir::homePath();
+    const QStringList candidates = {
+        home + QStringLiteral("/projects"),
+        home + QStringLiteral("/code"),
+        home + QStringLiteral("/workspace"),
+        home + QStringLiteral("/src"),
+    };
+
+    for (const QString &dir : candidates) {
+        if (QDir(dir).exists()) {
+            return dir;
+        }
+    }
+
+    return home;
 }
 
 void KonsolaiSettings::setProjectRoot(const QString &path)

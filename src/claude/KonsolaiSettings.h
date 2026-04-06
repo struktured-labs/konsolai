@@ -190,6 +190,13 @@ public:
      */
     void save();
 
+    /**
+     * Detect the best default project root by checking common directories.
+     * Checks ~/projects, ~/code, ~/workspace, ~/src in order,
+     * falling back to home directory if none exist.
+     */
+    static QString detectDefaultProjectRoot();
+
 Q_SIGNALS:
     void settingsChanged();
 

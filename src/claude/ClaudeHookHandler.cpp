@@ -59,21 +59,8 @@ QString ClaudeHookHandler::hookHandlerPath()
         return relative;
     }
 
-    // Check common install locations
-    const QStringList commonPaths = {
-        QStringLiteral("/usr/local/bin/konsolai-hook-handler"),
-        QStringLiteral("/usr/bin/konsolai-hook-handler"),
-    };
-
-    for (const QString &path : commonPaths) {
-        if (QFile::exists(path)) {
-            qDebug() << "ClaudeHookHandler: Found hook handler at:" << path;
-            return path;
-        }
-    }
-
     qWarning() << "ClaudeHookHandler: Hook handler binary not found!";
-    qWarning() << "  Checked: QStandardPaths, appDir=" << appDir << ", /usr/local/bin, /usr/bin";
+    qWarning() << "  Checked: QStandardPaths, appDir=" << appDir;
     return QString();
 }
 

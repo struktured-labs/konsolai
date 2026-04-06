@@ -324,7 +324,7 @@ void ClaudeSession::run()
             msgBox.setInformativeText(
                 QStringLiteral("Please install Claude CLI:\n"
                                "  npm install -g @anthropic-ai/claude-code\n\n"
-                               "Or visit: https://claude.ai/download"));
+                               "Or visit: https://docs.anthropic.com/en/docs/claude-code/overview"));
             msgBox.exec();
             return;
         }

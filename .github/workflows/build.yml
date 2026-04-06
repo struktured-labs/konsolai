@@ -86,7 +86,6 @@ jobs:
         run: xvfb-run -a ctest --test-dir build --output-on-failure -j$(nproc)
 
       - name: Run GUI smoke test
-        continue-on-error: true
         run: |
           # Launch konsolai from build dir (no system install — that would break Package step).
           # This may fail in CI (no KDE profile, no tmux) — non-blocking.
