@@ -45,13 +45,61 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 - Send prompts, approve/deny permissions
 - Access session transcripts
 
-## Building
+## Prerequisites
 
-### Dependencies
-- Qt6 (Core, Gui, Widgets, Network, Multimedia, Concurrent, DBus)
-- KDE Frameworks 6 (KNotifications, KPty, KConfig, KI18n, KStatusNotifierItem, KDBusAddons)
-- tmux (runtime)
-- claude CLI (runtime)
+### Build Dependencies
+
+- **CMake** 3.16+ and **Ninja** (build system)
+- **Qt 6.5+** (Core, Widgets, Multimedia, PrintSupport, Concurrent, DBus)
+- **KDE Frameworks 6** (KConfig, KI18n, KIO, KNotifications, KParts, KPty, KCrash, KNewStuff, KXmlGui, and more)
+- **Extra CMake Modules** (ECM)
+- **ICU** 61.0+ (Unicode support)
+- C++17 compiler (GCC 10+ or Clang 13+)
+
+### Runtime Dependencies
+
+- **tmux** -- session persistence backend
+- **claude** CLI -- Claude Code by Anthropic (`npm install -g @anthropic-ai/claude-code`)
+
+### Install Packages
+
+**Ubuntu / Debian (24.04+):**
+```bash
+sudo apt install cmake ninja-build g++ extra-cmake-modules \
+  qt6-base-dev qt6-multimedia-dev libgl-dev \
+  libkf6config-dev libkf6i18n-dev libkf6kio-dev libkf6notifications-dev \
+  libkf6parts-dev libkf6pty-dev libkf6crash-dev libkf6newstuff-dev \
+  libkf6xmlgui-dev libkf6bookmarks-dev libkf6coreaddons-dev \
+  libkf6guiaddons-dev libkf6iconthemes-dev libkf6notifyconfig-dev \
+  libkf6service-dev libkf6textwidgets-dev libkf6widgetsaddons-dev \
+  libkf6windowsystem-dev libkf6configwidgets-dev libkf6dbusaddons-dev \
+  libkf6globalaccel-dev libicu-dev tmux
+```
+
+**Fedora 40+:**
+```bash
+sudo dnf install cmake ninja-build gcc-c++ extra-cmake-modules \
+  qt6-qtbase-devel qt6-qtmultimedia-devel \
+  kf6-kconfig-devel kf6-ki18n-devel kf6-kio-devel kf6-knotifications-devel \
+  kf6-kparts-devel kf6-kpty-devel kf6-kcrash-devel kf6-knewstuff-devel \
+  kf6-kxmlgui-devel kf6-kbookmarks-devel kf6-kcoreaddons-devel \
+  kf6-kguiaddons-devel kf6-kiconthemes-devel kf6-knotifyconfig-devel \
+  kf6-kservice-devel kf6-ktextwidgets-devel kf6-kwidgetsaddons-devel \
+  kf6-kwindowsystem-devel kf6-kconfigwidgets-devel kf6-kdbusaddons-devel \
+  kf6-kglobalaccel-devel libicu-devel tmux
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S cmake ninja extra-cmake-modules \
+  qt6-base qt6-multimedia \
+  kconfig ki18n kio knotifications kparts kpty kcrash knewstuff \
+  kxmlgui kbookmarks kcoreaddons kguiaddons kiconthemes knotifyconfig \
+  kservice ktextwidgets kwidgetsaddons kwindowsystem kconfigwidgets \
+  kdbusaddons kglobalaccel icu tmux
+```
+
+## Building
 
 ### Build Instructions
 ```bash

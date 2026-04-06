@@ -336,7 +336,8 @@ void SessionManagerPanel::setupUi()
     m_treeWidget->viewport()->installEventFilter(this);
     m_treeWidget->installEventFilter(this);
 
-    layout->addWidget(m_treeWidget);
+    m_treeWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    layout->addWidget(m_treeWidget, 1 /* stretch */);
 
     // Empty state overlay
     m_emptyStateLabel = new QLabel(m_treeWidget);
@@ -1941,8 +1942,6 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
 
     QString sessionId = item->data(0, Qt::UserRole).toString();
     if (sessionId.isEmpty()) {
-        qDebug() << "SessionManagerPanel::onContextMenu - empty sessionId, item text:" << item->text(0)
-                 << "parent:" << (item->parent() ? item->parent()->text(0) : QStringLiteral("null"));
         return;
     }
 
@@ -2017,7 +2016,6 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     }
 
     if (!m_metadata.contains(sessionId)) {
-        qDebug() << "SessionManagerPanel::onContextMenu - no metadata for sessionId:" << sessionId << "item text:" << item->text(0);
         return;
     }
 
@@ -2433,8 +2431,6 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         }
     }
 
-    qDebug() << "SessionManagerPanel::onContextMenu - showing menu with" << menu.actions().size() << "actions for" << item->text(0) << "sessionId:" << sessionId
-             << "isDismissed:" << meta.isDismissed << "isArchived:" << meta.isArchived << "isActive:" << m_activeSessions.contains(sessionId);
     menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
 }
 
@@ -3178,6 +3174,13 @@ void SessionManagerPanel::applyFilter(const QString &text)
         return;
     }
 
+    // Helper: check if a leaf item matches the filter text
+    auto itemMatchesFilter = [&text](QTreeWidgetItem *item) -> bool {
+        QString sessionId = item->data(0, Qt::UserRole).toString();
+        return item->text(0).contains(text, Qt::CaseInsensitive) || item->toolTip(0).contains(text, Qt::CaseInsensitive)
+            || sessionId.contains(text, Qt::CaseInsensitive);
+    };
+
     // Iterate all category items, show/hide children based on filter match
     const QList<QTreeWidgetItem *> categories = {m_pinnedCategory, m_activeCategory,    m_detachedCategory,  m_closedCategory,
                                                   m_archivedCategory, m_dismissedCategory, m_discoveredCategory};
@@ -3191,16 +3194,38 @@ void SessionManagerPanel::applyFilter(const QString &text)
             auto *child = cat->child(i);
             if (text.isEmpty()) {
                 child->setHidden(false);
+                // Also unhide grandchildren (group subnodes)
+                for (int j = 0; j < child->childCount(); ++j) {
+                    child->child(j)->setHidden(false);
+                }
                 ++visibleChildren;
             } else {
-                // Match against display name (col 0), tooltip (working dir + session name),
-                // and the raw sessionId (for ID-based lookup)
-                QString sessionId = child->data(0, Qt::UserRole).toString();
-                bool matches = child->text(0).contains(text, Qt::CaseInsensitive) || child->toolTip(0).contains(text, Qt::CaseInsensitive)
-                    || sessionId.contains(text, Qt::CaseInsensitive);
-                child->setHidden(!matches);
-                if (matches) {
-                    ++visibleChildren;
+                // Check if this is a group item (has children that are sessions)
+                bool isGroup = child->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"));
+                if (isGroup) {
+                    // Filter group subnodes individually; show group if any child matches
+                    int visibleGroupChildren = 0;
+                    for (int j = 0; j < child->childCount(); ++j) {
+                        auto *grandchild = child->child(j);
+                        bool matches = itemMatchesFilter(grandchild);
+                        grandchild->setHidden(!matches);
+                        if (matches) {
+                            ++visibleGroupChildren;
+                        }
+                    }
+                    child->setHidden(visibleGroupChildren == 0);
+                    if (visibleGroupChildren > 0) {
+                        child->setExpanded(true);
+                        ++visibleChildren;
+                    }
+                } else {
+                    // Match against display name (col 0), tooltip (working dir + session name),
+                    // and the raw sessionId (for ID-based lookup)
+                    bool matches = itemMatchesFilter(child);
+                    child->setHidden(!matches);
+                    if (matches) {
+                        ++visibleChildren;
+                    }
                 }
             }
         }
