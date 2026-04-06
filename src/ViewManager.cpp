@@ -412,7 +412,7 @@ void ViewManager::toggleActionsBasedOnState()
         }
     }
 
-    // Disable split-view actions for Claude sessions
+    // For Claude sessions, only disable "from next tab" split actions (shared-session split is allowed)
     if (_actionCollection && _viewContainer && _viewContainer->activeViewSplitter()) {
         bool isClaude = false;
         auto *activeDisplay = _viewContainer->activeViewSplitter()->activeTerminalDisplay();
@@ -420,15 +420,12 @@ void ViewManager::toggleActionsBasedOnState()
             isClaude = qobject_cast<Konsolai::ClaudeSession *>(_sessionMap.value(activeDisplay)) != nullptr;
         }
         if (isClaude) {
-            const QStringList splitActions = {
-                QStringLiteral("split-view-left-right"),
-                QStringLiteral("split-view-top-bottom"),
-                QStringLiteral("split-view-auto"),
+            const QStringList nextTabSplitActions = {
                 QStringLiteral("split-view-left-right-next-tab"),
                 QStringLiteral("split-view-top-bottom-next-tab"),
                 QStringLiteral("split-view-auto-next-tab"),
             };
-            for (const QString &name : splitActions) {
+            for (const QString &name : nextTabSplitActions) {
                 if (auto *action = _actionCollection->action(name)) {
                     action->setEnabled(false);
                 }
@@ -841,15 +838,18 @@ void ViewManager::splitAutoNextTab()
 
 void ViewManager::splitView(Qt::Orientation orientation, bool fromNextTab)
 {
-    // Split view is disabled for Claude sessions (tmux sharing is unreliable)
     if (!_viewContainer || !_viewContainer->activeViewSplitter()) {
         return;
     }
-    auto *activeDisplay = _viewContainer->activeViewSplitter()->activeTerminalDisplay();
-    if (activeDisplay) {
-        Session *activeSession = _sessionMap.value(activeDisplay);
-        if (qobject_cast<Konsolai::ClaudeSession *>(activeSession)) {
-            return;
+
+    // Block "from next tab" splits for Claude sessions (detaching from another tab doesn't apply)
+    if (fromNextTab) {
+        auto *activeDisplay = _viewContainer->activeViewSplitter()->activeTerminalDisplay();
+        if (activeDisplay) {
+            Session *activeSession = _sessionMap.value(activeDisplay);
+            if (qobject_cast<Konsolai::ClaudeSession *>(activeSession)) {
+                return;
+            }
         }
     }
 
@@ -870,13 +870,17 @@ void ViewManager::splitView(Qt::Orientation orientation, bool fromNextTab)
         auto *activeSession = SessionManager::instance()->idToSession(currentSessionId);
         Q_ASSERT(activeSession);
 
-        auto profile = SessionManager::instance()->sessionProfile(activeSession);
-
-        const QString directory = profile->startInCurrentSessionDir() ? activeSession->currentWorkingDirectory() : QString();
-        auto *session = createSession(profile, directory);
-
-        focused = terminalDisplay = createView(session);
-        Q_EMIT activeViewChanged(activeViewController());
+        // For Claude sessions, reuse the existing session (shared session, multiple views)
+        if (qobject_cast<Konsolai::ClaudeSession *>(activeSession)) {
+            focused = terminalDisplay = createView(activeSession);
+            Q_EMIT activeViewChanged(activeViewController());
+        } else {
+            auto profile = SessionManager::instance()->sessionProfile(activeSession);
+            const QString directory = profile->startInCurrentSessionDir() ? activeSession->currentWorkingDirectory() : QString();
+            auto *session = createSession(profile, directory);
+            focused = terminalDisplay = createView(session);
+            Q_EMIT activeViewChanged(activeViewController());
+        }
     }
 
     _viewContainer->splitView(terminalDisplay, orientation);
@@ -981,24 +985,23 @@ void ViewManager::controllerChanged(SessionController *controller)
 
     _pluggedController = controller;
 
-    // Disable split-view actions for Claude sessions (tmux sharing is unreliable)
+    // For Claude sessions, only disable "from next tab" split actions (shared-session split is allowed)
     if (_actionCollection) {
         bool isClaude = false;
         if (controller && controller->view()) {
             Session *session = _sessionMap.value(controller->view());
             isClaude = qobject_cast<Konsolai::ClaudeSession *>(session) != nullptr;
         }
-        const QStringList splitActions = {
-            QStringLiteral("split-view-left-right"),
-            QStringLiteral("split-view-top-bottom"),
-            QStringLiteral("split-view-auto"),
-            QStringLiteral("split-view-left-right-next-tab"),
-            QStringLiteral("split-view-top-bottom-next-tab"),
-            QStringLiteral("split-view-auto-next-tab"),
-        };
-        for (const QString &name : splitActions) {
-            if (auto *action = _actionCollection->action(name)) {
-                action->setEnabled(!isClaude);
+        if (isClaude) {
+            const QStringList nextTabSplitActions = {
+                QStringLiteral("split-view-left-right-next-tab"),
+                QStringLiteral("split-view-top-bottom-next-tab"),
+                QStringLiteral("split-view-auto-next-tab"),
+            };
+            for (const QString &name : nextTabSplitActions) {
+                if (auto *action = _actionCollection->action(name)) {
+                    action->setEnabled(false);
+                }
             }
         }
     }

@@ -87,6 +87,95 @@ void SplitViewClaudeTest::testSessionMapTracksMultipleViews()
     delete session;
 }
 
+void SplitViewClaudeTest::testSharedSessionSplit()
+{
+    // Verify that when splitting a Claude session, the SAME session object
+    // should be reused (not a new one created). We simulate this by checking
+    // that a single ClaudeSession can be inserted into the session map under
+    // multiple display keys (the core invariant of Option B shared-session split).
+    auto *session = new ClaudeSession(QStringLiteral("shared-split"), QDir::tempPath());
+    QHash<int, Konsole::Session *> sessionMap;
+
+    // Simulate first view
+    sessionMap.insert(100, session);
+    QCOMPARE(sessionMap.size(), 1);
+
+    // Simulate split: same session, new display key
+    sessionMap.insert(200, session);
+    QCOMPARE(sessionMap.size(), 2);
+
+    // Both map entries should resolve to the exact same session pointer
+    QCOMPARE(sessionMap.value(100), session);
+    QCOMPARE(sessionMap.value(200), session);
+    QVERIFY(sessionMap.value(100) == sessionMap.value(200));
+
+    // The session is a ClaudeSession in both cases
+    QVERIFY(qobject_cast<Konsolai::ClaudeSession *>(sessionMap.value(100)) != nullptr);
+    QVERIFY(qobject_cast<Konsolai::ClaudeSession *>(sessionMap.value(200)) != nullptr);
+
+    sessionMap.clear();
+    delete session;
+}
+
+void SplitViewClaudeTest::testMultipleViewsSameSession()
+{
+    // Verify that _sessionMap correctly tracks multiple displays pointing to
+    // the same session, and that keys(session) returns all of them.
+    auto *session = new ClaudeSession(QStringLiteral("multi-display"), QDir::tempPath());
+    QHash<int, Konsole::Session *> sessionMap;
+
+    sessionMap.insert(10, session);
+    sessionMap.insert(20, session);
+    sessionMap.insert(30, session);
+
+    // All three displays map to the same session
+    QCOMPARE(sessionMap.keys(session).count(), 3);
+    QVERIFY(sessionMap.keys(session).contains(10));
+    QVERIFY(sessionMap.keys(session).contains(20));
+    QVERIFY(sessionMap.keys(session).contains(30));
+
+    // Remove the middle one
+    sessionMap.remove(20);
+    QCOMPARE(sessionMap.keys(session).count(), 2);
+    QVERIFY(!sessionMap.keys(session).contains(20));
+
+    // Session is still reachable from remaining displays
+    QCOMPARE(sessionMap.value(10), session);
+    QCOMPARE(sessionMap.value(30), session);
+
+    sessionMap.clear();
+    delete session;
+}
+
+void SplitViewClaudeTest::testRemoveOneViewKeepsSession()
+{
+    // Verify that removing one view (display) from the session map does NOT
+    // destroy the session when other views still reference it.
+    auto *session = new ClaudeSession(QStringLiteral("keep-alive"), QDir::tempPath());
+    QPointer<ClaudeSession> guard(session);
+
+    QHash<int, Konsole::Session *> sessionMap;
+    sessionMap.insert(1, session);
+    sessionMap.insert(2, session);
+
+    // Remove one view
+    sessionMap.remove(1);
+
+    // Session must still be alive — only one view was removed, not the session
+    QVERIFY(!guard.isNull());
+    QCOMPARE(sessionMap.keys(session).count(), 1);
+    QCOMPARE(sessionMap.value(2), session);
+
+    // Remove the last view — session is still alive (map removal doesn't delete)
+    sessionMap.remove(2);
+    QVERIFY(!guard.isNull());
+    QCOMPARE(sessionMap.keys(session).count(), 0);
+
+    // Only explicit delete destroys it
+    delete session;
+    QVERIFY(guard.isNull());
+}
+
 void SplitViewClaudeTest::testCreateForReattachProducesIndependentSession()
 {
     // createForReattach should produce a distinct session object

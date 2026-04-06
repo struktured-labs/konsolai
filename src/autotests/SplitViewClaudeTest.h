@@ -25,6 +25,9 @@ private Q_SLOTS:
     void testClaudeSessionReusedOnSplit();
     void testRemoveOneViewDoesNotKillSession();
     void testSessionMapTracksMultipleViews();
+    void testSharedSessionSplit();
+    void testMultipleViewsSameSession();
+    void testRemoveOneViewKeepsSession();
     void testCreateForReattachProducesIndependentSession();
     void testReattachSessionHasSameNameButDifferentObject();
     void testRemoveHooksForWorkDirClearsAllKonsolaiHooks();
