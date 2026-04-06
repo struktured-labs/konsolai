@@ -52,6 +52,7 @@ class SessionGroup;
 class TerminalDisplay;
 class UrlFilter;
 class ColorFilter;
+class SessionLinkFilter;
 class HotSpot;
 class SaveHistoryAutoTask;
 
@@ -415,6 +416,7 @@ private:
     bool _monitorProcessFinish;
     bool _monitorOnce;
     EscapeSequenceUrlFilter *_escapedUrlFilter;
+    SessionLinkFilter *_sessionLinkFilter = nullptr;
 
     std::unique_ptr<KXMLGUIBuilder> _clientBuilder;
 

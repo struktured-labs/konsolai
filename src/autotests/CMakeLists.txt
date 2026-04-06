@@ -94,5 +94,6 @@ ecm_add_tests(
     HookCleanupRaceTest.cpp
     AgentFleetProviderTest.cpp
     SplitViewClaudeTest.cpp
+    SessionLinkFilterTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )

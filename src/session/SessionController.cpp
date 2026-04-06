@@ -70,6 +70,7 @@
 #include "filterHotSpots/FilterChain.h"
 #include "filterHotSpots/HotSpot.h"
 #include "filterHotSpots/RegExpFilter.h"
+#include "filterHotSpots/SessionLinkFilter.h"
 #include "filterHotSpots/UrlFilter.h"
 
 #include "history/HistoryType.h"
@@ -84,6 +85,8 @@
 
 #include "widgets/EditProfileDialog.h"
 #include "widgets/IncrementalSearchBar.h"
+
+#include "claude/ClaudeSession.h"
 
 #include "terminalDisplay/TerminalColor.h"
 #include "terminalDisplay/TerminalDisplay.h"
@@ -1498,6 +1501,19 @@ void SessionController::updateFilterList(const Profile::Ptr &profile)
     } else if (allowColorFilters && (_colorFilter == nullptr)) {
         _colorFilter = new ColorFilter();
         filterChain->addFilter(_colorFilter);
+    }
+
+    // Session link filter: enable for Claude sessions to make @session-name clickable
+    const bool isClaude = qobject_cast<Konsolai::ClaudeSession *>(session().data()) != nullptr;
+    if (isClaude) {
+        if (_sessionLinkFilter == nullptr) {
+            _sessionLinkFilter = new SessionLinkFilter();
+            filterChain->addFilter(_sessionLinkFilter);
+        }
+    } else if (_sessionLinkFilter != nullptr) {
+        filterChain->removeFilter(_sessionLinkFilter);
+        delete _sessionLinkFilter;
+        _sessionLinkFilter = nullptr;
     }
 }
 
