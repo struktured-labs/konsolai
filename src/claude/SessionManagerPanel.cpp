@@ -3482,7 +3482,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             if (!boltsHtml.isEmpty()) {
                 auto *label = new QLabel(boltsHtml);
                 label->setTextFormat(Qt::RichText);
-                label->installEventFilter(this);
+                label->setAttribute(Qt::WA_TransparentForMouseEvents);
                 m_treeWidget->setItemWidget(item, 1, label);
             }
         }
@@ -3611,7 +3611,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!elapsed.isEmpty()) {
                     auto *durationLabel = new QLabel(elapsed);
                     durationLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
-                    durationLabel->installEventFilter(this);
+                    durationLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
                     m_treeWidget->setItemWidget(childItem, 1, durationLabel);
                 }
 
@@ -3677,7 +3677,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 if (!col1.isEmpty()) {
                     auto *statsLabel = new QLabel(col1);
                     statsLabel->setStyleSheet(QStringLiteral("color: gray; font-size: 10px;"));
-                    statsLabel->installEventFilter(this);
+                    statsLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
                     m_treeWidget->setItemWidget(childItem, 1, statsLabel);
                 }
 
@@ -4375,7 +4375,7 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
         } else {
             auto *label = new QLabel(boltsHtml);
             label->setTextFormat(Qt::RichText);
-            label->installEventFilter(this);
+            label->setAttribute(Qt::WA_TransparentForMouseEvents);
             m_treeWidget->setItemWidget(item, 1, label);
         }
     } else if (existing) {
@@ -5267,26 +5267,8 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
                 scheduleTreeUpdate();
             }
         }
-        // Intercept right-click on viewport
-        if (watched == m_treeWidget->viewport() && event->type() == QEvent::ContextMenu) {
-            auto *ce = static_cast<QContextMenuEvent *>(event);
-            onContextMenu(ce->pos());
-            return true;
-        }
     }
 
-    // Intercept right-click on QLabel item widgets (they sit on top of the viewport
-    // and consume ContextMenu events before the viewport sees them).
-    // Map the label's position back to viewport coordinates for itemAt().
-    if (event->type() == QEvent::ContextMenu) {
-        auto *widget = qobject_cast<QWidget *>(watched);
-        if (widget && m_treeWidget && widget->isVisible() && m_treeWidget->isAncestorOf(widget)) {
-            auto *ce = static_cast<QContextMenuEvent *>(event);
-            QPoint viewportPos = widget->mapTo(m_treeWidget->viewport(), ce->pos());
-            onContextMenu(viewportPos);
-            return true;
-        }
-    }
     return QWidget::eventFilter(watched, event);
 }
 
