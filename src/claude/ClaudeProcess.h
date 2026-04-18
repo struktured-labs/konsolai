@@ -44,8 +44,8 @@ public:
      * Claude model to use
      */
     enum class Model {
-        Default,        // Use default model
-        Opus, // claude-opus-4-6
+        Default, // Use default model (opus 4.7 max effort)
+        Opus, // claude-opus-4-7
         Sonnet, // claude-sonnet-4-6
         Haiku // claude-haiku-4-5-20251001
     };

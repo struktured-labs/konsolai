@@ -31,8 +31,11 @@ QString ClaudeProcess::buildCommand(Model model,
     QStringList args;
     args << QStringLiteral("claude");
 
-    // Add model if not default
-    if (model != Model::Default) {
+    // Default: opus 4.7 with max effort. Explicit model overrides this.
+    if (model == Model::Default) {
+        args << QStringLiteral("--model") << QStringLiteral("claude-opus-4-7");
+        args << QStringLiteral("--effort") << QStringLiteral("max");
+    } else {
         args << QStringLiteral("--model") << modelName(model);
     }
 
@@ -69,7 +72,7 @@ QString ClaudeProcess::modelName(Model model)
 {
     switch (model) {
     case Model::Opus:
-        return QStringLiteral("claude-opus-4-6");
+        return QStringLiteral("claude-opus-4-7");
     case Model::Sonnet:
         return QStringLiteral("claude-sonnet-4-6");
     case Model::Haiku:
