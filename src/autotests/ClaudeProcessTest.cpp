@@ -68,14 +68,14 @@ void ClaudeProcessTest::testIsRunning()
 void ClaudeProcessTest::testModelName()
 {
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Default), QString());
-    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-4-6"));
+    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-4-7"));
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Sonnet), QStringLiteral("claude-sonnet-4-6"));
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Haiku), QStringLiteral("claude-haiku-4-5-20251001"));
 }
 
 void ClaudeProcessTest::testParseModel()
 {
-    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-4-6")), ClaudeProcess::Model::Opus);
+    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-4-7")), ClaudeProcess::Model::Opus);
     QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-sonnet-4-6")), ClaudeProcess::Model::Sonnet);
     QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-haiku-4-5-20251001")), ClaudeProcess::Model::Haiku);
 

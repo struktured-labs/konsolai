@@ -924,6 +924,11 @@ Q_SIGNALS:
     void budgetBlocked(const QString &reason);
 
     /**
+     * Emitted when a rate limit is detected and retry is scheduled
+     */
+    void rateLimitDetected(int retryCount, int delaySecs);
+
+    /**
      * Emitted when task description is set/changed
      */
     void taskDescriptionChanged();
@@ -1053,6 +1058,13 @@ private:
     void startIdlePolling();
     void stopIdlePolling();
     void pollForIdlePrompt();
+
+    // Rate limit detection and auto-retry with exponential backoff
+    QTimer *m_rateLimitRetryTimer = nullptr;
+    int m_rateLimitRetryCount = 0;
+    static constexpr int MAX_RATE_LIMIT_RETRIES = 8; // max ~4 min backoff
+    bool detectRateLimit(const QString &terminalOutput);
+    void scheduleRateLimitRetry();
 
     // Hook cleanup: remove konsolai hooks from project's .claude/settings.local.json
     void removeHooksFromProjectSettings();

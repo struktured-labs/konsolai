@@ -92,6 +92,9 @@ ClaudeSession::~ClaudeSession()
     if (m_resourceTimer) {
         m_resourceTimer->stop();
     }
+    if (m_rateLimitRetryTimer) {
+        m_rateLimitRetryTimer->stop();
+    }
 
     // BudgetController and SessionObserver own timers — delete early to stop them
     delete m_budgetController;
@@ -636,6 +639,22 @@ void ClaudeSession::connectSignals()
         if (m_budgetController && m_budgetController->shouldBlockYolo()) {
             qDebug() << "ClaudeSession: Budget gate blocking L2 yolo";
             return;
+        }
+
+        // Check for rate limit — capture terminal and retry if needed.
+        // This runs async, so we check BEFORE the yolo logic fires.
+        if (m_tmuxManager) {
+            QPointer<ClaudeSession> rlGuard(this);
+            m_tmuxManager->capturePaneAsync(m_sessionName, [rlGuard](bool ok, const QString &output) {
+                if (!rlGuard || !ok) {
+                    return;
+                }
+                if (rlGuard->detectRateLimit(output)) {
+                    rlGuard->scheduleRateLimitRetry();
+                } else {
+                    rlGuard->m_rateLimitRetryCount = 0;
+                }
+            });
         }
 
         // Signal hook-based idle to suppress polling for a cooldown window.
@@ -1631,7 +1650,20 @@ void ClaudeSession::pollForIdlePrompt()
         }
         const QString bottomLines = (pos > 0) ? output.mid(pos + 1) : output;
 
-        if (detectIdlePrompt(bottomLines)) {
+        // Check for rate limit BEFORE idle prompt — if Claude hit a rate limit
+        // and is now idle, auto-retry with exponential backoff.
+        if (detectIdlePrompt(bottomLines) && detectRateLimit(output)) {
+            if (!m_idlePromptDetected) {
+                m_idlePromptDetected = true;
+                scheduleRateLimitRetry();
+                QTimer::singleShot(10000, this, [this]() {
+                    m_idlePromptDetected = false;
+                });
+            }
+        } else if (detectIdlePrompt(bottomLines)) {
+            // Reset rate limit retry count on successful idle (no rate limit)
+            m_rateLimitRetryCount = 0;
+
             if (!m_idlePromptDetected) {
                 m_idlePromptDetected = true;
 
@@ -1693,6 +1725,59 @@ bool ClaudeSession::detectIdlePrompt(const QString &terminalOutput)
     }
 
     return false;
+}
+
+bool ClaudeSession::detectRateLimit(const QString &terminalOutput)
+{
+    // Claude Code shows rate limit errors in the terminal when the API returns
+    // 429 (rate limit) or 529 (overloaded). Common patterns:
+    //   "rate limit" / "Rate limit"
+    //   "overloaded" / "Overloaded"
+    //   "too many requests" / "Too many requests"
+    //   "429" / "529" (HTTP status codes in error messages)
+    //   "retry" in context of errors
+    // Check the last 10 lines for these patterns.
+    const auto lines = terminalOutput.split(QLatin1Char('\n'));
+    int start = qMax(0, lines.size() - 10);
+    for (int i = start; i < lines.size(); ++i) {
+        const QString &line = lines[i];
+        if (line.contains(QStringLiteral("rate limit"), Qt::CaseInsensitive) || line.contains(QStringLiteral("rate_limit"), Qt::CaseInsensitive)
+            || line.contains(QStringLiteral("overloaded"), Qt::CaseInsensitive) || line.contains(QStringLiteral("too many requests"), Qt::CaseInsensitive)
+            || line.contains(QStringLiteral("529")) || line.contains(QStringLiteral("429"))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ClaudeSession::scheduleRateLimitRetry()
+{
+    if (m_rateLimitRetryCount >= MAX_RATE_LIMIT_RETRIES) {
+        qDebug() << "ClaudeSession: Rate limit retry count exhausted (" << MAX_RATE_LIMIT_RETRIES << "), giving up";
+        m_rateLimitRetryCount = 0;
+        return;
+    }
+
+    // Exponential backoff: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s
+    int delaySecs = 2 << m_rateLimitRetryCount;
+    m_rateLimitRetryCount++;
+
+    qDebug() << "ClaudeSession: Rate limit detected, retry" << m_rateLimitRetryCount << "in" << delaySecs << "seconds";
+
+    Q_EMIT rateLimitDetected(m_rateLimitRetryCount, delaySecs);
+
+    if (!m_rateLimitRetryTimer) {
+        m_rateLimitRetryTimer = new QTimer(this);
+        m_rateLimitRetryTimer->setSingleShot(true);
+        connect(m_rateLimitRetryTimer, &QTimer::timeout, this, [this]() {
+            if (!m_tmuxManager) {
+                return;
+            }
+            qDebug() << "ClaudeSession: Rate limit retry - sending 'continue'";
+            sendPrompt(QStringLiteral("continue"));
+        });
+    }
+    m_rateLimitRetryTimer->start(delaySecs * 1000);
 }
 
 void ClaudeSession::startTokenTracking()
