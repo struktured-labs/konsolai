@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
 
-<gui name="konsolai" version="25">
+<gui name="konsolai" version="50">
     <MenuBar>
         <Menu name="file"><text>File</text>
             <Action name="new-claude-session"/>

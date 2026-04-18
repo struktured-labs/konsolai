@@ -3504,11 +3504,14 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                     boltsHtml += QStringLiteral(" <span style='color:#FFC107'>\xe2\x9a\xa0</span>");
                 }
             }
+            // Use plain setText for column 1 — QLabel item widgets intercept
+            // mouse events on Wayland, preventing right-click context menus.
             if (!boltsHtml.isEmpty()) {
-                auto *label = new QLabel(boltsHtml);
-                label->setTextFormat(Qt::RichText);
-                label->setAttribute(Qt::WA_TransparentForMouseEvents);
-                m_treeWidget->setItemWidget(item, 1, label);
+                // Strip HTML to plain text for setText, preserve unicode symbols
+                QString plain = boltsHtml;
+                plain.replace(QRegularExpression(QStringLiteral("<[^>]*>")), QString());
+                plain = plain.simplified();
+                item->setText(1, plain);
             }
         }
     }
@@ -4393,18 +4396,14 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
             boltsHtml += QStringLiteral(" <span style='color:#FFC107'>\xe2\x9a\xa0</span>");
         }
     }
-    auto *existing = qobject_cast<QLabel *>(m_treeWidget->itemWidget(item, 1));
+    // Use plain setText — QLabel item widgets block right-click on Wayland
     if (!boltsHtml.isEmpty()) {
-        if (existing) {
-            existing->setText(boltsHtml);
-        } else {
-            auto *label = new QLabel(boltsHtml);
-            label->setTextFormat(Qt::RichText);
-            label->setAttribute(Qt::WA_TransparentForMouseEvents);
-            m_treeWidget->setItemWidget(item, 1, label);
-        }
-    } else if (existing) {
-        m_treeWidget->removeItemWidget(item, 1);
+        QString plain = boltsHtml;
+        plain.replace(QRegularExpression(QStringLiteral("<[^>]*>")), QString());
+        plain = plain.simplified();
+        item->setText(1, plain);
+    } else {
+        item->setText(1, QString());
     }
 }
 
