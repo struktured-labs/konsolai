@@ -39,6 +39,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
@@ -1534,6 +1535,8 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 void SessionManagerPanel::onContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = m_treeWidget->itemAt(pos);
+    qWarning() << "RIGHT-CLICK:" << pos << "item:" << (item ? item->text(0) : QStringLiteral("NULL"))
+               << "parent:" << (item && item->parent() ? item->parent()->text(0) : QStringLiteral("none"));
     if (!item) {
         return;
     }
@@ -5289,6 +5292,17 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
             if (m_pendingUpdate && !isTreeInteractionActive()) {
                 m_pendingUpdate = false;
                 scheduleTreeUpdate();
+            }
+        }
+
+        // Handle right-click directly via MouseButtonRelease on viewport.
+        // customContextMenuRequested doesn't fire reliably for items under
+        // group headers (depth > 1) on Qt6/Wayland.
+        if (watched == m_treeWidget->viewport() && event->type() == QEvent::MouseButtonRelease) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            if (me->button() == Qt::RightButton) {
+                onContextMenu(me->pos());
+                return true;
             }
         }
     }
