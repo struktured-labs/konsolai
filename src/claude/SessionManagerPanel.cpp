@@ -1733,8 +1733,12 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     }
 
     // Handle items deeper than direct children of categories (subagents, subprocesses, task/prompt groups)
+    // Skip session items that happen to be under a group (depth 2 but still sessions):
+    // sessions have UserRole + 6 = "s:..." — let them fall through to the session menu below.
     QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem && parentItem->parent() != nullptr) {
+    QString compositeKeyForItem = item->data(0, Qt::UserRole + 6).toString();
+    bool isSessionItem = compositeKeyForItem.startsWith(QStringLiteral("s:"));
+    if (!isSessionItem && parentItem && parentItem->parent() != nullptr) {
         // Check if this is a prompt group item (UserRole + 3)
         QVariant promptGroupVar = item->data(0, Qt::UserRole + 3);
         if (promptGroupVar.isValid() && !promptGroupVar.isNull()) {
