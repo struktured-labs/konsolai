@@ -1452,6 +1452,14 @@ void ClaudeSession::pollForPermissionPrompt()
         return;
     }
 
+    // Skip when Claude is actively working — permission prompts only appear
+    // in Idle/WaitingInput states.  Polling while Working spawns a tmux
+    // capture-pane subprocess every 300ms per session for no benefit and
+    // contributes to typing latency when many sessions are active.
+    if (claudeState() == ClaudeProcess::State::Working) {
+        return;
+    }
+
     // Budget gate: block yolo when budget exceeded or resources critical
     if (m_budgetController && m_budgetController->shouldBlockYolo()) {
         return;
@@ -1540,16 +1548,42 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
     //   ❯ Yes, allow once            (verbose form)
     //   ❯ Allow once                 (alternate wording)
     //   ❯ Always allow               (second option, when pre-selected differently)
+    //
+    // Critical: Claude Code's INPUT prompt also uses ❯ as a marker:
+    //   ─────────────  (border, all U+2500)
+    //   ❯ user typing here
+    //   ─────────────  (border, all U+2500)
+    // If the user types "yes"/"allow", we must NOT match that as a permission
+    // prompt.  Distinguishing feature: the input prompt's ❯ line is sandwiched
+    // between full-width horizontal-rule borders (lines that are almost
+    // entirely U+2500).  Permission UI uses boxed corners (╭╮╰╯) or plain
+    // text — never pure U+2500-only lines adjacent to ❯.
+
+    auto isInputBoxBorder = [](const QString &line) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.size() < 20) {
+            return false;
+        }
+        int dashCount = trimmed.count(QChar(0x2500));
+        return dashCount > trimmed.size() * 9 / 10;
+    };
 
     const auto lines = terminalOutput.split(QLatin1Char('\n'));
-    for (const QString &line : lines) {
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString &line = lines[i];
         if (!line.contains(QStringLiteral("❯"))) {
             continue;
         }
-        // Selector arrow is on this line — check for permission-related keywords
-        if (line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive) || line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive)) {
-            return true;
+        if (!line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive) && !line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive)) {
+            continue;
         }
+        // Skip if this is the input prompt (sandwiched between border lines).
+        bool prevIsBorder = (i > 0) && isInputBoxBorder(lines[i - 1]);
+        bool nextIsBorder = (i + 1 < lines.size()) && isInputBoxBorder(lines[i + 1]);
+        if (prevIsBorder || nextIsBorder) {
+            continue;
+        }
+        return true;
     }
 
     return false;

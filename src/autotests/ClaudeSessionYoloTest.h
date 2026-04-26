@@ -55,6 +55,8 @@ private Q_SLOTS:
     // Detection edge cases
     void testDetectPermissionPrompt_NoMatch_CrossLine();
     void testDetectPermissionPrompt_NoMatch_SelectorOnDeny();
+    void testDetectPermissionPrompt_NoMatch_UserTypingYesInInputBox();
+    void testDetectPermissionPrompt_NoMatch_UserTypingAllowInInputBox();
     void testDetectIdlePrompt_NoMatch_CaretInMiddle();
 
     // Approval logging

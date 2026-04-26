@@ -320,6 +320,30 @@ void ClaudeSessionYoloTest::testDetectIdlePrompt_NoMatch_CaretInMiddle()
     QVERIFY(!ClaudeSession::detectIdlePrompt(output));
 }
 
+void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_UserTypingYesInInputBox()
+{
+    // Claude Code's input box uses ❯ as the input marker, surrounded by
+    // horizontal-rule borders.  When the user types "yes" or "YES", the
+    // line matches "❯ + Yes" but it's the input prompt, NOT a permission
+    // prompt.  Must NOT match.
+    QString border = QString(120, QChar(0x2500));
+    QString output = QStringLiteral("Some Claude output above\n") + border + QStringLiteral("\n❯ YES\n") + border + QStringLiteral("\n  status footer");
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(output));
+
+    QString output2 = QStringLiteral("Some Claude output above\n") + border + QStringLiteral("\n❯ yes please\n") + border + QStringLiteral("\n  status footer");
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(output2));
+}
+
+void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_UserTypingAllowInInputBox()
+{
+    // Same as above but with "Allow" — user typing "allow this please" must
+    // not trigger permission detection.
+    QString border = QString(120, QChar(0x2500));
+    QString output =
+        QStringLiteral("Some Claude output above\n") + border + QStringLiteral("\n❯ allow this command\n") + border + QStringLiteral("\n  status footer");
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(output));
+}
+
 // ============================================================
 // Approval logging tests
 // ============================================================
