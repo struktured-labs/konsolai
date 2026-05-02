@@ -3478,26 +3478,9 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 }
             }
             if (auto *bc = session->budgetController()) {
-                if (bc->budget().hasAnyLimit()) {
-                    QString budgetInfo;
-                    if (bc->budget().timeLimitMinutes > 0) {
-                        int elapsed = bc->budget().elapsedMinutes();
-                        budgetInfo += QStringLiteral(" %1/%2m").arg(elapsed).arg(bc->budget().timeLimitMinutes);
-                    }
-                    if (bc->budget().costCeilingUSD > 0.0) {
-                        double cost = session->tokenUsage().estimatedCostUSD();
-                        if (!budgetInfo.isEmpty()) {
-                            budgetInfo += QStringLiteral(" |");
-                        }
-                        budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
-                    }
-                    if (!budgetInfo.isEmpty()) {
-                        boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
-                    }
-                }
-                const auto &vel = bc->velocity();
-                if (vel.tokensPerMinute() > 0) {
-                    boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
+                if (bc->budget().hasAnyLimit() && bc->budget().timeLimitMinutes > 0) {
+                    int elapsed = bc->budget().elapsedMinutes();
+                    boltsHtml += QStringLiteral(" <span style='color:gray; font-size:10px'>%1/%2m</span>").arg(elapsed).arg(bc->budget().timeLimitMinutes);
                 }
             }
             if (auto *obs = session->sessionObserver()) {
@@ -4370,26 +4353,9 @@ void SessionManagerPanel::refreshSessionItemLabel(const QString &sessionId)
         }
     }
     if (auto *bc = session->budgetController()) {
-        if (bc->budget().hasAnyLimit()) {
-            QString budgetInfo;
-            if (bc->budget().timeLimitMinutes > 0) {
-                int elapsed = bc->budget().elapsedMinutes();
-                budgetInfo += QStringLiteral(" %1/%2m").arg(elapsed).arg(bc->budget().timeLimitMinutes);
-            }
-            if (bc->budget().costCeilingUSD > 0.0) {
-                double cost = session->tokenUsage().estimatedCostUSD();
-                if (!budgetInfo.isEmpty()) {
-                    budgetInfo += QStringLiteral(" |");
-                }
-                budgetInfo += QStringLiteral(" $%1/$%2").arg(cost, 0, 'f', 2).arg(bc->budget().costCeilingUSD, 0, 'f', 2);
-            }
-            if (!budgetInfo.isEmpty()) {
-                boltsHtml += QStringLiteral("<span style='color:gray; font-size:10px'>%1</span>").arg(budgetInfo);
-            }
-        }
-        const auto &vel = bc->velocity();
-        if (vel.tokensPerMinute() > 0) {
-            boltsHtml += QStringLiteral("<br><span style='color:gray; font-size:9px'>%1</span>").arg(vel.formatVelocity());
+        if (bc->budget().hasAnyLimit() && bc->budget().timeLimitMinutes > 0) {
+            int elapsed = bc->budget().elapsedMinutes();
+            boltsHtml += QStringLiteral(" <span style='color:gray; font-size:10px'>%1/%2m</span>").arg(elapsed).arg(bc->budget().timeLimitMinutes);
         }
     }
     if (auto *obs = session->sessionObserver()) {
