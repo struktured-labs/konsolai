@@ -392,7 +392,6 @@ void SessionManagerPanel::setupUi()
     m_discoveredCategory->setExpanded(false);
 
     setMinimumWidth(200);
-    setMaximumWidth(350);
 }
 
 void SessionManagerPanel::showLoadingState()
@@ -427,7 +426,7 @@ void SessionManagerPanel::setCollapsed(bool collapsed)
         m_newSessionButton->hide();
     } else {
         m_collapseButton->setIcon(QIcon::fromTheme(QStringLiteral("sidebar-collapse-left")));
-        setMaximumWidth(350);
+        setMaximumWidth(QWIDGETSIZE_MAX);
         m_treeWidget->show();
         m_filterEdit->show();
         m_newSessionButton->show();
