@@ -865,10 +865,17 @@ void ViewManager::splitView(Qt::Orientation orientation, bool fromNextTab)
         terminalDisplay = nextTab->activeTerminalDisplay();
         focused = _viewContainer->activeViewSplitter()->activeTerminalDisplay();
     } else {
+        // currentSession() returns -1 when no controller is plugged (e.g.,
+        // split-view invoked from a transient state).  Bail out gracefully
+        // instead of asserting — this path is reachable from user actions.
         int currentSessionId = currentSession();
-        Q_ASSERT(currentSessionId >= 0);
+        if (currentSessionId < 0) {
+            return;
+        }
         auto *activeSession = SessionManager::instance()->idToSession(currentSessionId);
-        Q_ASSERT(activeSession);
+        if (!activeSession) {
+            return;
+        }
 
         // For Claude sessions, reuse the existing session (shared session, multiple views)
         if (qobject_cast<Konsolai::ClaudeSession *>(activeSession)) {
@@ -1510,8 +1517,7 @@ QStringList ViewManager::sessionList()
 
 int ViewManager::currentSession()
 {
-    if (_pluggedController != nullptr) {
-        Q_ASSERT(_pluggedController->session() != nullptr);
+    if (_pluggedController != nullptr && _pluggedController->session() != nullptr) {
         return _pluggedController->session()->sessionId();
     }
     return -1;
