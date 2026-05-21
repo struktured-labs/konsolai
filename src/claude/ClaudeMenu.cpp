@@ -147,6 +147,12 @@ void ClaudeMenu::createActions()
     m_archiveAllAction->setToolTip(i18n("Kill all detached tmux sessions"));
     connect(m_archiveAllAction, &QAction::triggered, this, &ClaudeMenu::onArchiveAll);
 
+    // Restart All Sessions — picks up new Claude CLI/MCP/plugin versions
+    m_restartAllSessionsAction = addAction(i18n("Restart All Active Sessio&ns..."));
+    m_restartAllSessionsAction->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
+    m_restartAllSessionsAction->setToolTip(i18n("Restart every active Claude session to pick up new CLI/MCP/plugin versions"));
+    connect(m_restartAllSessionsAction, &QAction::triggered, this, &ClaudeMenu::onRestartAllSessions);
+
     addSeparator();
 
     // Clear All Stale Hooks
@@ -502,6 +508,38 @@ void ClaudeMenu::onArchiveAll()
         });
     };
     killNext();
+}
+
+void ClaudeMenu::onRestartAllSessions()
+{
+    if (!m_registry) {
+        return;
+    }
+
+    QList<ClaudeSession *> sessions = m_registry->activeSessions();
+    if (sessions.isEmpty()) {
+        QMessageBox::information(this, i18n("Restart All Sessions"), i18n("No active Claude sessions to restart."));
+        return;
+    }
+
+    int count = sessions.size();
+    QMessageBox::StandardButton reply = QMessageBox::question(this,
+                                                              i18n("Restart All Active Sessions"),
+                                                              i18n("Restart all %1 active Claude session(s)?\n\n"
+                                                                   "Each session's conversation will be preserved (resumed by ID), but the Claude CLI process "
+                                                                   "will be replaced — picking up new CLI, MCP, and plugin versions.",
+                                                                   count),
+                                                              QMessageBox::Yes | QMessageBox::No,
+                                                              QMessageBox::No);
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    for (ClaudeSession *session : sessions) {
+        if (session) {
+            session->restart();
+        }
+    }
 }
 
 void ClaudeMenu::onArchiveSession()

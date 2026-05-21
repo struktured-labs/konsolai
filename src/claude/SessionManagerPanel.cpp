@@ -1540,7 +1540,7 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         return;
     }
 
-    // Group items — provide expand/collapse context menu
+    // Group items — provide expand/collapse + restart-all context menu
     QString compositeKey = item->data(0, Qt::UserRole + 6).toString();
     if (compositeKey.startsWith(QStringLiteral("group:"))) {
         QMenu menu(this);
@@ -1555,6 +1555,43 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         connect(collapseAction, &QAction::triggered, this, [item]() {
             item->setExpanded(false);
         });
+
+        // Collect active session IDs in this group for restart action
+        QStringList activeIds;
+        for (int i = 0; i < item->childCount(); ++i) {
+            QString childId = item->child(i)->data(0, Qt::UserRole).toString();
+            if (!childId.isEmpty() && m_activeSessions.contains(childId)) {
+                activeIds << childId;
+            }
+        }
+        if (!activeIds.isEmpty()) {
+            menu.addSeparator();
+            QAction *restartAllAction =
+                menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart All Sessions in Group (%1)", activeIds.size()));
+            restartAllAction->setToolTip(i18n("Restart all active Claude sessions in this group to pick up CLI/MCP/plugin updates"));
+            QString groupLabel = item->text(0);
+            connect(restartAllAction, &QAction::triggered, this, [this, activeIds, groupLabel]() {
+                int ret = QMessageBox::question(this,
+                                                i18n("Restart Sessions in Group"),
+                                                i18n("Restart all %1 active Claude session(s) in \"%2\"?\n\n"
+                                                     "Each session's conversation will be preserved (resumed by ID), but the Claude CLI process "
+                                                     "will be replaced — picking up new CLI/MCP/plugin versions.",
+                                                     activeIds.size(),
+                                                     groupLabel),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+                if (ret != QMessageBox::Yes) {
+                    return;
+                }
+                for (const QString &id : activeIds) {
+                    QPointer<ClaudeSession> session = m_activeSessions.value(id);
+                    if (session) {
+                        session->restart();
+                    }
+                }
+            });
+        }
+
         menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
     }

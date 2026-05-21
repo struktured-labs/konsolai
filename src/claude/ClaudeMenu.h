@@ -140,6 +140,7 @@ private Q_SLOTS:
     void onDoubleYoloModeToggled(bool checked);
     void onArchiveAll();
     void onArchiveSession();
+    void onRestartAllSessions();
     void onClearStaleHooks();
     void onConfigureNotifications();
     void onToggleNotificationChannel();
@@ -161,6 +162,7 @@ private:
     QAction *m_detachAction = nullptr;
     QAction *m_killAction = nullptr;
     QAction *m_archiveAllAction = nullptr;
+    QAction *m_restartAllSessionsAction = nullptr;
     QAction *m_clearStaleHooksAction = nullptr;
     QAction *m_configureHooksAction = nullptr;
 
