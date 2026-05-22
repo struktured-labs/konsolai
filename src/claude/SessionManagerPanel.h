@@ -340,6 +340,7 @@ private:
     void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent, bool hasSiblings = false);
     void showApprovalLog(ClaudeSession *session);
     void showSessionActivity(const QString &jsonlPath, const QString &workDir);
+    void showSessionStructure(const QString &sessionId);
     void showSubagentTranscript(const SubagentInfo &info);
     void showSubagentDetails(const SubagentInfo &info);
     void showSubprocessOutput(const SubprocessInfo &info);

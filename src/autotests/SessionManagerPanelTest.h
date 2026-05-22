@@ -95,14 +95,9 @@ private Q_SLOTS:
     void testBulkDismissOlderThan();
     void testBulkCloseMultipleSessions();
 
-    // Tree widget rendering — subagent/team subnodes
-    void testTreeSubagentItemsRendered();
-    void testTreeSubprocessItemsRendered();
-    void testTreeMultiRoundPromptGroups();
-    void testTreeTaskGrouping();
-    void testTreeHideCompletedAgents();
-    void testTreeSubagentStateIcons();
-    void testTreePersistedAgentsForcedNotRunning();
+    // Note: inline subagent/subprocess tree rendering tests were
+    // removed when the tree was simplified — that detail moved to
+    // the "Show Session Structure..." popup dialog.
 
     // Timer pause/resume (window activation)
     void testPauseResumeIdempotent();
