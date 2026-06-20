@@ -39,6 +39,11 @@ QString ClaudeProcess::buildCommand(Model model,
         args << QStringLiteral("--model") << modelName(model);
     }
 
+    // Opt the session-intercom MCP server into the experimental Channels API
+    // so inbound DMs arrive between turns as <channel> tags instead of needing
+    // intercom_poll. No-op for sessions that don't have the server installed.
+    args << QStringLiteral("--dangerously-load-development-channels") << QStringLiteral("server:session-intercom");
+
     // Add any additional arguments
     args << additionalArgs;
 
