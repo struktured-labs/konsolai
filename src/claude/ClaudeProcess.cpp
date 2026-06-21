@@ -39,10 +39,14 @@ QString ClaudeProcess::buildCommand(Model model,
         args << QStringLiteral("--model") << modelName(model);
     }
 
-    // Opt the session-intercom MCP server into the experimental Channels API
-    // so inbound DMs arrive between turns as <channel> tags instead of needing
-    // intercom_poll. No-op for sessions that don't have the server installed.
-    args << QStringLiteral("--dangerously-load-development-channels") << QStringLiteral("server:session-intercom");
+    // Opt the session-intercom plugin's MCP server into the experimental
+    // Channels API so inbound DMs arrive between turns as <channel> tags
+    // instead of needing intercom_poll. Uses plugin:<name>@<marketplace>
+    // form because the server is plugin-provided (server: form is for
+    // standalone MCP servers); Claude Code rejects mismatched kinds with
+    // "server <name> not in --channels list for this session". No-op for
+    // sessions that don't have the plugin installed.
+    args << QStringLiteral("--dangerously-load-development-channels") << QStringLiteral("plugin:session-intercom@struktured-labs");
 
     // Add any additional arguments
     args << additionalArgs;
