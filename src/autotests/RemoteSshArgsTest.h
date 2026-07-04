@@ -36,6 +36,9 @@ private Q_SLOTS:
     // Tmux command generation
     void testTmuxNewSession_inRemoteCommand();
     void testTmuxAttach_existingRemoteSession();
+    void testTmuxAttach_emptyName_refusesToCreate();
+    void testTmuxAttach_whitespaceName_refusesToCreate();
+    void testTmuxAttach_passthroughOff();
 
     // Resume session
     void testResumeSessionId_inRemoteCommand();

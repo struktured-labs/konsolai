@@ -44,6 +44,12 @@ private Q_SLOTS:
 
     // Async operations
     void testRefreshOrphanedSessionsAsyncCompletes();
+
+    // Remote has-session pre-check (attach hardening)
+    void testBuildRemoteHasSessionArgs_basic();
+    void testBuildRemoteHasSessionArgs_customPort();
+    void testBuildRemoteHasSessionArgs_quotesSessionName();
+    void testRemoteHasSessionAsync_emptyTarget();
 };
 
 }

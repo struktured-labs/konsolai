@@ -1079,10 +1079,21 @@ QStringList ClaudeSession::buildRemoteSshArgs() const
 
     QString remoteCmd;
 
-    // Attach to an existing remote tmux session (no new session, no hooks setup)
-    if (!m_existingRemoteTmuxSession.isEmpty()) {
-        remoteCmd = QStringLiteral("%1tmux attach-session -t %2")
-                        .arg(profileSetup, m_existingRemoteTmuxSession);
+    // Attach to an existing remote tmux session (no new session, no hooks setup).
+    // Attach intent must never fall through to "new-session -A" below — a missing
+    // name means we refuse loudly instead of silently creating a remote session.
+    if (m_remoteAttachRequested || !m_existingRemoteTmuxSession.isEmpty()) {
+        const QString attachName = m_existingRemoteTmuxSession.trimmed();
+        if (attachName.isEmpty()) {
+            remoteCmd = QStringLiteral(
+                "echo 'konsolai: refusing to attach: no tmux session name recorded for this remote session' >&2; exit 1");
+        } else {
+            // '=' prefix forces exact-name match (tmux otherwise prefix-matches targets)
+            QString quotedName = attachName;
+            quotedName.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+            remoteCmd = QStringLiteral("%1tmux attach-session -t '=%2' \\; set-option -p allow-passthrough off")
+                            .arg(profileSetup, quotedName);
+        }
     } else if (tunnelPort > 0 && m_hookHandler) {
         // Generate the hook script and config
         QString hookScript = m_hookHandler->generateRemoteHookScript(tunnelPort);

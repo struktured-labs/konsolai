@@ -17,6 +17,7 @@
 #include <QStandardPaths>
 
 #ifdef Q_OS_LINUX
+#include <memory>
 #include <unistd.h>
 #endif
 
@@ -967,6 +968,77 @@ void ClaudeSessionRegistry::discoverRemoteTmuxSessionsAsync(
     });
 
     process->start(QStringLiteral("ssh"), args);
+}
+
+QStringList ClaudeSessionRegistry::buildRemoteHasSessionArgs(const QString &sshTarget, int sshPort,
+                                                             const QString &tmuxSessionName)
+{
+    QStringList args;
+    args << QStringLiteral("-o") << QStringLiteral("BatchMode=yes")
+         << QStringLiteral("-o") << QStringLiteral("ConnectTimeout=5");
+    if (sshPort != 22 && sshPort > 0) {
+        args << QStringLiteral("-p") << QString::number(sshPort);
+    }
+
+    // '=' prefix forces exact-name match; markers on stdout distinguish
+    // "tmux says no" from "ssh/tmux unavailable" (both would exit non-zero).
+    QString quotedName = tmuxSessionName;
+    quotedName.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    args << sshTarget
+         << QStringLiteral("tmux has-session -t '=%1' 2>/dev/null && echo KONSOLAI_HAS_SESSION || echo KONSOLAI_NO_SESSION")
+                .arg(quotedName);
+    return args;
+}
+
+void ClaudeSessionRegistry::remoteTmuxSessionExistsAsync(const QString &sshTarget, int sshPort,
+                                                         const QString &tmuxSessionName,
+                                                         std::function<void(bool exists, bool checkSucceeded)> callback)
+{
+    if (sshTarget.isEmpty() || tmuxSessionName.trimmed().isEmpty()) {
+        if (callback) {
+            callback(false, false);
+        }
+        return;
+    }
+
+    auto *process = new QProcess(this);
+    ensureSshAuthSock(process);
+
+    // A crashed ssh emits both errorOccurred and finished — fire the callback once.
+    auto fired = std::make_shared<bool>(false);
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [process, callback, fired](int, QProcess::ExitStatus) {
+        if (!*fired) {
+            *fired = true;
+            const QString output = QString::fromUtf8(process->readAllStandardOutput());
+            bool exists = false;
+            bool checkSucceeded = false;
+            if (output.contains(QStringLiteral("KONSOLAI_HAS_SESSION"))) {
+                exists = true;
+                checkSucceeded = true;
+            } else if (output.contains(QStringLiteral("KONSOLAI_NO_SESSION"))) {
+                checkSucceeded = true;
+            }
+            if (callback) {
+                callback(exists, checkSucceeded);
+            }
+        }
+        process->deleteLater();
+    });
+
+    connect(process, &QProcess::errorOccurred, this, [process, callback, fired](QProcess::ProcessError) {
+        qDebug() << "remoteTmuxSessionExistsAsync: SSH process error:" << process->errorString();
+        if (!*fired) {
+            *fired = true;
+            if (callback) {
+                callback(false, false);
+            }
+        }
+        process->deleteLater();
+    });
+
+    process->start(QStringLiteral("ssh"), buildRemoteHasSessionArgs(sshTarget, sshPort, tmuxSessionName));
 }
 
 QList<ClaudeSessionState> ClaudeSessionRegistry::discoverSessions(const QString &searchRoot) const

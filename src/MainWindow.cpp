@@ -1193,6 +1193,15 @@ void MainWindow::setupActions()
     // Reattach to a live remote tmux session from the session panel
     connect(_sessionPanel, &Konsolai::SessionManagerPanel::remoteAttachRequested,
             this, [this](const QString &sshHost, const QString &sshUsername, int sshPort, const QString &workDir, const QString &tmuxSessionName) {
+        // Attach must never silently create a remote session: refuse an empty name
+        // up front (buildRemoteSshArgs refuses too, as a last line of defense).
+        if (tmuxSessionName.trimmed().isEmpty()) {
+            KMessageBox::error(this,
+                               i18n("Cannot attach: no tmux session name is recorded for this remote session."),
+                               i18n("Remote Attach"));
+            return;
+        }
+
         Profile::Ptr claudeProfile;
         const QList<Profile::Ptr> profiles = ProfileManager::instance()->allProfiles();
         for (const Profile::Ptr &profile : profiles) {
@@ -1207,27 +1216,56 @@ void MainWindow::setupActions()
             return;
         }
 
-        auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
-        claudeSession->setIsRemote(true);
-        claudeSession->setSshHost(sshHost);
-        claudeSession->setSshUsername(sshUsername);
-        claudeSession->setSshPort(sshPort);
-        claudeSession->setExistingRemoteTmuxSession(tmuxSessionName);
-        SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
+        auto doAttach = [this, claudeProfile, sshHost, sshUsername, sshPort, workDir, tmuxSessionName]() {
+            auto *claudeSession = new Konsolai::ClaudeSession(claudeProfile->name(), workDir, this);
+            claudeSession->setIsRemote(true);
+            claudeSession->setSshHost(sshHost);
+            claudeSession->setSshUsername(sshUsername);
+            claudeSession->setSshPort(sshPort);
+            claudeSession->setExistingRemoteTmuxSession(tmuxSessionName);
+            SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
 
-        auto *view = _viewManager->createView(claudeSession);
-        _viewManager->activeContainer()->addView(view);
+            auto *view = _viewManager->createView(claudeSession);
+            _viewManager->activeContainer()->addView(view);
 
-        if (!claudeSession->isRunning()) {
-            claudeSession->run();
-        }
+            if (!claudeSession->isRunning()) {
+                claudeSession->run();
+            }
 
-        _sessionPanel->registerSession(claudeSession);
+            _sessionPanel->registerSession(claudeSession);
 
+            auto *registry = Konsolai::ClaudeSessionRegistry::instance();
+            if (registry) {
+                registry->registerSession(claudeSession);
+            }
+        };
+
+        // Pre-check that the session still exists on the remote (mirrors the local
+        // reattach flow). Inconclusive checks (host offline, password-only auth)
+        // proceed anyway — attach-session can fail but can never create.
         auto *registry = Konsolai::ClaudeSessionRegistry::instance();
-        if (registry) {
-            registry->registerSession(claudeSession);
+        if (!registry) {
+            doAttach();
+            return;
         }
+
+        const QString sshTarget = sshUsername.isEmpty() ? sshHost : sshUsername + QLatin1Char('@') + sshHost;
+        QPointer<MainWindow> guard(this);
+        registry->remoteTmuxSessionExistsAsync(sshTarget, sshPort, tmuxSessionName,
+                                               [guard, doAttach, sshHost, tmuxSessionName](bool exists, bool checkSucceeded) {
+            if (!guard) {
+                return;
+            }
+            if (checkSucceeded && !exists) {
+                KMessageBox::error(guard,
+                                   i18n("The tmux session '%1' no longer exists on %2.\n\n"
+                                        "Use \"Restart Session\" in the session panel to start a fresh one.",
+                                        tmuxSessionName, sshHost),
+                                   i18n("Remote Session Not Found"));
+                return;
+            }
+            doAttach();
+        });
     });
 
     // Resume a specific conversation from the session panel

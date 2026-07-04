@@ -436,7 +436,10 @@ public:
 
     /**
      * Name of an existing tmux session on the remote host to attach to.
-     * When set, buildRemoteSshArgs() uses "tmux attach" instead of "tmux new-session".
+     * Calling the setter records attach intent: buildRemoteSshArgs() uses
+     * "tmux attach-session" and will refuse to run (rather than fall back to
+     * "tmux new-session -A") if the name is empty, so an attach request can
+     * never silently create a session on the remote.
      */
     QString existingRemoteTmuxSession() const
     {
@@ -445,6 +448,11 @@ public:
     void setExistingRemoteTmuxSession(const QString &sessionName)
     {
         m_existingRemoteTmuxSession = sessionName;
+        m_remoteAttachRequested = true;
+    }
+    bool isRemoteAttachRequested() const
+    {
+        return m_remoteAttachRequested;
     }
 
     /**
@@ -995,6 +1003,7 @@ private:
     QString m_sshUsername;
     int m_sshPort = 22;
     QString m_existingRemoteTmuxSession; // attach to existing remote tmux session
+    bool m_remoteAttachRequested = false; // attach intent — never fall back to new-session
 
     TmuxManager *m_tmuxManager = nullptr;
     ClaudeProcess *m_claudeProcess = nullptr;

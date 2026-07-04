@@ -192,6 +192,30 @@ public:
                                           std::function<void(const QList<TmuxManager::SessionInfo> &)> callback);
 
     /**
+     * Check whether a named tmux session exists on a remote SSH host (exact-name match).
+     *
+     * The check is advisory: @p checkSucceeded is false when it could not be carried
+     * out (empty target/name, ssh unreachable, BatchMode auth refused). Callers should
+     * treat an inconclusive check as "proceed" — the attach command itself uses
+     * "tmux attach-session", which can never create a session.
+     *
+     * @param sshTarget SSH target ("user@host" or ssh config name)
+     * @param sshPort SSH port
+     * @param tmuxSessionName Exact tmux session name to look for
+     * @param callback Called with (exists, checkSucceeded)
+     */
+    void remoteTmuxSessionExistsAsync(const QString &sshTarget, int sshPort,
+                                      const QString &tmuxSessionName,
+                                      std::function<void(bool exists, bool checkSucceeded)> callback);
+
+    /**
+     * Build the ssh argument list used by remoteTmuxSessionExistsAsync().
+     * Exposed for testing — pure function, performs no I/O.
+     */
+    static QStringList buildRemoteHasSessionArgs(const QString &sshTarget, int sshPort,
+                                                 const QString &tmuxSessionName);
+
+    /**
      * Discover ALL Claude CLI conversations on a remote host, across all projects.
      * Scans all .jsonl files under ~/.claude/projects/ and returns conversations with projectPath set.
      *

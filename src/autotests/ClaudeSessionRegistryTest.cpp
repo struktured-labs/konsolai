@@ -261,6 +261,81 @@ void ClaudeSessionRegistryTest::testHashedProjectPath_HandlesWorktreePath()
              QStringLiteral("-home-struktured-projects-dr-mario-rl--claude-worktrees-faithful-sim"));
 }
 
+void ClaudeSessionRegistryTest::testBuildRemoteHasSessionArgs_basic()
+{
+    QStringList args = ClaudeSessionRegistry::buildRemoteHasSessionArgs(
+        QStringLiteral("deploy@myserver.example.com"), 22, QStringLiteral("konsolai-abc-12345678"));
+
+    // Non-interactive, bounded ssh — same policy as remote discovery
+    QVERIFY2(args.contains(QStringLiteral("BatchMode=yes")), "has-session check must not hang on interactive auth");
+    QVERIFY2(args.contains(QStringLiteral("ConnectTimeout=5")), "has-session check must have a bounded connect timeout");
+    QVERIFY2(!args.contains(QStringLiteral("-p")), "Default port 22 should not produce -p flag");
+    QVERIFY2(args.contains(QStringLiteral("deploy@myserver.example.com")), "Args should contain the ssh target");
+
+    const QString remoteCmd = args.last();
+    QVERIFY2(remoteCmd.contains(QStringLiteral("tmux has-session")), "Check must use 'tmux has-session'");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("-t '=konsolai-abc-12345678'")),
+             "Check must use exact-match ('=' prefix) so a prefix-named sibling session does not count as a hit");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("KONSOLAI_HAS_SESSION")), "Check must emit a positive marker on stdout");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("KONSOLAI_NO_SESSION")), "Check must emit a negative marker on stdout");
+    QVERIFY2(!remoteCmd.contains(QStringLiteral("new-session")), "Existence check must never create a session");
+}
+
+void ClaudeSessionRegistryTest::testBuildRemoteHasSessionArgs_customPort()
+{
+    QStringList args = ClaudeSessionRegistry::buildRemoteHasSessionArgs(
+        QStringLiteral("myserver.example.com"), 2222, QStringLiteral("konsolai-abc-12345678"));
+
+    int pIdx = args.indexOf(QStringLiteral("-p"));
+    QVERIFY2(pIdx >= 0, "Custom port should produce -p flag");
+    QVERIFY2(pIdx + 1 < args.size(), "-p flag must have a value following it");
+    QCOMPARE(args.at(pIdx + 1), QStringLiteral("2222"));
+}
+
+void ClaudeSessionRegistryTest::testBuildRemoteHasSessionArgs_quotesSessionName()
+{
+    // A session name containing a single quote must not break out of the shell quoting
+    QStringList args = ClaudeSessionRegistry::buildRemoteHasSessionArgs(
+        QStringLiteral("myserver.example.com"), 22, QStringLiteral("weird'name"));
+
+    const QString remoteCmd = args.last();
+    QVERIFY2(remoteCmd.contains(QStringLiteral("weird'\\''name")),
+             "Single quotes in the session name must be shell-escaped ('\\'')");
+}
+
+void ClaudeSessionRegistryTest::testRemoteHasSessionAsync_emptyTarget()
+{
+    ClaudeSessionRegistry registry;
+
+    // Empty target: check is inconclusive — callback must fire synchronously
+    // with checkSucceeded=false (callers treat inconclusive as "proceed with attach").
+    bool called = false;
+    bool gotExists = true;
+    bool gotSucceeded = true;
+    registry.remoteTmuxSessionExistsAsync(QString(), 22, QStringLiteral("konsolai-abc-12345678"),
+                                          [&](bool exists, bool checkSucceeded) {
+                                              called = true;
+                                              gotExists = exists;
+                                              gotSucceeded = checkSucceeded;
+                                          });
+
+    QVERIFY2(called, "Callback must fire even for an empty ssh target");
+    QVERIFY2(!gotExists, "Empty target cannot report an existing session");
+    QVERIFY2(!gotSucceeded, "Empty target check must be reported as inconclusive");
+
+    // Empty session name: same contract
+    called = false;
+    registry.remoteTmuxSessionExistsAsync(QStringLiteral("host.example.com"), 22, QString(),
+                                          [&](bool exists, bool checkSucceeded) {
+                                              called = true;
+                                              gotExists = exists;
+                                              gotSucceeded = checkSucceeded;
+                                          });
+    QVERIFY2(called, "Callback must fire even for an empty session name");
+    QVERIFY2(!gotExists, "Empty session name cannot report an existing session");
+    QVERIFY2(!gotSucceeded, "Empty session name check must be reported as inconclusive");
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionRegistryTest)
 
 #include "moc_ClaudeSessionRegistryTest.cpp"

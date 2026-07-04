@@ -179,8 +179,64 @@ void RemoteSshArgsTest::testTmuxAttach_existingRemoteSession()
     const QString remoteCmd = args.last();
     QVERIFY2(remoteCmd.contains(QStringLiteral("tmux attach-session")),
              "Remote command should use 'tmux attach-session' when existingRemoteTmuxSession is set");
-    QVERIFY2(remoteCmd.contains(QStringLiteral("-t existing-session-abc")), "Remote command should reference the existing session name");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("-t '=existing-session-abc'")),
+             "Remote command should target the existing session by exact name (quoted, '=' prefix — no tmux prefix-matching surprises)");
     QVERIFY2(!remoteCmd.contains(QStringLiteral("tmux new-session")), "Remote command should NOT contain 'tmux new-session' for attach");
+}
+
+void RemoteSshArgsTest::testTmuxAttach_emptyName_refusesToCreate()
+{
+    // An attach request with an empty session name must NEVER fall through to
+    // "tmux new-session -A" (which would silently create a session on the remote).
+    ClaudeSession session(QStringLiteral("test"), QStringLiteral("/home/user/project"));
+    session.setIsRemote(true);
+    session.setSshHost(QStringLiteral("myserver.example.com"));
+    session.setExistingRemoteTmuxSession(QString());
+
+    QStringList args = session.buildRemoteSshArgs();
+
+    const QString remoteCmd = args.last();
+    QVERIFY2(!remoteCmd.contains(QStringLiteral("new-session")),
+             "Attach request with empty session name must NOT create a new remote session");
+    QVERIFY2(!remoteCmd.contains(QStringLiteral("attach-session")),
+             "Attach request with empty session name has nothing to attach to");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("refusing")),
+             "Attach request with empty session name should print a loud refusal message");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("exit 1")),
+             "Attach request with empty session name should exit non-zero");
+}
+
+void RemoteSshArgsTest::testTmuxAttach_whitespaceName_refusesToCreate()
+{
+    // Whitespace-only names are as good as empty — refuse, never create.
+    ClaudeSession session(QStringLiteral("test"), QStringLiteral("/home/user/project"));
+    session.setIsRemote(true);
+    session.setSshHost(QStringLiteral("myserver.example.com"));
+    session.setExistingRemoteTmuxSession(QStringLiteral("   "));
+
+    QStringList args = session.buildRemoteSshArgs();
+
+    const QString remoteCmd = args.last();
+    QVERIFY2(!remoteCmd.contains(QStringLiteral("new-session")),
+             "Attach request with whitespace-only session name must NOT create a new remote session");
+    QVERIFY2(remoteCmd.contains(QStringLiteral("refusing")),
+             "Attach request with whitespace-only session name should print a loud refusal message");
+}
+
+void RemoteSshArgsTest::testTmuxAttach_passthroughOff()
+{
+    // Remote attach should suppress DCS passthrough like every other tmux path
+    // (matches local attach in TmuxManager::buildAttachCommand).
+    ClaudeSession session(QStringLiteral("test"), QStringLiteral("/home/user/project"));
+    session.setIsRemote(true);
+    session.setSshHost(QStringLiteral("myserver.example.com"));
+    session.setExistingRemoteTmuxSession(QStringLiteral("existing-session-abc"));
+
+    QStringList args = session.buildRemoteSshArgs();
+
+    const QString remoteCmd = args.last();
+    QVERIFY2(remoteCmd.contains(QStringLiteral("allow-passthrough off")),
+             "Remote attach command should suppress DCS passthrough like the new-session paths");
 }
 
 // ========================================================================
