@@ -138,6 +138,10 @@ void ClaudeSessionRegistry::registerSession(ClaudeSession *session)
     state.taskDescription = session->taskDescription();
     state.yoloMode = session->yoloMode();
     state.doubleYoloMode = session->doubleYoloMode();
+    state.isRemote = session->isRemote();
+    state.sshHost = session->sshHost();
+    state.sshUsername = session->sshUsername();
+    state.sshPort = session->sshPort();
 
     m_sessionStates.insert(name, state);
 

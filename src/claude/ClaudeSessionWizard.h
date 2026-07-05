@@ -100,6 +100,7 @@ private Q_SLOTS:
     void onTestConnectionClicked();
     void onResumeClicked();
     void onDiscoverRemoteTmuxClicked();
+    void onBrowseLiveRemoteSessionsClicked();
 
 private:
     void setupUi();
@@ -142,6 +143,8 @@ private:
     QLabel *m_connectionStatusLabel = nullptr;
     QPushButton *m_discoverRemoteTmuxButton = nullptr;
     QLabel *m_remoteTmuxLabel = nullptr;
+    QPushButton *m_browseLiveSessionsButton = nullptr;
+    QLabel *m_browseLiveSessionsLabel = nullptr;
 
     // Local/shared widgets
     QLabel *m_pathLabel = nullptr;

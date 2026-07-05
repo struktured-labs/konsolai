@@ -355,6 +355,84 @@ void ClaudeSessionStateTest::testTaskDescriptionMissingFromJson()
     QVERIFY(state.taskDescription.isEmpty());
 }
 
+// ============================================================
+// Remote/SSH persistence — the actual bug behind "resume made
+// a new remote session": ClaudeSessionState dropped the ssh
+// fields on save, so a remote session loaded as "local" and
+// there was nothing to reattach to.
+// ============================================================
+
+void ClaudeSessionStateTest::testRemoteSshFields_defaultLocal()
+{
+    ClaudeSessionState state;
+
+    // Fresh state must NOT accidentally look remote — a stale local
+    // session must never be treated as an SSH target.
+    QCOMPARE(state.isRemote, false);
+    QVERIFY(state.sshHost.isEmpty());
+    QVERIFY(state.sshUsername.isEmpty());
+    QCOMPARE(state.sshPort, 22);
+}
+
+void ClaudeSessionStateTest::testRemoteSshFields_roundTrip()
+{
+    ClaudeSessionState original;
+    original.sessionName = QStringLiteral("konsolai-default-Claude-1d957d8f");
+    original.sessionId = QStringLiteral("1d957d8f");
+    original.workingDirectory = QStringLiteral("/home/struktured/projects/cowir-main");
+    original.isRemote = true;
+    original.sshHost = QStringLiteral("blackmage.tailecb0b5.ts.net");
+    original.sshUsername = QStringLiteral("struktured");
+    original.sshPort = 2222;
+
+    QJsonObject json = original.toJson();
+    QVERIFY2(json.contains(QStringLiteral("isRemote")), "toJson must persist isRemote");
+    QVERIFY2(json.contains(QStringLiteral("sshHost")), "toJson must persist sshHost");
+    QVERIFY2(json.contains(QStringLiteral("sshUsername")), "toJson must persist sshUsername");
+    QVERIFY2(json.contains(QStringLiteral("sshPort")), "toJson must persist sshPort");
+
+    ClaudeSessionState restored = ClaudeSessionState::fromJson(json);
+    QCOMPARE(restored.isRemote, true);
+    QCOMPARE(restored.sshHost, original.sshHost);
+    QCOMPARE(restored.sshUsername, original.sshUsername);
+    QCOMPARE(restored.sshPort, 2222);
+}
+
+void ClaudeSessionStateTest::testRemoteSshFields_localSessionOmitsSshKeys()
+{
+    // A local session should NOT bloat every state record with empty ssh keys.
+    ClaudeSessionState state;
+    state.sessionName = QStringLiteral("konsolai-local-abcd1234");
+    state.sessionId = QStringLiteral("abcd1234");
+    // isRemote left false, ssh fields left empty
+
+    QJsonObject json = state.toJson();
+
+    QVERIFY2(!json.contains(QStringLiteral("sshHost")),
+             "Local session must not serialize an empty sshHost");
+    QVERIFY2(!json.contains(QStringLiteral("sshUsername")),
+             "Local session must not serialize an empty sshUsername");
+    // isRemote may or may not be persisted when false — either is fine, but must round-trip.
+}
+
+void ClaudeSessionStateTest::testRemoteSshFields_missingFromJsonDefaultLocal()
+{
+    // Old state files (pre-fix) have no ssh keys. They must load as LOCAL,
+    // never as a remote session with garbage/empty ssh info.
+    QJsonObject json;
+    json[QStringLiteral("sessionName")] = QStringLiteral("konsolai-legacy-00112233");
+    json[QStringLiteral("sessionId")] = QStringLiteral("00112233");
+    json[QStringLiteral("workingDirectory")] = QStringLiteral("/home/user/oldproject");
+
+    ClaudeSessionState state = ClaudeSessionState::fromJson(json);
+
+    QVERIFY(state.isValid());
+    QCOMPARE(state.isRemote, false);
+    QVERIFY(state.sshHost.isEmpty());
+    QVERIFY(state.sshUsername.isEmpty());
+    QCOMPARE(state.sshPort, 22);
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionStateTest)
 
 #include "moc_ClaudeSessionStateTest.cpp"

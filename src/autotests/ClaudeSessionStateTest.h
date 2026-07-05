@@ -56,6 +56,12 @@ private Q_SLOTS:
     void testTaskDescriptionRoundTrip();
     void testTaskDescriptionEmptyNotInJson();
     void testTaskDescriptionMissingFromJson();
+
+    // Remote/SSH persistence — needed so remote sessions survive konsolai restart
+    void testRemoteSshFields_defaultLocal();
+    void testRemoteSshFields_roundTrip();
+    void testRemoteSshFields_localSessionOmitsSshKeys();
+    void testRemoteSshFields_missingFromJsonDefaultLocal();
 };
 
 }

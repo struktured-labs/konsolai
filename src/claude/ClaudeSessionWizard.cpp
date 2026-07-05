@@ -25,6 +25,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -403,6 +404,19 @@ void ClaudeSessionWizard::setupUi()
     m_remoteTmuxLabel = new QLabel(this);
     m_remoteTmuxLabel->setStyleSheet(QStringLiteral("color: gray;"));
     sshLayout->addWidget(m_remoteTmuxLabel, 4, 1, 1, 2);
+
+    // Attach to an existing running tmux session on the remote (vs. "Browse
+    // Conversations" above, which resumes a Claude *conversation* in a fresh tmux).
+    m_browseLiveSessionsButton = new QPushButton(i18n("Browse Live Sessions..."), this);
+    m_browseLiveSessionsButton->setToolTip(
+        i18n("Attach to a running tmux session on the remote host"));
+    connect(m_browseLiveSessionsButton, &QPushButton::clicked,
+            this, &ClaudeSessionWizard::onBrowseLiveRemoteSessionsClicked);
+    sshLayout->addWidget(m_browseLiveSessionsButton, 5, 0);
+
+    m_browseLiveSessionsLabel = new QLabel(this);
+    m_browseLiveSessionsLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    sshLayout->addWidget(m_browseLiveSessionsLabel, 5, 1, 1, 2);
 
     m_sshGroup->setVisible(false); // Hidden by default (Local selected)
     mainLayout->addWidget(m_sshGroup);
@@ -1414,6 +1428,94 @@ void ClaudeSessionWizard::onDiscoverRemoteTmuxClicked()
             }
 
             guard->accept();
+        });
+}
+
+void ClaudeSessionWizard::onBrowseLiveRemoteSessionsClicked()
+{
+    QString host = sshHost();
+    if (host.isEmpty()) {
+        m_browseLiveSessionsLabel->setText(i18n("Enter a host first"));
+        m_browseLiveSessionsLabel->setStyleSheet(QStringLiteral("color: orange;"));
+        return;
+    }
+
+    m_browseLiveSessionsLabel->setText(i18n("Scanning remote tmux..."));
+    m_browseLiveSessionsLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    m_browseLiveSessionsButton->setEnabled(false);
+
+    const QString user = sshUsername();
+    const QString target = user.isEmpty() ? host : QStringLiteral("%1@%2").arg(user, host);
+
+    auto *registry = ClaudeSessionRegistry::instance();
+    if (!registry) {
+        m_browseLiveSessionsButton->setEnabled(true);
+        return;
+    }
+
+    QPointer<ClaudeSessionWizard> guard(this);
+
+    // konsolaiOnly=true: only offer sessions we recognize; foreign tmux sessions
+    // would confuse yolo/hooks detection and the session panel.
+    registry->discoverRemoteTmuxSessionsAsync(target, sshPort(), /*konsolaiOnly*/ true,
+        [guard](const QList<TmuxManager::SessionInfo> &sessions) {
+            if (!guard) {
+                return;
+            }
+            guard->m_browseLiveSessionsButton->setEnabled(true);
+            if (sessions.isEmpty()) {
+                guard->m_browseLiveSessionsLabel->setText(i18n("No live sessions found"));
+                return;
+            }
+
+            QStringList items;
+            items.reserve(sessions.size());
+            for (const auto &info : sessions) {
+                items << TmuxManager::formatSessionForPicker(info);
+            }
+
+            bool ok = false;
+            const QString chosen = QInputDialog::getItem(
+                guard, i18n("Attach to Remote Session"),
+                i18n("Pick a running tmux session on %1:", guard->sshHost()),
+                items, 0, /*editable*/ false, &ok);
+            if (!ok || chosen.isEmpty()) {
+                guard->m_browseLiveSessionsLabel->clear();
+                return;
+            }
+
+            // Recover the matching SessionInfo. The label starts with the exact
+            // session name (formatSessionForPicker guarantees this).
+            const TmuxManager::SessionInfo *picked = nullptr;
+            for (const auto &info : sessions) {
+                if (chosen.startsWith(info.name)) {
+                    picked = &info;
+                    break;
+                }
+            }
+            if (!picked) {
+                return;
+            }
+
+            // Wire everything up so wizard finish → attach path (not new-session).
+            guard->m_selectedTmuxSession = picked->name;
+
+            // Auto-populate the working directory from the remote pane so the
+            // session panel and hooks match. Folder-name UI mirrors the
+            // conversation picker (must set BEFORE folder name to avoid the
+            // clearing side-effect of onFolderNameChanged).
+            if (picked->paneCurrentPath.startsWith(QLatin1Char('/'))) {
+                guard->m_selectedDirectory = picked->paneCurrentPath;
+                guard->m_useExistingDir = true;
+                const QString dirName = QDir(picked->paneCurrentPath).dirName();
+                if (!dirName.isEmpty() && dirName != QStringLiteral(".")) {
+                    guard->m_folderNameEdit->setText(dirName);
+                }
+            }
+
+            guard->m_browseLiveSessionsLabel->setText(
+                i18n("Will attach to: %1", picked->name));
+            guard->m_browseLiveSessionsLabel->setStyleSheet(QStringLiteral("color: green;"));
         });
 }
 

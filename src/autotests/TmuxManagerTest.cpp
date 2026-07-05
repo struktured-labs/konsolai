@@ -630,6 +630,52 @@ void TmuxManagerTest::testWorkspaceFromSessionName_TestWorkspace()
     QCOMPARE(ws, QStringLiteral("test"));
 }
 
+void TmuxManagerTest::testSessionPickerLabel_includesNameAndCwd()
+{
+    TmuxManager::SessionInfo info;
+    info.name = QStringLiteral("konsolai-default-Claude-1d957d8f");
+    info.paneCurrentPath = QStringLiteral("/home/struktured/projects/cowir-main");
+    info.attached = false;
+
+    const QString label = TmuxManager::formatSessionForPicker(info);
+
+    QVERIFY2(label.contains(info.name), "Picker label must contain the tmux session name");
+    QVERIFY2(label.contains(info.paneCurrentPath),
+             "Picker label must contain the cwd so the user can tell projects apart");
+}
+
+void TmuxManagerTest::testSessionPickerLabel_marksAttached()
+{
+    TmuxManager::SessionInfo info;
+    info.name = QStringLiteral("konsolai-default-Claude-1d957d8f");
+    info.paneCurrentPath = QStringLiteral("/home/struktured/projects/cowir-main");
+    info.attached = true;
+
+    const QString label = TmuxManager::formatSessionForPicker(info);
+
+    // "attached" should be visible somehow — user shouldn't be surprised when
+    // their new client shares a screen with an existing one.
+    QVERIFY2(label.toLower().contains(QStringLiteral("attached")),
+             "Attached sessions should be marked in the picker label");
+}
+
+void TmuxManagerTest::testSessionPickerLabel_omitsEmptyCwd()
+{
+    TmuxManager::SessionInfo info;
+    info.name = QStringLiteral("orphan-session");
+    info.paneCurrentPath.clear();
+    info.attached = false;
+
+    const QString label = TmuxManager::formatSessionForPicker(info);
+
+    QVERIFY2(label.contains(info.name), "Picker label always includes the name");
+    // An empty cwd shouldn't produce a stray delimiter or empty parens.
+    QVERIFY2(!label.contains(QStringLiteral("()")),
+             "Empty cwd must not produce empty parens in the label");
+    QVERIFY2(!label.contains(QStringLiteral("[]")),
+             "Empty cwd must not produce empty brackets in the label");
+}
+
 QTEST_GUILESS_MAIN(TmuxManagerTest)
 
 #include "moc_TmuxManagerTest.cpp"

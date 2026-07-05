@@ -49,6 +49,14 @@ public:
     // Status
     bool isAttached = false;    // Whether Konsolai is currently attached
 
+    // Remote/SSH — persisted so remote sessions survive a Konsolai restart.
+    // If isRemote is false, the ssh fields are meaningless (and toJson omits
+    // the string ones to keep local-session records tidy).
+    bool isRemote = false;
+    QString sshHost;
+    QString sshUsername;
+    int sshPort = 22;
+
     // Per-session settings
     bool yoloMode = false;
     bool doubleYoloMode = false;

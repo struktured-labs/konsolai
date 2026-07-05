@@ -24,6 +24,14 @@ QJsonObject ClaudeSessionState::toJson() const
         obj[QStringLiteral("taskDescription")] = taskDescription;
     }
     obj[QStringLiteral("isAttached")] = isAttached;
+    if (isRemote) {
+        obj[QStringLiteral("isRemote")] = true;
+        obj[QStringLiteral("sshHost")] = sshHost;
+        if (!sshUsername.isEmpty()) {
+            obj[QStringLiteral("sshUsername")] = sshUsername;
+        }
+        obj[QStringLiteral("sshPort")] = sshPort;
+    }
     obj[QStringLiteral("yoloMode")] = yoloMode;
     obj[QStringLiteral("doubleYoloMode")] = doubleYoloMode;
     return obj;
@@ -41,6 +49,11 @@ ClaudeSessionState ClaudeSessionState::fromJson(const QJsonObject &obj)
     state.claudeModel = obj.value(QStringLiteral("claudeModel")).toString();
     state.taskDescription = obj.value(QStringLiteral("taskDescription")).toString();
     state.isAttached = obj.value(QStringLiteral("isAttached")).toBool();
+    state.isRemote = obj.value(QStringLiteral("isRemote")).toBool();
+    state.sshHost = obj.value(QStringLiteral("sshHost")).toString();
+    state.sshUsername = obj.value(QStringLiteral("sshUsername")).toString();
+    // int(22) is the default port when the key is absent (legacy state files).
+    state.sshPort = obj.value(QStringLiteral("sshPort")).toInt(22);
     state.yoloMode = obj.value(QStringLiteral("yoloMode")).toBool();
     state.doubleYoloMode = obj.value(QStringLiteral("doubleYoloMode")).toBool();
     return state;

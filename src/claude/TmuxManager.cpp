@@ -52,6 +52,19 @@ QString TmuxManager::version()
     return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
 }
 
+QString TmuxManager::formatSessionForPicker(const SessionInfo &info)
+{
+    // "<name>  —  <cwd>  (attached)" — cwd and attached marker are optional.
+    QString label = info.name;
+    if (!info.paneCurrentPath.isEmpty()) {
+        label += QStringLiteral("  \342\200\224  ") + info.paneCurrentPath;
+    }
+    if (info.attached) {
+        label += QStringLiteral("  (attached)");
+    }
+    return label;
+}
+
 QString TmuxManager::generateSessionId()
 {
     QString id;

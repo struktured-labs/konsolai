@@ -58,6 +58,14 @@ public:
     static QString version();
 
     /**
+     * Format a SessionInfo for a picker dialog. Pure — no I/O.
+     * Includes the session name, working directory, and an "(attached)" marker
+     * when the session already has a client attached, so a user picking one
+     * knows they'll share the view rather than get a private terminal.
+     */
+    static QString formatSessionForPicker(const SessionInfo &info);
+
+    /**
      * Generate a unique session ID (8 hex characters)
      */
     static QString generateSessionId();

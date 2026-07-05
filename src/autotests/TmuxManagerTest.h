@@ -85,6 +85,11 @@ private Q_SLOTS:
     void testWorkspaceFromSessionName_NewFormat();
     void testWorkspaceFromSessionName_LegacyFormat();
     void testWorkspaceFromSessionName_TestWorkspace();
+
+    // Picker display formatting (used by the remote-session Browse Live Sessions UI)
+    void testSessionPickerLabel_includesNameAndCwd();
+    void testSessionPickerLabel_marksAttached();
+    void testSessionPickerLabel_omitsEmptyCwd();
 };
 
 }
