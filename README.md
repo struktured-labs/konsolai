@@ -15,16 +15,23 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 - Level 3: Auto-continue with configurable prompt when idle
 
 **Session Management**
-- Sidebar panel with pinned, active, detached, archived, and discovered categories
+- Sidebar panel with pinned, active, detached, closed, archived, and discovered categories
 - Automatic detection and reattachment of orphaned tmux sessions
-- Remote SSH sessions with full yolo mode support
+- Remote SSH sessions with full yolo mode support, including "Browse Live Sessions..." in the wizard to attach to a running remote tmux (safe attach: exact-name match, has-session pre-check, never silently creates a new session)
+- Persisted SSH info in the session registry so remote sessions survive across Konsolai restarts
 - Git worktree integration for feature branch sessions
 - Quick session switcher (`Ctrl+Shift+P`)
 
+**Multi-Session Workflow**
+- **Broadcast** — send input to multiple sessions at once (dry-run preview, opt-in per session)
+- **Session Merge** — combine two detached sessions with configurable merge policy
+- **Reorganize Tree** — AI-assisted regrouping of sessions in the sidebar (uses `claude -p` under the hood)
+
 **Agent Panel**
-- Monitor persistent background agents from agent-fleet or custom providers
+- Monitor persistent background agents from agent-fleet, Letta, or custom providers
 - Trigger runs, set briefs, add steering notes from context menu
 - Interactive attachment: open a Claude tab connected to an agent's tmux session
+- Send messages to Letta agents from a dedicated dialog
 - Aggregate daily spend tracking across all agents
 - Pluggable provider architecture with versioned interface
 
@@ -110,7 +117,7 @@ ninja -j4
 
 ### Running Tests
 ```bash
-# Unit tests (50 tests)
+# Unit tests (63+ tests)
 ctest --test-dir build/ --output-on-failure
 
 # GUI tests (requires running Konsolai instance)
@@ -149,9 +156,9 @@ bash Testing/run-all-gui-tests.sh
 │  │  │  - Pinned        │ │  - AgentProvider │              │    │
 │  │  │  - Active        │ │    (abstract)    │              │    │
 │  │  │  - Detached      │ │  - AgentFleet    │              │    │
-│  │  │  - Archived      │ │    Provider      │              │    │
-│  │  │  - Discovered    │ │  - (future       │              │    │
-│  │  │                  │ │    providers)    │              │    │
+│  │  │  - Closed        │ │    Provider      │              │    │
+│  │  │  - Archived      │ │  - Letta         │              │    │
+│  │  │  - Discovered    │ │    Provider      │              │    │
 │  │  └──────────────────┘ └──────────────────┘              │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
@@ -166,8 +173,8 @@ bash Testing/run-all-gui-tests.sh
 | Directory          | Description                                                   |
 | ------------------ | ------------------------------------------------------------- |
 | `/src`             | Core terminal emulator source code                            |
-| `/src/claude`      | Claude integration (sessions, hooks, yolo, agents, budgets)   |
-| `/src/autotests`   | C++ unit tests (QTest framework, 50+ tests)                   |
+| `/src/claude`      | Claude integration (sessions, hooks, yolo, agents, budgets, broadcast, merge, Letta) |
+| `/src/autotests`   | C++ unit tests (QTest framework, 63+ tests)                   |
 | `/Testing`         | GUI tests (AT-SPI smoke tests, interaction tests)             |
 | `/doc/konsolai`    | Konsolai-specific documentation                               |
 | `/desktop`         | Desktop files for launching Konsolai                          |
