@@ -572,8 +572,17 @@ int ClaudeSessionRegistry::countFilesModified(const QString &jsonlPath)
 
 QString ClaudeSessionRegistry::hashedProjectPath(const QString &projectPath)
 {
+    // Claude Code's per-project directory under ~/.claude/projects/ normalizes
+    // '/' AND '_' AND '.' to '-'.  Verified against on-disk output:
+    //   /home/u/projects/dr_mario_rl        → -home-u-projects-dr-mario-rl
+    //   /home/u/projects/foo.bar            → -home-u-projects-foo-bar
+    //   /home/u/projects/foo/.claude/w/x    → -home-u-projects-foo--claude-w-x
+    // Konsolai must match all three or resume detection, token tracking, and
+    // conversation discovery all silently look in a non-existent directory.
     QString hashed = projectPath;
     hashed.replace(QLatin1Char('/'), QLatin1Char('-'));
+    hashed.replace(QLatin1Char('_'), QLatin1Char('-'));
+    hashed.replace(QLatin1Char('.'), QLatin1Char('-'));
     return hashed;
 }
 

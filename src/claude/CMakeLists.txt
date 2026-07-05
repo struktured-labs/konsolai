@@ -29,9 +29,17 @@ set(claude_SRCS
     ClaudeSessionWizard.cpp
     ClaudeConversationPicker.cpp
     SessionManagerPanel.cpp
+    SessionTreeWidget.cpp
+    MergePolicy.cpp
+    MergeSessionsDialog.cpp
+    BroadcastPolicy.cpp
+    BroadcastDialog.cpp
     KonsolaiSettings.cpp
     BudgetController.cpp
     KonsolaiLogging.cpp
+    ClaudeAssistant.cpp
+    ClaudeAssistantPromptBuilder.cpp
+    ReorganizeTreeDialog.cpp
     SessionObserver.cpp
     PromptQualityGate.cpp
     PromptTemplateManager.cpp
@@ -40,6 +48,10 @@ set(claude_SRCS
     AgentFleetProvider.cpp
     AgentManagerPanel.cpp
     AgentSessionLinker.cpp
+    TreeToolbar.cpp
+    LettaApiClient.cpp
+    LettaAgentProvider.cpp
+    LettaSendMessageDialog.cpp
     ${dbus_xml_srcs}
 )
 

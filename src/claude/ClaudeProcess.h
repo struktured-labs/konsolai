@@ -47,7 +47,8 @@ public:
         Default, // Use default model (opus 4.7 max effort)
         Opus, // claude-opus-4-7
         Sonnet, // claude-sonnet-4-6
-        Haiku // claude-haiku-4-5-20251001
+        Haiku, // claude-haiku-4-5-20251001
+        Fable // claude-fable-5
     };
     Q_ENUM(Model)
 

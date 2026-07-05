@@ -8,8 +8,10 @@
 
 #include "konsoleprivate_export.h"
 
+#include <QHash>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <KSharedConfig>
 
@@ -58,6 +60,20 @@ public:
      */
     QString defaultModel() const;
     void setDefaultModel(const QString &model);
+
+    /**
+     * Extra command-line arguments passed to every Claude session by default.
+     * Free-form whitespace-separated string. Per-session overrides are stored
+     * on ClaudeSession itself and take precedence when non-empty.
+     *
+     * Default:
+     *   --dangerously-load-development-channels plugin:session-intercom@struktured-labs
+     * so the session-intercom plugin's channel-based async notifications
+     * actually bind (the plugin's MCP server lives under the plugin namespace,
+     * not as a top-level server entry).
+     */
+    QString extraClaudeArgs() const;
+    void setExtraClaudeArgs(const QString &args);
 
     /**
      * Git mode for new sessions:
@@ -166,6 +182,82 @@ public:
      */
     QString agentFleetPath() const;
     void setAgentFleetPath(const QString &path);
+
+    // ========== Session Tree View ==========
+
+    /**
+     * Which session states are visible in the tree.
+     * Stored as comma-separated lowercase tokens in [SessionTree] VisibleStates.
+     * Default: "active,detached,pinned" — the noisy/long-tail states
+     * (closed, archived, dismissed, discovered) are hidden by default and
+     * toggled on via filter chips above the session tree.
+     *
+     * Recognized tokens: pinned, active, detached, closed, archived,
+     * dismissed, discovered.
+     */
+    QStringList visibleSessionStates() const;
+    void setVisibleSessionStates(const QStringList &states);
+
+    /**
+     * User-defined category-to-category renames. Applied AFTER LCP grouping so
+     * "cowardly-irregular" (LCP result) can be re-routed to "cowir".
+     * Stored as "source1=target1,source2=target2" in [SessionTree] CategoryAliases.
+     */
+    QHash<QString, QString> categoryAliases() const;
+    void setCategoryAliases(const QHash<QString, QString> &aliases);
+    void addCategoryAlias(const QString &source, const QString &target);
+    void removeCategoryAlias(const QString &source);
+
+    /**
+     * Per-workdir category override. Wins over CategoryAliases and LCP alike.
+     * Stored as "workdir1=cat1,workdir2=cat2" in [SessionTree] WorkdirCategoryOverrides.
+     */
+    QHash<QString, QString> workdirCategoryOverrides() const;
+    void setWorkdirCategoryOverrides(const QHash<QString, QString> &overrides);
+    void addWorkdirCategoryOverride(const QString &workdir, const QString &category);
+    void removeWorkdirCategoryOverride(const QString &workdir);
+
+    /**
+     * Category names that should NEVER auto-group even if LCP would create them.
+     * Used by the "Ungroup" action on LCP-created categories.
+     * Stored as comma-separated list in [SessionTree] SuppressCategories.
+     */
+    QStringList suppressedCategories() const;
+    void setSuppressedCategories(const QStringList &names);
+    void addSuppressedCategory(const QString &name);
+    void removeSuppressedCategory(const QString &name);
+
+    /**
+     * User-created empty categories.  These render as top-level tree items even
+     * when they contain zero projects, so users can drop projects into them via
+     * DnD.  Stored as comma-separated list in [SessionTree] UserCategories.
+     */
+    QStringList userCategories() const;
+    void setUserCategories(const QStringList &names);
+    void addUserCategory(const QString &name);
+    void removeUserCategory(const QString &name);
+
+    // ========== Letta Settings ==========
+
+    /**
+     * Base URL for the Letta server. Empty falls back to the LETTA_BASE_URL
+     * environment variable, then to http://localhost:8283.
+     */
+    QString lettaBaseUrl() const;
+    void setLettaBaseUrl(const QString &url);
+
+    /**
+     * Bearer token for the Letta server. Empty falls back to the
+     * LETTA_API_KEY environment variable, then no auth.
+     */
+    QString lettaApiKey() const;
+    void setLettaApiKey(const QString &key);
+
+    /**
+     * Whether to enable the Letta agent provider in the Agents panel.
+     */
+    bool lettaEnabled() const;
+    void setLettaEnabled(bool enabled);
 
     /**
      * Last-used SSH host (for wizard pre-fill)

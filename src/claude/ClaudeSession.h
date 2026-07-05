@@ -458,6 +458,25 @@ public:
     void setClaudeModel(ClaudeProcess::Model model) { m_claudeModel = model; }
 
     /**
+     * Per-session override for extra Claude CLI args. Whitespace-separated.
+     * Empty string means "use KonsolaiSettings::extraClaudeArgs()".
+     */
+    QString extraClaudeArgs() const
+    {
+        return m_extraClaudeArgs;
+    }
+    void setExtraClaudeArgs(const QString &args)
+    {
+        m_extraClaudeArgs = args;
+    }
+
+    /**
+     * Resolved extra args list: per-session override if set, else the global
+     * default from KonsolaiSettings. Split on whitespace.
+     */
+    QStringList effectiveExtraClaudeArgs() const;
+
+    /**
      * Get the current Claude state
      */
     ClaudeProcess::State claudeState() const;
@@ -967,6 +986,7 @@ private:
     QString m_taskDescription;
     ClaudeProcess::Model m_claudeModel = ClaudeProcess::Model::Default;
     QString m_resumeSessionId;
+    QString m_extraClaudeArgs;
     bool m_isReattach = false;
 
     // SSH remote session fields

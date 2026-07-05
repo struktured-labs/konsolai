@@ -974,6 +974,21 @@ SessionObserver *ClaudeSession::sessionObserver()
     return m_sessionObserver;
 }
 
+QStringList ClaudeSession::effectiveExtraClaudeArgs() const
+{
+    QString source = m_extraClaudeArgs;
+    if (source.isEmpty()) {
+        if (auto *settings = KonsolaiSettings::instance()) {
+            source = settings->extraClaudeArgs();
+        }
+    }
+    if (source.isEmpty()) {
+        return {};
+    }
+    static const QRegularExpression splitter(QStringLiteral("\\s+"));
+    return source.split(splitter, Qt::SkipEmptyParts);
+}
+
 QString ClaudeSession::shellCommand() const
 {
     // Remote sessions use buildRemoteSshArgs() directly in run()
@@ -987,6 +1002,7 @@ QString ClaudeSession::shellCommand() const
     if (!m_resumeSessionId.isEmpty()) {
         extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
     }
+    extraArgs << effectiveExtraClaudeArgs();
 
     QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
 
@@ -1043,6 +1059,7 @@ QStringList ClaudeSession::buildRemoteSshArgs() const
     if (!m_resumeSessionId.isEmpty()) {
         claudeArgs << QStringLiteral("--resume") << m_resumeSessionId;
     }
+    claudeArgs << effectiveExtraClaudeArgs();
     QString claudeCmd = QStringLiteral("claude");
     if (!claudeArgs.isEmpty()) {
         claudeCmd += QStringLiteral(" ") + claudeArgs.join(QStringLiteral(" "));
@@ -1323,9 +1340,7 @@ void ClaudeSession::restart()
 
         // If token tracking hasn't populated m_lastTokenFile yet, find the newest JSONL now
         if (convFile.isEmpty() && !m_workingDir.isEmpty()) {
-            QString hashedName = m_workingDir;
-            hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
-            QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+            QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + ClaudeSessionRegistry::hashedProjectPath(m_workingDir);
             QDateTime newestTime;
             QDirIterator it(projectDir, {QStringLiteral("*.jsonl")}, QDir::Files);
             while (it.hasNext()) {
@@ -1352,6 +1367,7 @@ void ClaudeSession::restart()
     if (!m_resumeSessionId.isEmpty()) {
         extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
     }
+    extraArgs << effectiveExtraClaudeArgs();
     QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
 
     // Use respawn-pane to atomically kill the current process and start a new one.
@@ -1835,9 +1851,7 @@ void ClaudeSession::startTokenTracking()
 
     // Watch the project dir if we have a working directory
     if (!m_workingDir.isEmpty()) {
-        QString hashedName = m_workingDir;
-        hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
-        QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+        QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + ClaudeSessionRegistry::hashedProjectPath(m_workingDir);
         if (QDir(projectDir).exists() && projectDir != m_watchedProjectDir) {
             if (!m_watchedProjectDir.isEmpty()) {
                 m_tokenFileWatcher->removePath(m_watchedProjectDir);
@@ -1868,9 +1882,7 @@ void ClaudeSession::refreshTokenUsage()
     }
 
     // Convert working dir to Claude's hashed project path
-    QString hashedName = m_workingDir;
-    hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
-    QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+    QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + ClaudeSessionRegistry::hashedProjectPath(m_workingDir);
 
     if (!QDir(projectDir).exists()) {
         return;

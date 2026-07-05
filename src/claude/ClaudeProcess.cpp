@@ -86,6 +86,8 @@ QString ClaudeProcess::modelName(Model model)
         return QStringLiteral("claude-sonnet-4-6[1m]");
     case Model::Haiku:
         return QStringLiteral("claude-haiku-4-5-20251001");
+    case Model::Fable:
+        return QStringLiteral("claude-fable-5");
     case Model::Default:
     default:
         return QString();
@@ -101,6 +103,8 @@ QString ClaudeProcess::shortModelName(Model model)
         return QStringLiteral("sonnet");
     case Model::Haiku:
         return QStringLiteral("haiku");
+    case Model::Fable:
+        return QStringLiteral("fable");
     case Model::Default:
     default:
         return QString();
@@ -118,6 +122,9 @@ ClaudeProcess::Model ClaudeProcess::parseModel(const QString &name)
     }
     if (lower.contains(QStringLiteral("haiku"))) {
         return Model::Haiku;
+    }
+    if (lower.contains(QStringLiteral("fable"))) {
+        return Model::Fable;
     }
     return Model::Default;
 }

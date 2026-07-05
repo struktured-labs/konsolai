@@ -62,6 +62,26 @@ void KonsolaiSettingsTest::testDefaultModel()
     QCOMPARE(settings.defaultModel(), QStringLiteral("claude-sonnet-4"));
 }
 
+void KonsolaiSettingsTest::testDefaultExtraClaudeArgs()
+{
+    KonsolaiSettings settings;
+    // Defaults to the plugin's channel namespace so async DMs from
+    // session-intercom actually bind in konsolai-launched sessions.
+    // "server:session-intercom" was wrong — only matches top-level MCP
+    // entries, not plugin-provided MCP servers.
+    QCOMPARE(settings.extraClaudeArgs(), QStringLiteral("--dangerously-load-development-channels plugin:session-intercom@struktured-labs"));
+}
+
+void KonsolaiSettingsTest::testExtraClaudeArgsRoundTrip()
+{
+    KonsolaiSettings settings;
+    settings.setExtraClaudeArgs(QStringLiteral("--debug --foo bar"));
+    QCOMPARE(settings.extraClaudeArgs(), QStringLiteral("--debug --foo bar"));
+
+    settings.setExtraClaudeArgs(QString());
+    QCOMPARE(settings.extraClaudeArgs(), QString());
+}
+
 void KonsolaiSettingsTest::testDefaultGitMode()
 {
     KonsolaiSettings settings;
@@ -374,6 +394,237 @@ void KonsolaiSettingsTest::testSettingsChangedSignal()
 
     settings.setLastSshPort(2222);
     QCOMPARE(spy.count(), 5);
+}
+
+// ========== Session-tree alias / override / suppression ==========
+
+void KonsolaiSettingsTest::testDefaultCategoryAliasesEmpty()
+{
+    KonsolaiSettings settings;
+    QCOMPARE(settings.categoryAliases().size(), 0);
+}
+
+void KonsolaiSettingsTest::testCategoryAliasesRoundTrip()
+{
+    KonsolaiSettings settings;
+
+    QHash<QString, QString> aliases;
+    aliases.insert(QStringLiteral("cowardly-irregular"), QStringLiteral("cowir"));
+    aliases.insert(QStringLiteral("penta-dragon"), QStringLiteral("pdrag"));
+    settings.setCategoryAliases(aliases);
+
+    const auto read = settings.categoryAliases();
+    QCOMPARE(read.size(), 2);
+    QCOMPARE(read.value(QStringLiteral("cowardly-irregular")), QStringLiteral("cowir"));
+    QCOMPARE(read.value(QStringLiteral("penta-dragon")), QStringLiteral("pdrag"));
+
+    // Empty map round-trip.
+    settings.setCategoryAliases({});
+    QCOMPARE(settings.categoryAliases().size(), 0);
+}
+
+void KonsolaiSettingsTest::testDefaultWorkdirCategoryOverridesEmpty()
+{
+    KonsolaiSettings settings;
+    QCOMPARE(settings.workdirCategoryOverrides().size(), 0);
+}
+
+void KonsolaiSettingsTest::testWorkdirCategoryOverridesRoundTrip()
+{
+    KonsolaiSettings settings;
+
+    QHash<QString, QString> overrides;
+    overrides.insert(QStringLiteral("/home/u/wild-orphan"), QStringLiteral("cowir"));
+    overrides.insert(QStringLiteral("/home/u/other-mid"), QStringLiteral("misc"));
+    settings.setWorkdirCategoryOverrides(overrides);
+
+    const auto read = settings.workdirCategoryOverrides();
+    QCOMPARE(read.size(), 2);
+    QCOMPARE(read.value(QStringLiteral("/home/u/wild-orphan")), QStringLiteral("cowir"));
+    QCOMPARE(read.value(QStringLiteral("/home/u/other-mid")), QStringLiteral("misc"));
+
+    settings.setWorkdirCategoryOverrides({});
+    QCOMPARE(settings.workdirCategoryOverrides().size(), 0);
+}
+
+void KonsolaiSettingsTest::testDefaultSuppressedCategoriesEmpty()
+{
+    KonsolaiSettings settings;
+    QCOMPARE(settings.suppressedCategories().size(), 0);
+}
+
+void KonsolaiSettingsTest::testSuppressedCategoriesRoundTrip()
+{
+    KonsolaiSettings settings;
+
+    QStringList names = {QStringLiteral("cowir"), QStringLiteral("penta")};
+    settings.setSuppressedCategories(names);
+    const QStringList read = settings.suppressedCategories();
+    QCOMPARE(read.size(), 2);
+    QVERIFY(read.contains(QStringLiteral("cowir")));
+    QVERIFY(read.contains(QStringLiteral("penta")));
+
+    // Empty round-trip.
+    settings.setSuppressedCategories({});
+    QCOMPARE(settings.suppressedCategories().size(), 0);
+
+    // Duplicates get deduplicated on write.
+    settings.setSuppressedCategories({QStringLiteral("x"), QStringLiteral("x"), QStringLiteral("y")});
+    QCOMPARE(settings.suppressedCategories().size(), 2);
+}
+
+void KonsolaiSettingsTest::testAddRemoveCategoryAlias()
+{
+    KonsolaiSettings settings;
+
+    settings.addCategoryAlias(QStringLiteral("foo"), QStringLiteral("bar"));
+    QCOMPARE(settings.categoryAliases().value(QStringLiteral("foo")), QStringLiteral("bar"));
+
+    // add a second — first is untouched.
+    settings.addCategoryAlias(QStringLiteral("baz"), QStringLiteral("qux"));
+    QCOMPARE(settings.categoryAliases().size(), 2);
+
+    // add overwrites existing entry.
+    settings.addCategoryAlias(QStringLiteral("foo"), QStringLiteral("baz"));
+    QCOMPARE(settings.categoryAliases().value(QStringLiteral("foo")), QStringLiteral("baz"));
+
+    // remove one, other stays.
+    settings.removeCategoryAlias(QStringLiteral("foo"));
+    QCOMPARE(settings.categoryAliases().size(), 1);
+    QVERIFY(!settings.categoryAliases().contains(QStringLiteral("foo")));
+
+    // removing a non-existent key is a no-op.
+    settings.removeCategoryAlias(QStringLiteral("does-not-exist"));
+    QCOMPARE(settings.categoryAliases().size(), 1);
+
+    // Empty source/target are rejected silently.
+    settings.addCategoryAlias(QString(), QStringLiteral("nope"));
+    settings.addCategoryAlias(QStringLiteral("nope"), QString());
+    QCOMPARE(settings.categoryAliases().size(), 1);
+
+    // Self-alias is rejected.
+    settings.addCategoryAlias(QStringLiteral("loop"), QStringLiteral("loop"));
+    QVERIFY(!settings.categoryAliases().contains(QStringLiteral("loop")));
+}
+
+void KonsolaiSettingsTest::testAddRemoveWorkdirOverride()
+{
+    KonsolaiSettings settings;
+
+    settings.addWorkdirCategoryOverride(QStringLiteral("/p/one"), QStringLiteral("cat1"));
+    settings.addWorkdirCategoryOverride(QStringLiteral("/p/two"), QStringLiteral("cat2"));
+    QCOMPARE(settings.workdirCategoryOverrides().size(), 2);
+
+    // Overwrite.
+    settings.addWorkdirCategoryOverride(QStringLiteral("/p/one"), QStringLiteral("cat1b"));
+    QCOMPARE(settings.workdirCategoryOverrides().value(QStringLiteral("/p/one")), QStringLiteral("cat1b"));
+
+    // Remove.
+    settings.removeWorkdirCategoryOverride(QStringLiteral("/p/one"));
+    QCOMPARE(settings.workdirCategoryOverrides().size(), 1);
+    QVERIFY(!settings.workdirCategoryOverrides().contains(QStringLiteral("/p/one")));
+
+    // Empty inputs are rejected silently.
+    settings.addWorkdirCategoryOverride(QString(), QStringLiteral("x"));
+    settings.addWorkdirCategoryOverride(QStringLiteral("/p/three"), QString());
+    QCOMPARE(settings.workdirCategoryOverrides().size(), 1);
+}
+
+void KonsolaiSettingsTest::testAddRemoveSuppressedCategory()
+{
+    KonsolaiSettings settings;
+
+    settings.addSuppressedCategory(QStringLiteral("cowir"));
+    QVERIFY(settings.suppressedCategories().contains(QStringLiteral("cowir")));
+
+    // Adding again is idempotent.
+    settings.addSuppressedCategory(QStringLiteral("cowir"));
+    QCOMPARE(settings.suppressedCategories().size(), 1);
+
+    settings.addSuppressedCategory(QStringLiteral("penta"));
+    QCOMPARE(settings.suppressedCategories().size(), 2);
+
+    settings.removeSuppressedCategory(QStringLiteral("cowir"));
+    QCOMPARE(settings.suppressedCategories().size(), 1);
+    QVERIFY(!settings.suppressedCategories().contains(QStringLiteral("cowir")));
+
+    // Empty add is rejected silently.
+    settings.addSuppressedCategory(QString());
+    QCOMPARE(settings.suppressedCategories().size(), 1);
+
+    // Remove no-op on missing key.
+    settings.removeSuppressedCategory(QStringLiteral("does-not-exist"));
+    QCOMPARE(settings.suppressedCategories().size(), 1);
+}
+
+// ========== User-defined empty categories ==========
+
+void KonsolaiSettingsTest::testDefaultUserCategoriesEmpty()
+{
+    KonsolaiSettings settings;
+    QCOMPARE(settings.userCategories().size(), 0);
+}
+
+void KonsolaiSettingsTest::testUserCategoriesRoundTrip()
+{
+    KonsolaiSettings settings;
+
+    QStringList names = {QStringLiteral("my-stuff"), QStringLiteral("scratch")};
+    settings.setUserCategories(names);
+    const QStringList read = settings.userCategories();
+    QCOMPARE(read.size(), 2);
+    QVERIFY(read.contains(QStringLiteral("my-stuff")));
+    QVERIFY(read.contains(QStringLiteral("scratch")));
+
+    // Empty round-trip.
+    settings.setUserCategories({});
+    QCOMPARE(settings.userCategories().size(), 0);
+
+    // Duplicates deduplicated on write.
+    settings.setUserCategories({QStringLiteral("x"), QStringLiteral("x"), QStringLiteral("y")});
+    QCOMPARE(settings.userCategories().size(), 2);
+}
+
+void KonsolaiSettingsTest::testAddRemoveUserCategory()
+{
+    KonsolaiSettings settings;
+
+    settings.addUserCategory(QStringLiteral("alpha"));
+    QVERIFY(settings.userCategories().contains(QStringLiteral("alpha")));
+
+    // Adding again is idempotent.
+    settings.addUserCategory(QStringLiteral("alpha"));
+    QCOMPARE(settings.userCategories().size(), 1);
+
+    settings.addUserCategory(QStringLiteral("beta"));
+    QCOMPARE(settings.userCategories().size(), 2);
+
+    settings.removeUserCategory(QStringLiteral("alpha"));
+    QCOMPARE(settings.userCategories().size(), 1);
+    QVERIFY(!settings.userCategories().contains(QStringLiteral("alpha")));
+
+    // Empty add is rejected silently.
+    settings.addUserCategory(QString());
+    QCOMPARE(settings.userCategories().size(), 1);
+
+    // Remove no-op on missing key.
+    settings.removeUserCategory(QStringLiteral("does-not-exist"));
+    QCOMPARE(settings.userCategories().size(), 1);
+}
+
+void KonsolaiSettingsTest::testDefaultVisibleStatesDoesNotIncludeSubagent()
+{
+    // Subagent sessions are hidden by default — they're worker-spawned
+    // sessions the user doesn't drive directly.  Toggle on from the filter
+    // chip overflow menu to inspect them.
+    KonsolaiSettings settings;
+    const QStringList defaults = settings.visibleSessionStates();
+    QVERIFY2(!defaults.contains(QStringLiteral("subagent")), "Default visibleSessionStates must NOT include 'subagent'");
+    // Sanity: the expected defaults are still present.
+    QVERIFY(defaults.contains(QStringLiteral("active")));
+    QVERIFY(defaults.contains(QStringLiteral("detached")));
+    QVERIFY(defaults.contains(QStringLiteral("pinned")));
+    QVERIFY(defaults.contains(QStringLiteral("closed")));
 }
 
 QTEST_GUILESS_MAIN(Konsolai::KonsolaiSettingsTest)

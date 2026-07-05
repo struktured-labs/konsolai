@@ -7,7 +7,9 @@
 
 #include <KConfigGroup>
 #include <QDir>
+#include <QSet>
 #include <QStandardPaths>
+#include <algorithm>
 
 namespace Konsolai
 {
@@ -109,6 +111,23 @@ void KonsolaiSettings::setDefaultModel(const QString &model)
 {
     KConfigGroup group(m_config, QStringLiteral("Claude"));
     group.writeEntry("DefaultModel", model);
+    Q_EMIT settingsChanged();
+}
+
+QString KonsolaiSettings::extraClaudeArgs() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Claude"));
+    // The channel target is the plugin's MCP namespace, NOT a top-level entry
+    // in ~/.claude.json / .mcp.json. "server:session-intercom" only matches a
+    // user-installed top-level MCP server (which we don't ship), so it
+    // silently no-ops. The plugin namespace below is what actually binds.
+    return group.readEntry("ExtraArgs", QStringLiteral("--dangerously-load-development-channels plugin:session-intercom@struktured-labs"));
+}
+
+void KonsolaiSettings::setExtraClaudeArgs(const QString &args)
+{
+    KConfigGroup group(m_config, QStringLiteral("Claude"));
+    group.writeEntry("ExtraArgs", args);
     Q_EMIT settingsChanged();
 }
 
@@ -350,6 +369,216 @@ void KonsolaiSettings::setNotificationYoloEnabled(bool enabled)
     Q_EMIT settingsChanged();
 }
 
+// ========== Session Tree View ==========
+
+QStringList KonsolaiSettings::visibleSessionStates() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    // Default includes "closed" because typical users have many sessions whose
+    // claude process isn't running right now but which they still expect to
+    // see in the tree. Archived / dismissed / discovered stay opt-in (overflow
+    // menu) because they're long-tail and noisy.
+    const QStringList defaults = {QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")};
+    return group.readEntry("VisibleStates", defaults);
+}
+
+void KonsolaiSettings::setVisibleSessionStates(const QStringList &states)
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    group.writeEntry("VisibleStates", states);
+    Q_EMIT settingsChanged();
+}
+
+namespace
+{
+
+// Serialize a hash to "k1=v1,k2=v2" pairs suitable for KConfigGroup::writeEntry(QStringList).
+QStringList serializeHash(const QHash<QString, QString> &hash)
+{
+    QStringList out;
+    out.reserve(hash.size());
+    for (auto it = hash.cbegin(); it != hash.cend(); ++it) {
+        if (it.key().isEmpty()) {
+            continue;
+        }
+        out.append(it.key() + QLatin1Char('=') + it.value());
+    }
+    std::sort(out.begin(), out.end()); // deterministic order on disk
+    return out;
+}
+
+QHash<QString, QString> parseHash(const QStringList &pairs)
+{
+    QHash<QString, QString> out;
+    for (const QString &pair : pairs) {
+        const int eq = pair.indexOf(QLatin1Char('='));
+        if (eq <= 0) {
+            continue;
+        }
+        const QString k = pair.left(eq);
+        const QString v = pair.mid(eq + 1);
+        if (!k.isEmpty()) {
+            out.insert(k, v);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+QHash<QString, QString> KonsolaiSettings::categoryAliases() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    return parseHash(group.readEntry("CategoryAliases", QStringList{}));
+}
+
+void KonsolaiSettings::setCategoryAliases(const QHash<QString, QString> &aliases)
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    group.writeEntry("CategoryAliases", serializeHash(aliases));
+    Q_EMIT settingsChanged();
+}
+
+void KonsolaiSettings::addCategoryAlias(const QString &source, const QString &target)
+{
+    if (source.isEmpty() || target.isEmpty() || source == target) {
+        return;
+    }
+    QHash<QString, QString> h = categoryAliases();
+    h.insert(source, target);
+    setCategoryAliases(h);
+}
+
+void KonsolaiSettings::removeCategoryAlias(const QString &source)
+{
+    QHash<QString, QString> h = categoryAliases();
+    if (h.remove(source) > 0) {
+        setCategoryAliases(h);
+    }
+}
+
+QHash<QString, QString> KonsolaiSettings::workdirCategoryOverrides() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    return parseHash(group.readEntry("WorkdirCategoryOverrides", QStringList{}));
+}
+
+void KonsolaiSettings::setWorkdirCategoryOverrides(const QHash<QString, QString> &overrides)
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    group.writeEntry("WorkdirCategoryOverrides", serializeHash(overrides));
+    Q_EMIT settingsChanged();
+}
+
+void KonsolaiSettings::addWorkdirCategoryOverride(const QString &workdir, const QString &category)
+{
+    if (workdir.isEmpty() || category.isEmpty()) {
+        return;
+    }
+    QHash<QString, QString> h = workdirCategoryOverrides();
+    h.insert(workdir, category);
+    setWorkdirCategoryOverrides(h);
+}
+
+void KonsolaiSettings::removeWorkdirCategoryOverride(const QString &workdir)
+{
+    QHash<QString, QString> h = workdirCategoryOverrides();
+    if (h.remove(workdir) > 0) {
+        setWorkdirCategoryOverrides(h);
+    }
+}
+
+QStringList KonsolaiSettings::suppressedCategories() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    return group.readEntry("SuppressCategories", QStringList{});
+}
+
+void KonsolaiSettings::setSuppressedCategories(const QStringList &names)
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    // Deduplicate + sort for deterministic on-disk state.
+    QStringList clean;
+    QSet<QString> seen;
+    for (const QString &n : names) {
+        if (n.isEmpty() || seen.contains(n)) {
+            continue;
+        }
+        seen.insert(n);
+        clean.append(n);
+    }
+    std::sort(clean.begin(), clean.end());
+    group.writeEntry("SuppressCategories", clean);
+    Q_EMIT settingsChanged();
+}
+
+void KonsolaiSettings::addSuppressedCategory(const QString &name)
+{
+    if (name.isEmpty()) {
+        return;
+    }
+    QStringList list = suppressedCategories();
+    if (list.contains(name)) {
+        return;
+    }
+    list.append(name);
+    setSuppressedCategories(list);
+}
+
+void KonsolaiSettings::removeSuppressedCategory(const QString &name)
+{
+    QStringList list = suppressedCategories();
+    if (list.removeAll(name) > 0) {
+        setSuppressedCategories(list);
+    }
+}
+
+QStringList KonsolaiSettings::userCategories() const
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    return group.readEntry("UserCategories", QStringList{});
+}
+
+void KonsolaiSettings::setUserCategories(const QStringList &names)
+{
+    KConfigGroup group(m_config, QStringLiteral("SessionTree"));
+    // Deduplicate + sort for deterministic on-disk state (mirrors
+    // setSuppressedCategories).
+    QStringList clean;
+    QSet<QString> seen;
+    for (const QString &n : names) {
+        if (n.isEmpty() || seen.contains(n)) {
+            continue;
+        }
+        seen.insert(n);
+        clean.append(n);
+    }
+    std::sort(clean.begin(), clean.end());
+    group.writeEntry("UserCategories", clean);
+    Q_EMIT settingsChanged();
+}
+
+void KonsolaiSettings::addUserCategory(const QString &name)
+{
+    if (name.isEmpty()) {
+        return;
+    }
+    QStringList list = userCategories();
+    if (list.contains(name)) {
+        return;
+    }
+    list.append(name);
+    setUserCategories(list);
+}
+
+void KonsolaiSettings::removeUserCategory(const QString &name)
+{
+    QStringList list = userCategories();
+    if (list.removeAll(name) > 0) {
+        setUserCategories(list);
+    }
+}
+
 // ========== Agent Fleet Settings ==========
 
 QString KonsolaiSettings::agentFleetPath() const
@@ -362,6 +591,47 @@ void KonsolaiSettings::setAgentFleetPath(const QString &path)
 {
     KConfigGroup group(m_config, QStringLiteral("AgentFleet"));
     group.writeEntry("FleetPath", path);
+    Q_EMIT settingsChanged();
+}
+
+// ========== Letta Settings ==========
+
+QString KonsolaiSettings::lettaBaseUrl() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Letta"));
+    return group.readEntry("BaseUrl", QString());
+}
+
+void KonsolaiSettings::setLettaBaseUrl(const QString &url)
+{
+    KConfigGroup group(m_config, QStringLiteral("Letta"));
+    group.writeEntry("BaseUrl", url);
+    Q_EMIT settingsChanged();
+}
+
+QString KonsolaiSettings::lettaApiKey() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Letta"));
+    return group.readEntry("ApiKey", QString());
+}
+
+void KonsolaiSettings::setLettaApiKey(const QString &key)
+{
+    KConfigGroup group(m_config, QStringLiteral("Letta"));
+    group.writeEntry("ApiKey", key);
+    Q_EMIT settingsChanged();
+}
+
+bool KonsolaiSettings::lettaEnabled() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Letta"));
+    return group.readEntry("Enabled", true);
+}
+
+void KonsolaiSettings::setLettaEnabled(bool enabled)
+{
+    KConfigGroup group(m_config, QStringLiteral("Letta"));
+    group.writeEntry("Enabled", enabled);
     Q_EMIT settingsChanged();
 }
 

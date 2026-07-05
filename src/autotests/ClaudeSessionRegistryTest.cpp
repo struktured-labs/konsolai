@@ -223,6 +223,44 @@ void ClaudeSessionRegistryTest::testRefreshOrphanedSessionsAsyncCompletes()
     Q_UNUSED(states)
 }
 
+// ============================================================
+// hashedProjectPath tests — pin down the exact normalization
+// Claude Code uses so resume/token/conversation lookups don't
+// silently look in a non-existent directory.
+// ============================================================
+
+void ClaudeSessionRegistryTest::testHashedProjectPath_HyphenatesSlashes()
+{
+    QCOMPARE(ClaudeSessionRegistry::hashedProjectPath(QStringLiteral("/home/user/projects/konsolai")), QStringLiteral("-home-user-projects-konsolai"));
+}
+
+void ClaudeSessionRegistryTest::testHashedProjectPath_HyphenatesUnderscores()
+{
+    QCOMPARE(ClaudeSessionRegistry::hashedProjectPath(QStringLiteral("/home/u/dr_mario_rl")), QStringLiteral("-home-u-dr-mario-rl"));
+    QCOMPARE(ClaudeSessionRegistry::hashedProjectPath(QStringLiteral("foo_bar_baz")), QStringLiteral("foo-bar-baz"));
+}
+
+void ClaudeSessionRegistryTest::testHashedProjectPath_HyphenatesDots()
+{
+    QCOMPARE(ClaudeSessionRegistry::hashedProjectPath(QStringLiteral("/home/u/foo.bar")), QStringLiteral("-home-u-foo-bar"));
+}
+
+void ClaudeSessionRegistryTest::testHashedProjectPath_MatchesClaudeCodeDrMarioRlCase()
+{
+    // The regression this whole fix exists for. Actual Claude Code observed
+    // output was -home-struktured-projects-dr-mario-rl for the underscore path.
+    QCOMPARE(ClaudeSessionRegistry::hashedProjectPath(QStringLiteral("/home/struktured/projects/dr_mario_rl")),
+             QStringLiteral("-home-struktured-projects-dr-mario-rl"));
+}
+
+void ClaudeSessionRegistryTest::testHashedProjectPath_HandlesWorktreePath()
+{
+    // /.claude/... adds two hyphens in a row because both '/' and '.' collapse.
+    // Verified against the on-disk name in ~/.claude/projects/.
+    QCOMPARE(ClaudeSessionRegistry::hashedProjectPath(QStringLiteral("/home/struktured/projects/dr_mario_rl/.claude/worktrees/faithful-sim")),
+             QStringLiteral("-home-struktured-projects-dr-mario-rl--claude-worktrees-faithful-sim"));
+}
+
 QTEST_GUILESS_MAIN(ClaudeSessionRegistryTest)
 
 #include "moc_ClaudeSessionRegistryTest.cpp"

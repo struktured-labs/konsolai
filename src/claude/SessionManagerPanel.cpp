@@ -4,12 +4,21 @@
 */
 
 #include "SessionManagerPanel.h"
+#include "BroadcastDialog.h"
+#include "BroadcastPolicy.h"
+#include "ClaudeAssistant.h"
+#include "ClaudeAssistantPromptBuilder.h"
 #include "ClaudeConversationPicker.h"
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
 #include "KonsolaiSettings.h"
+#include "MergePolicy.h"
+#include "MergeSessionsDialog.h"
 #include "NotificationManager.h"
+#include "ReorganizeTreeDialog.h"
+#include "SessionTreeWidget.h"
 #include "TmuxManager.h"
+#include "TreeToolbar.h"
 
 #include <limits>
 
@@ -37,16 +46,19 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QSet>
+#include <QShortcut>
 #include <QSlider>
 #include <QSpinBox>
 #include <QSplitter>
@@ -66,6 +78,16 @@ struct CacheRefreshResult {
 };
 
 static const QString SETTINGS_GROUP = QStringLiteral("SessionManager");
+
+// All possible session state tokens, in display/sort order.
+static const QStringList ALL_STATE_TOKENS = {QStringLiteral("active"),
+                                             QStringLiteral("detached"),
+                                             QStringLiteral("pinned"),
+                                             QStringLiteral("closed"),
+                                             QStringLiteral("archived"),
+                                             QStringLiteral("dismissed"),
+                                             QStringLiteral("discovered"),
+                                             QStringLiteral("subagent")};
 
 static QString formatElapsed(const QDateTime &start)
 {
@@ -296,6 +318,17 @@ void SessionManagerPanel::setupUi()
     connect(m_newSessionButton, &QPushButton::clicked, this, &SessionManagerPanel::onNewSessionClicked);
     headerLayout->addWidget(m_newSessionButton);
 
+    // "New Category…" — creates an empty user-defined top-level category that
+    // renders in the tree until the user drags projects into it.
+    auto *newCategoryButton = new QToolButton(this);
+    newCategoryButton->setObjectName(QStringLiteral("newCategoryButton"));
+    newCategoryButton->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
+    newCategoryButton->setAutoRaise(true);
+    newCategoryButton->setFixedSize(24, 24);
+    newCategoryButton->setToolTip(i18n("New Category…"));
+    connect(newCategoryButton, &QToolButton::clicked, this, &SessionManagerPanel::createUserCategory);
+    headerLayout->addWidget(newCategoryButton);
+
     layout->addLayout(headerLayout);
 
     // Search/filter bar
@@ -308,6 +341,17 @@ void SessionManagerPanel::setupUi()
     connect(m_filterEdit, &QLineEdit::textChanged, this, &SessionManagerPanel::applyFilter);
     layout->addWidget(m_filterEdit);
 
+    // Filter chip toolbar (state-token visibility toggles)
+    auto *chipsRow = new QHBoxLayout();
+    chipsRow->setContentsMargins(4, 2, 4, 2);
+    chipsRow->setSpacing(4);
+    buildFilterChips(chipsRow);
+    chipsRow->addStretch();
+    m_filterChipsRow = new QWidget(this);
+    m_filterChipsRow->setObjectName(QStringLiteral("sessionFilterChips"));
+    m_filterChipsRow->setLayout(chipsRow);
+    layout->addWidget(m_filterChipsRow);
+
     // Loading progress bar (shown during deferred init, hidden after)
     m_loadingBar = new QProgressBar(this);
     m_loadingBar->setRange(0, 0); // indeterminate
@@ -316,8 +360,10 @@ void SessionManagerPanel::setupUi()
     m_loadingBar->setVisible(false);
     layout->addWidget(m_loadingBar);
 
-    // Tree widget for sessions
-    m_treeWidget = new QTreeWidget(this);
+    // Tree widget for sessions — custom subclass adds drag-drop reparenting
+    // for category/project-group nodes.
+    auto *sessionTree = new SessionTreeWidget(this);
+    m_treeWidget = sessionTree;
     m_treeWidget->setObjectName(QStringLiteral("sessionTree"));
     m_treeWidget->setColumnCount(2);
     m_treeWidget->setHeaderHidden(true);
@@ -325,6 +371,54 @@ void SessionManagerPanel::setupUi()
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     m_treeWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_treeWidget->setIndentation(12);
+
+    // Wire the drop signal to the alias/override persistence handler.
+    connect(sessionTree, &SessionTreeWidget::dropRequested, this, &SessionManagerPanel::handleDropRequest);
+    // Vim-style keyboard signals. actionRequested → handleTreeAction dispatches
+    // per-item; topRequested / bottomRequested / focusFilterRequested /
+    // escapePressed are handled inline because they only touch widget state.
+    connect(sessionTree, &SessionTreeWidget::actionRequested, this, &SessionManagerPanel::handleTreeAction);
+    connect(sessionTree, &SessionTreeWidget::focusFilterRequested, this, [this]() {
+        if (m_filterEdit) {
+            m_filterEdit->setFocus();
+            m_filterEdit->selectAll();
+        }
+    });
+    connect(sessionTree, &SessionTreeWidget::escapePressed, this, [this]() {
+        if (m_filterEdit && !m_filterEdit->text().isEmpty()) {
+            m_filterEdit->clear();
+        }
+        if (m_treeWidget) {
+            m_treeWidget->clearSelection();
+        }
+    });
+    connect(sessionTree, &SessionTreeWidget::topRequested, this, [this]() {
+        if (!m_treeWidget || m_treeWidget->topLevelItemCount() == 0) {
+            return;
+        }
+        QTreeWidgetItem *first = m_treeWidget->topLevelItem(0);
+        m_treeWidget->setCurrentItem(first);
+        m_treeWidget->scrollToItem(first);
+    });
+    connect(sessionTree, &SessionTreeWidget::bottomRequested, this, [this]() {
+        if (!m_treeWidget || m_treeWidget->topLevelItemCount() == 0) {
+            return;
+        }
+        // Walk to the deepest last-visible descendant of the last top-level
+        // item so `G` behaves like vim (last _visible_ line, respecting the
+        // current expand/collapse state).
+        QTreeWidgetItem *last = m_treeWidget->topLevelItem(m_treeWidget->topLevelItemCount() - 1);
+        while (last && last->isExpanded() && last->childCount() > 0) {
+            last = last->child(last->childCount() - 1);
+        }
+        if (last) {
+            m_treeWidget->setCurrentItem(last);
+            m_treeWidget->scrollToItem(last);
+        }
+    });
+    // Auto-expand groups when a drag hovers over them. Redundant with the
+    // subclass ctor's own setAutoExpandDelay(500), but explicit is fine.
+    m_treeWidget->setAutoExpandDelay(500);
     // Column 0: session name (stretches), Column 1: indicators (fixed width, right-aligned)
     m_treeWidget->header()->setStretchLastSection(false);
     m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -337,7 +431,27 @@ void SessionManagerPanel::setupUi()
     m_treeWidget->viewport()->installEventFilter(this);
     m_treeWidget->installEventFilter(this);
 
+    // Panel-level `/` shortcut — focuses the filter box no matter where the
+    // focus currently sits inside the panel.  Uses WidgetWithChildrenShortcut
+    // so it doesn't leak into other docks.
+    auto *slashShortcut = new QShortcut(QKeySequence(Qt::Key_Slash), this);
+    slashShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(slashShortcut, &QShortcut::activated, this, [this]() {
+        if (m_filterEdit) {
+            m_filterEdit->setFocus();
+            m_filterEdit->selectAll();
+        }
+    });
+
+    // Filter box event filter: Esc clears text and returns focus to tree.
+    // The QLineEdit swallows Esc otherwise (nothing happens), which is a
+    // dead end for keyboard-only users.
+    m_filterEdit->installEventFilter(this);
+
     m_treeWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    auto *treeToolbar = new TreeToolbar(m_treeWidget, this);
+    layout->addWidget(treeToolbar);
     layout->addWidget(m_treeWidget, 1 /* stretch */);
 
     // Empty state overlay
@@ -348,50 +462,371 @@ void SessionManagerPanel::setupUi()
     m_emptyStateLabel->setWordWrap(true);
     m_emptyStateLabel->setVisible(true);
 
-    // Create category items
-    m_pinnedCategory = new QTreeWidgetItem(m_treeWidget);
-    m_pinnedCategory->setText(0, i18n("Pinned"));
-    m_pinnedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("pin")));
-    m_pinnedCategory->setFlags(Qt::ItemIsEnabled);
-    m_pinnedCategory->setExpanded(true);
-
-    m_activeCategory = new QTreeWidgetItem(m_treeWidget);
-    m_activeCategory->setText(0, i18n("Active"));
-    m_activeCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-start")));
-    m_activeCategory->setFlags(Qt::ItemIsEnabled);
-    m_activeCategory->setExpanded(true);
-
-    m_detachedCategory = new QTreeWidgetItem(m_treeWidget);
-    m_detachedCategory->setText(0, i18n("Detached"));
-    m_detachedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("media-playback-pause")));
-    m_detachedCategory->setFlags(Qt::ItemIsEnabled);
-    m_detachedCategory->setExpanded(true);
-
-    m_closedCategory = new QTreeWidgetItem(m_treeWidget);
-    m_closedCategory->setText(0, i18n("Closed"));
-    m_closedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("window-close")));
-    m_closedCategory->setFlags(Qt::ItemIsEnabled);
-    m_closedCategory->setExpanded(true);
-
-    m_archivedCategory = new QTreeWidgetItem(m_treeWidget);
-    m_archivedCategory->setText(0, i18n("Archived"));
-    m_archivedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("archive-remove")));
-    m_archivedCategory->setFlags(Qt::ItemIsEnabled);
-    m_archivedCategory->setExpanded(false);
-
-    m_dismissedCategory = new QTreeWidgetItem(m_treeWidget);
-    m_dismissedCategory->setText(0, i18n("Dismissed"));
-    m_dismissedCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-clear-history")));
-    m_dismissedCategory->setFlags(Qt::ItemIsEnabled);
-    m_dismissedCategory->setExpanded(false);
-
-    m_discoveredCategory = new QTreeWidgetItem(m_treeWidget);
-    m_discoveredCategory->setText(0, i18n("Discovered"));
-    m_discoveredCategory->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-find")));
-    m_discoveredCategory->setFlags(Qt::ItemIsEnabled);
-    m_discoveredCategory->setExpanded(false);
-
+    // Categories are no longer created — sessions are grouped by project (workingDirectory)
+    // and state is rendered as a per-session icon. See ensureProjectGroup() and stateIcon().
     setMinimumWidth(200);
+}
+
+// ============================================================
+// Filter chips toolbar + state-token helpers
+// ============================================================
+
+void SessionManagerPanel::buildFilterChips(QHBoxLayout *into)
+{
+    auto *settings = KonsolaiSettings::instance();
+    const QStringList visible =
+        settings ? settings->visibleSessionStates() : QStringList{QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned")};
+    for (const QString &v : visible) {
+        m_visibleStates.insert(v);
+    }
+
+    struct Chip {
+        QString token;
+        QString label;
+        QString iconName;
+    };
+    // Primary chips: rendered inline. The four most common states; long-tail
+    // (archived / dismissed / discovered) go into the overflow hamburger so the
+    // row stays compact.
+    const QList<Chip> primary = {
+        {QStringLiteral("active"), i18n("Active"), QStringLiteral("media-playback-start")},
+        {QStringLiteral("detached"), i18n("Detached"), QStringLiteral("media-playback-pause")},
+        {QStringLiteral("closed"), i18n("Closed"), QStringLiteral("window-close")},
+        {QStringLiteral("pinned"), i18n("Pinned"), QStringLiteral("pin")},
+    };
+    // Overflow: state tokens reachable only through the hamburger menu. Not added to m_filterChips
+    // (so anything that looks up a chip by token gracefully no-ops for these).
+    const QList<Chip> overflow = {
+        {QStringLiteral("archived"), i18n("Archived"), QStringLiteral("archive-remove")},
+        {QStringLiteral("dismissed"), i18n("Dismissed"), QStringLiteral("edit-clear-history")},
+        {QStringLiteral("discovered"), i18n("Discovered"), QStringLiteral("edit-find")},
+        // Subagent sessions (spawned by Task tool / agent-fleet worker) are
+        // hidden from the default view — they'd otherwise clutter the tree
+        // with worker sessions the user doesn't drive directly.  Toggle on
+        // from the overflow to inspect.
+        {QStringLiteral("subagent"), i18n("Subagents"), QStringLiteral("system-run")},
+    };
+    for (const Chip &c : primary) {
+        auto *btn = new QToolButton(this);
+        btn->setObjectName(QStringLiteral("filterChip_") + c.token);
+        btn->setText(c.label);
+        btn->setIcon(QIcon::fromTheme(c.iconName));
+        btn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        btn->setCheckable(true);
+        btn->setChecked(m_visibleStates.contains(c.token));
+        btn->setAutoRaise(true);
+        btn->setToolTip(i18n("Show %1 sessions", c.label));
+        connect(btn, &QToolButton::toggled, this, [this, token = c.token](bool on) {
+            onFilterChipToggled(token, on);
+        });
+        m_filterChips.insert(c.token, btn);
+        into->addWidget(btn);
+    }
+
+    // Overflow hamburger: instant-popup QMenu with one checkable action per overflow state.
+    auto *overflowBtn = new QToolButton(this);
+    overflowBtn->setObjectName(QStringLiteral("filterChipsOverflow"));
+    overflowBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-more-symbolic"), QIcon::fromTheme(QStringLiteral("application-menu"))));
+    overflowBtn->setToolTip(i18n("More session filters"));
+    overflowBtn->setAutoRaise(true);
+    overflowBtn->setPopupMode(QToolButton::InstantPopup);
+
+    auto *overflowMenu = new QMenu(overflowBtn);
+    for (const Chip &c : overflow) {
+        QAction *action = overflowMenu->addAction(QIcon::fromTheme(c.iconName), c.label);
+        action->setCheckable(true);
+        action->setChecked(m_visibleStates.contains(c.token));
+        action->setObjectName(QStringLiteral("filterChipOverflow_") + c.token);
+        action->setToolTip(i18n("Show %1 sessions", c.label));
+        connect(action, &QAction::toggled, this, [this, token = c.token](bool on) {
+            onFilterChipToggled(token, on);
+        });
+        // Keep the menu open after each toggle so the user can flip multiple at once.
+        // (Qt closes the menu by default; QMenu's mouse handling re-opens on next click.)
+    }
+    overflowBtn->setMenu(overflowMenu);
+    into->addWidget(overflowBtn);
+}
+
+void SessionManagerPanel::onFilterChipToggled(const QString &token, bool on)
+{
+    if (on) {
+        m_visibleStates.insert(token);
+    } else {
+        m_visibleStates.remove(token);
+    }
+    persistVisibleStates();
+    scheduleTreeUpdate();
+}
+
+void SessionManagerPanel::persistVisibleStates()
+{
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+    QStringList list(m_visibleStates.cbegin(), m_visibleStates.cend());
+    std::sort(list.begin(), list.end());
+    settings->setVisibleSessionStates(list);
+}
+
+QString SessionManagerPanel::stateTokenFor(const SessionMetadata &meta, bool isLive) const
+{
+    // Subagent classification wins over dismissed/archived/live/pinned — a
+    // subagent session should be filed under the "Subagents" bucket even if
+    // it happens to also be dismissed or archived, so the user's toggle for
+    // "hide subagents" applies uniformly.
+    if (isSubagentSession(meta)) {
+        return QStringLiteral("subagent");
+    }
+    if (meta.isDismissed) {
+        return QStringLiteral("dismissed");
+    }
+    if (meta.isArchived) {
+        return QStringLiteral("archived");
+    }
+    if (isLive) {
+        // "active" wins over "pinned" for live sessions; pinned badge is shown separately.
+        return QStringLiteral("active");
+    }
+    if (meta.isPinned) {
+        return QStringLiteral("pinned");
+    }
+    return QStringLiteral("closed");
+}
+
+QIcon SessionManagerPanel::stateIcon(const QString &token) const
+{
+    if (token == QLatin1String("active")) {
+        return QIcon::fromTheme(QStringLiteral("media-playback-start"));
+    }
+    if (token == QLatin1String("detached")) {
+        return QIcon::fromTheme(QStringLiteral("media-playback-pause"));
+    }
+    if (token == QLatin1String("pinned")) {
+        return QIcon::fromTheme(QStringLiteral("pin"));
+    }
+    if (token == QLatin1String("closed")) {
+        return QIcon::fromTheme(QStringLiteral("window-close"));
+    }
+    if (token == QLatin1String("archived")) {
+        return QIcon::fromTheme(QStringLiteral("archive-remove"));
+    }
+    if (token == QLatin1String("dismissed")) {
+        return QIcon::fromTheme(QStringLiteral("edit-clear-history"));
+    }
+    if (token == QLatin1String("discovered")) {
+        return QIcon::fromTheme(QStringLiteral("edit-find"));
+    }
+    if (token == QLatin1String("subagent")) {
+        return QIcon::fromTheme(QStringLiteral("system-run"));
+    }
+    return {};
+}
+
+QString SessionManagerPanel::stateLabel(const QString &token) const
+{
+    if (token == QLatin1String("active")) {
+        return i18n("Active");
+    }
+    if (token == QLatin1String("detached")) {
+        return i18n("Detached");
+    }
+    if (token == QLatin1String("pinned")) {
+        return i18n("Pinned");
+    }
+    if (token == QLatin1String("closed")) {
+        return i18n("Closed");
+    }
+    if (token == QLatin1String("archived")) {
+        return i18n("Archived");
+    }
+    if (token == QLatin1String("dismissed")) {
+        return i18n("Dismissed");
+    }
+    if (token == QLatin1String("discovered")) {
+        return i18n("Discovered");
+    }
+    if (token == QLatin1String("subagent")) {
+        return i18n("Subagents");
+    }
+    return {};
+}
+
+int SessionManagerPanel::sessionCountByState(const QString &token) const
+{
+    int n = 0;
+    for (auto it = m_metadata.constBegin(); it != m_metadata.constEnd(); ++it) {
+        const auto &meta = it.value();
+        const bool isLive = m_activeSessions.contains(meta.sessionId) || m_cachedLiveNames.contains(meta.sessionName)
+            || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+        if (stateTokenFor(meta, isLive) == token) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+QString SessionManagerPanel::projectGroupKey(const QString &workingDirectory) const
+{
+    return workingDirectory.isEmpty() ? QStringLiteral("<no-project>") : workingDirectory;
+}
+
+// Static. Tokenize a workdir basename for category prefix matching.
+// Lowercased; underscores are normalized to hyphens before splitting on '-'.
+QStringList SessionManagerPanel::projectTokens(const QString &workingDirectory)
+{
+    QString base = QDir(workingDirectory).dirName().toLower();
+    base.replace(QLatin1Char('_'), QLatin1Char('-'));
+    return base.split(QLatin1Char('-'), Qt::SkipEmptyParts);
+}
+
+// Static. For each workdir, find its category key = longest token prefix it
+// shares with at least one OTHER workdir in the input set. If no other workdir
+// shares any prefix tokens, the workdir's own full basename is its key (it
+// becomes a standalone top-level entry rather than getting wrapped).
+// O(N^2) on project count; fine for hundreds of projects.
+//
+// Note: this is a per-pair best-LCP. With workdirs `penta-dragon-dx-claude`,
+// `penta-dragon-dx-remote`, `penta-dragon-remake`, the first two share lcp=3,
+// the third only shares lcp=2 with each. So the first two get category
+// "penta-dragon-dx" and the third gets "penta-dragon" — different keys, so
+// they end up in DIFFERENT top-level categories. Acceptable: the per-pair
+// greedy gives the tightest grouping per project, at the cost of occasional
+// asymmetric placement.
+QHash<QString, QString> SessionManagerPanel::buildCategoryMap(const QList<QString> &workingDirectories)
+{
+    QHash<QString, QStringList> tokens;
+    tokens.reserve(workingDirectories.size());
+    for (const QString &wd : workingDirectories) {
+        if (wd.isEmpty()) {
+            continue;
+        }
+        tokens.insert(wd, projectTokens(wd));
+    }
+
+    QHash<QString, QString> map;
+    map.reserve(tokens.size());
+
+    for (auto it = tokens.cbegin(); it != tokens.cend(); ++it) {
+        const QStringList &my = it.value();
+        if (my.isEmpty()) {
+            map.insert(it.key(), it.key());
+            continue;
+        }
+
+        int bestLcp = 0;
+        for (auto other = tokens.cbegin(); other != tokens.cend(); ++other) {
+            if (other.key() == it.key()) {
+                continue;
+            }
+            const QStringList &ot = other.value();
+            const int n = qMin(my.size(), ot.size());
+            int lcp = 0;
+            for (int i = 0; i < n; ++i) {
+                if (my[i] != ot[i]) {
+                    break;
+                }
+                ++lcp;
+            }
+            if (lcp > bestLcp) {
+                bestLcp = lcp;
+            }
+        }
+
+        if (bestLcp >= 1) {
+            map.insert(it.key(), my.mid(0, bestLcp).join(QLatin1Char('-')));
+        } else {
+            // Standalone: use full basename (joined) as its own key.
+            map.insert(it.key(), my.join(QLatin1Char('-')));
+        }
+    }
+    return map;
+}
+
+int SessionManagerPanel::categoryProjectCount(const QString &categoryKey) const
+{
+    int n = 0;
+    for (auto it = m_categoryMap.cbegin(); it != m_categoryMap.cend(); ++it) {
+        if (it.value() == categoryKey) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+QTreeWidgetItem *SessionManagerPanel::ensureProjectGroup(const QString &workingDirectory)
+{
+    const QString key = projectGroupKey(workingDirectory);
+    auto it = m_projectGroups.find(key);
+    if (it != m_projectGroups.end()) {
+        return it.value();
+    }
+
+    // Determine whether this workdir belongs in a multi-project category bucket.
+    // m_categoryMap is rebuilt at the start of updateTreeWidgetWithLiveSessions
+    // from the full set of m_metadata workdirs (skipping empty ones).
+    // A user-created empty category also counts as a valid bucket target even
+    // if only one project routes here — the LCP >=2 rule would otherwise
+    // standalone it, defeating the "drop into my-stuff" flow.
+    QString catKey = m_categoryMap.value(workingDirectory);
+    const bool userCreatedBucket = !catKey.isEmpty() && m_categoryGroups.contains(catKey);
+    const bool isMulti = !workingDirectory.isEmpty() && !catKey.isEmpty() && (userCreatedBucket || categoryProjectCount(catKey) >= 2);
+
+    QTreeWidgetItem *parentItem = nullptr;
+    QString label;
+
+    if (isMulti) {
+        // Ensure a top-level category bucket exists.
+        auto cit = m_categoryGroups.find(catKey);
+        if (cit == m_categoryGroups.end()) {
+            auto *cat = new QTreeWidgetItem(m_treeWidget);
+            cat->setText(0, catKey);
+            cat->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-symbolic"), QIcon::fromTheme(QStringLiteral("folder"))));
+            cat->setToolTip(0, i18n("Category: %1", catKey));
+            cat->setFlags(Qt::ItemIsEnabled);
+            cat->setExpanded(true);
+            cat->setData(0, Qt::UserRole + 6, QString(QStringLiteral("category:") + catKey));
+            cit = m_categoryGroups.insert(catKey, cat);
+        }
+        parentItem = cit.value();
+
+        // Project sub-label: basename with the category prefix stripped.
+        const QString base = QDir(workingDirectory).dirName();
+        QString lower = base.toLower();
+        lower.replace(QLatin1Char('_'), QLatin1Char('-'));
+        if (lower.startsWith(catKey + QLatin1Char('-'))) {
+            label = base.mid(catKey.size() + 1);
+        } else if (lower == catKey) {
+            // Single-token project (e.g. "konsolai") sitting in a multi-project
+            // category alongside "konsolai-handbook", "konsolai-keybind", etc.
+            // Show its full basename so the user can spot it.
+            label = base;
+        } else {
+            label = base;
+        }
+        if (label.isEmpty()) {
+            label = base;
+        }
+    } else {
+        // Standalone project: rendered at top level (no category wrapper).
+        parentItem = nullptr;
+        label = workingDirectory.isEmpty() ? i18n("(no project)") : QDir(workingDirectory).dirName();
+        if (label.isEmpty()) {
+            label = workingDirectory;
+        }
+    }
+
+    auto *group = parentItem ? new QTreeWidgetItem(parentItem) : new QTreeWidgetItem(m_treeWidget);
+    group->setText(0, label);
+    group->setIcon(0, QIcon::fromTheme(QStringLiteral("folder")));
+    group->setToolTip(0, workingDirectory);
+    group->setFlags(Qt::ItemIsEnabled);
+    group->setExpanded(true);
+    // Mark this as a project-group so context menu + tests can detect it.
+    group->setData(0, Qt::UserRole + 6, QString(QStringLiteral("group:") + key));
+    m_projectGroups.insert(key, group);
+    return group;
 }
 
 void SessionManagerPanel::showLoadingState()
@@ -1285,6 +1720,230 @@ void SessionManagerPanel::purgeDismissed()
     }
 }
 
+bool SessionManagerPanel::mergeSessions(const QStringList &sessionIds, const QString &primarySessionId, const MergeFieldChoices &choices)
+{
+    // Validation: at least two distinct, known sessions; primary must be present.
+    if (sessionIds.size() < 2) {
+        qWarning() << "SessionManagerPanel::mergeSessions: refusing — fewer than 2 sessions in selection";
+        return false;
+    }
+    if (!sessionIds.contains(primarySessionId)) {
+        qWarning() << "SessionManagerPanel::mergeSessions: refusing — primary not in selection:" << primarySessionId;
+        return false;
+    }
+    for (const QString &sid : sessionIds) {
+        if (!m_metadata.contains(sid)) {
+            qWarning() << "SessionManagerPanel::mergeSessions: refusing — unknown session id:" << sid;
+            return false;
+        }
+    }
+
+    const SessionMetadata &primaryMeta = m_metadata[primarySessionId];
+    const QString workdir = primaryMeta.workingDirectory;
+
+    QList<SessionMetadata> others;
+    QStringList otherIds;
+    for (const QString &sid : sessionIds) {
+        if (sid == primarySessionId) {
+            continue;
+        }
+        const SessionMetadata &m = m_metadata[sid];
+        if (m.workingDirectory != workdir) {
+            qWarning() << "SessionManagerPanel::mergeSessions: refusing — cross-project merge (" << workdir << "vs" << m.workingDirectory << ")";
+            return false;
+        }
+        others.append(m);
+        otherIds.append(sid);
+    }
+
+    // Build the jsonl size map for resume-id selection.
+    QStringList resumeCandidates;
+    resumeCandidates.append(primaryMeta.lastResumeSessionId);
+    for (const auto &o : others) {
+        resumeCandidates.append(o.lastResumeSessionId);
+    }
+    const QHash<QString, qint64> jsonlSizes = jsonlSizesForResumeIds(workdir, resumeCandidates);
+
+    // Compute and apply.
+    const SessionMetadata merged = applyMerge(primaryMeta, others, choices, jsonlSizes);
+    m_metadata[primarySessionId] = merged;
+
+    // Dismiss the others, stamping mergedInto.
+    for (const QString &sid : otherIds) {
+        m_metadata[sid].isDismissed = true;
+        m_metadata[sid].mergedInto = primarySessionId;
+        m_metadata[sid].lastAccessed = QDateTime::currentDateTime();
+    }
+
+    scheduleMetadataSave();
+    updateTreeWidget();
+    qDebug() << "SessionManagerPanel: Merged" << otherIds.size() << "sessions into" << primarySessionId;
+    return true;
+}
+
+bool SessionManagerPanel::canOfferMergeForSelection(const QStringList &sessionIds) const
+{
+    if (sessionIds.size() < 2) {
+        return false;
+    }
+    QString sharedWorkdir;
+    int countEligible = 0;
+    for (const QString &sid : sessionIds) {
+        auto it = m_metadata.constFind(sid);
+        if (it == m_metadata.constEnd()) {
+            return false;
+        }
+        if (it->isDismissed) {
+            // Dismissed sessions are not eligible to be merged into a primary.
+            return false;
+        }
+        if (sharedWorkdir.isEmpty()) {
+            sharedWorkdir = it->workingDirectory;
+        } else if (it->workingDirectory != sharedWorkdir) {
+            return false;
+        }
+        ++countEligible;
+    }
+    return countEligible >= 2;
+}
+
+bool SessionManagerPanel::canOfferUnmergeForSession(const QString &sessionId) const
+{
+    auto it = m_metadata.constFind(sessionId);
+    if (it == m_metadata.constEnd()) {
+        return false;
+    }
+    return !it->mergedInto.isEmpty();
+}
+
+bool SessionManagerPanel::canOfferBroadcastForSelection(const QStringList &sessionIds) const
+{
+    for (const QString &id : sessionIds) {
+        auto it = m_activeSessions.constFind(id);
+        if (it == m_activeSessions.constEnd()) {
+            continue;
+        }
+        if (it.value().isNull()) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+int SessionManagerPanel::broadcastMessage(const QStringList &sessionIds, const QString &templateText, bool pressEnterAfterEach)
+{
+    // Build the list of valid active recipients first so the per-recipient
+    // index/count vars reflect what actually goes out, not what was requested.
+    QList<QString> validIds;
+    validIds.reserve(sessionIds.size());
+    for (const QString &id : sessionIds) {
+        if (!m_activeSessions.contains(id)) {
+            qWarning() << "SessionManagerPanel::broadcastMessage: skipping unknown/inactive session" << id;
+            continue;
+        }
+        QPointer<ClaudeSession> session = m_activeSessions.value(id);
+        if (session.isNull()) {
+            qWarning() << "SessionManagerPanel::broadcastMessage: skipping null session pointer for" << id;
+            continue;
+        }
+        validIds.append(id);
+    }
+
+    const int total = validIds.size();
+    int sent = 0;
+    for (int i = 0; i < total; ++i) {
+        const QString &id = validIds[i];
+        QPointer<ClaudeSession> session = m_activeSessions.value(id);
+        if (session.isNull()) {
+            qWarning() << "SessionManagerPanel::broadcastMessage: session went away mid-send for" << id;
+            continue;
+        }
+        const SessionMetadata *meta = sessionMetadata(id);
+        if (!meta) {
+            qWarning() << "SessionManagerPanel::broadcastMessage: no metadata for active session" << id;
+            continue;
+        }
+
+        QString displayName = meta->description.trimmed();
+        if (displayName.isEmpty()) {
+            displayName = QDir(meta->workingDirectory).dirName();
+        }
+        if (displayName.isEmpty()) {
+            displayName = meta->sessionName;
+        }
+        const QString category = m_categoryMap.value(meta->workingDirectory, QDir(meta->workingDirectory).dirName());
+        const BroadcastVars vars = buildVars(*meta, displayName, category, /*index=*/i + 1, /*count=*/total);
+        const QString substituted = substituteTemplate(templateText, vars);
+
+        session->sendText(substituted);
+        if (pressEnterAfterEach) {
+            // Mirror sendPrompt's behaviour: Enter via the typed newline so tmux
+            // submits the input. sendText uses send-keys -l which means literal
+            // input — \n is interpreted as Enter by Claude Code's Ink UI.
+            session->sendText(QStringLiteral("\n"));
+        }
+        ++sent;
+    }
+
+    qInfo() << "SessionManagerPanel::broadcastMessage: sent to" << sent << "of" << sessionIds.size() << "requested";
+    return sent;
+}
+
+void SessionManagerPanel::openBroadcastDialog(const QStringList &activeIds)
+{
+    QList<BroadcastRecipient> recipients;
+    for (const QString &id : activeIds) {
+        const SessionMetadata *m = sessionMetadata(id);
+        if (!m) {
+            continue;
+        }
+        BroadcastRecipient r;
+        r.sessionId = id;
+        r.workingDirectory = m->workingDirectory;
+        r.tmuxSession = m->sessionName;
+        r.displayName = !m->description.trimmed().isEmpty() ? m->description.trimmed() : QDir(m->workingDirectory).dirName();
+        if (r.displayName.isEmpty()) {
+            r.displayName = m->sessionName;
+        }
+        r.category = m_categoryMap.value(m->workingDirectory, QDir(m->workingDirectory).dirName());
+        recipients.append(r);
+    }
+    if (recipients.isEmpty()) {
+        return;
+    }
+
+    BroadcastDialog dlg(recipients, this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QStringList chosen = dlg.selectedSessionIds();
+    const QString tmpl = dlg.messageTemplate();
+    const bool pressEnter = dlg.pressEnterAfterEach();
+    broadcastMessage(chosen, tmpl, pressEnter);
+}
+
+bool SessionManagerPanel::unmergeSession(const QString &dismissedSessionId)
+{
+    if (!m_metadata.contains(dismissedSessionId)) {
+        qWarning() << "SessionManagerPanel::unmergeSession: unknown session id:" << dismissedSessionId;
+        return false;
+    }
+    SessionMetadata &meta = m_metadata[dismissedSessionId];
+    if (meta.mergedInto.isEmpty()) {
+        qWarning() << "SessionManagerPanel::unmergeSession: session was not merged:" << dismissedSessionId;
+        return false;
+    }
+    meta.isDismissed = false;
+    meta.mergedInto.clear();
+    meta.lastAccessed = QDateTime::currentDateTime();
+    scheduleMetadataSave();
+    updateTreeWidget();
+    qDebug() << "SessionManagerPanel: Unmerged session:" << dismissedSessionId;
+    return true;
+}
+
 void SessionManagerPanel::pauseBackgroundTimers()
 {
     if (m_timersPaused) {
@@ -1372,44 +2031,27 @@ void SessionManagerPanel::resumeBackgroundTimers()
     qDebug() << "SessionManagerPanel: Resumed background timers (window active)";
 }
 
-// Check if an item is under a given category, accounting for group items in between
-static bool isUnderCategory(QTreeWidgetItem *item, QTreeWidgetItem *category)
-{
-    if (!item) {
-        return false;
-    }
-    QTreeWidgetItem *p = item->parent();
-    while (p) {
-        if (p == category) {
-            return true;
-        }
-        p = p->parent();
-    }
-    return false;
-}
-
 void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column)
 
-    if (!item || item == m_pinnedCategory || item == m_activeCategory || item == m_archivedCategory || item == m_closedCategory || item == m_dismissedCategory
-        || item == m_discoveredCategory) {
+    if (!item) {
         return;
     }
 
-    // Group items (auto-grouping headers) — toggle expand, not clickable as sessions
+    // Project-group items — toggle expand, not clickable as sessions.
     QString compositeKey = item->data(0, Qt::UserRole + 6).toString();
-    if (compositeKey.startsWith(QStringLiteral("group:"))) {
+    if (compositeKey.startsWith(QStringLiteral("group:")) || compositeKey.startsWith(QStringLiteral("category:"))) {
         item->setExpanded(!item->isExpanded());
         return;
     }
 
-    // Check if this is a subagent/subprocess child item (parent is a session item, not a category).
-    // Group items sit between category and session — skip them when checking depth.
+    // Subagent/subprocess child items live under session items (parent is a session item).
+    // Sessions live directly under project groups, so the parent of a "deep" item
+    // is a session item — its parent in turn is the project group.
     QTreeWidgetItem *parentItem = item->parent();
-    bool parentIsGroupOrCategory =
-        !parentItem || parentItem->parent() == nullptr || parentItem->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"));
-    if (parentItem && !parentIsGroupOrCategory) {
+    bool parentIsGroup = !parentItem || parentItem->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"));
+    if (parentItem && !parentIsGroup) {
         // Check if this is a prompt group item (toggle expand/collapse)
         QVariant promptGroupVar = item->data(0, Qt::UserRole + 3);
         if (promptGroupVar.isValid() && !promptGroupVar.isNull()) {
@@ -1464,8 +2106,8 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         return;
     }
 
-    // Check if this is a discovered session (parent is m_discoveredCategory)
-    if (item->parent() == m_discoveredCategory) {
+    // Discovered sessions are tagged with state token "discovered" at UserRole+5.
+    if (item->data(0, Qt::UserRole + 5).toString() == QLatin1String("discovered")) {
         QString workDir = item->data(0, Qt::UserRole + 1).toString();
         if (workDir.isEmpty()) {
             return;
@@ -1509,6 +2151,11 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
 
     const auto &meta = m_metadata[sessionId];
 
+    // "Closed" state: dead tmux, recreate like unarchive
+    const bool isLive = m_activeSessions.contains(meta.sessionId) || m_cachedLiveNames.contains(meta.sessionName)
+        || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+    const QString stateToken = stateTokenFor(meta, isLive);
+
     if (meta.isArchived) {
         // Unarchive and attach
         unarchiveSession(sessionId);
@@ -1518,7 +2165,7 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         if (session) {
             Q_EMIT focusSessionRequested(session);
         }
-    } else if (isUnderCategory(item, m_closedCategory)) {
+    } else if (stateToken == QLatin1String("closed")) {
         // Closed session — tmux is dead, recreate like unarchive
         unarchiveSession(sessionId);
     } else {
@@ -1537,11 +2184,115 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     qWarning() << "RIGHT-CLICK:" << pos << "item:" << (item ? item->text(0) : QStringLiteral("NULL"))
                << "parent:" << (item && item->parent() ? item->parent()->text(0) : QStringLiteral("none"));
     if (!item) {
+        // Empty-space menu — offer "New Category…" so the user can create an
+        // empty bucket without having to hunt for the toolbar button.
+        QMenu menu(this);
+        QAction *newCatAction = menu.addAction(QIcon::fromTheme(QStringLiteral("folder-new")), i18n("New Category…"));
+        newCatAction->setObjectName(QStringLiteral("newCategoryAction"));
+        connect(newCatAction, &QAction::triggered, this, &SessionManagerPanel::createUserCategory);
+        menu.addSeparator();
+        QAction *reorgAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-tree")), i18n("Reorganize Tree with AI…"));
+        reorgAction->setObjectName(QStringLiteral("reorganizeTreeAction"));
+        connect(reorgAction, &QAction::triggered, this, &SessionManagerPanel::openReorganizeTreeDialog);
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
     }
 
-    // Group items — provide expand/collapse + restart-all context menu
+    // Category items — wrap multiple projects sharing a token prefix.
+    // Recursively expand/collapse all nested project groups + their sessions.
     QString compositeKey = item->data(0, Qt::UserRole + 6).toString();
+    if (compositeKey.startsWith(QStringLiteral("category:"))) {
+        QMenu menu(this);
+        QAction *expandAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-tree")), i18n("Expand All"));
+        connect(expandAll, &QAction::triggered, this, [item]() {
+            std::function<void(QTreeWidgetItem *)> expandRec = [&](QTreeWidgetItem *node) {
+                node->setExpanded(true);
+                for (int i = 0; i < node->childCount(); ++i) {
+                    expandRec(node->child(i));
+                }
+            };
+            expandRec(item);
+        });
+        QAction *collapseAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-text")), i18n("Collapse All"));
+        connect(collapseAll, &QAction::triggered, this, [item]() {
+            std::function<void(QTreeWidgetItem *)> collapseRec = [&](QTreeWidgetItem *node) {
+                for (int i = 0; i < node->childCount(); ++i) {
+                    collapseRec(node->child(i));
+                }
+                node->setExpanded(false);
+            };
+            collapseRec(item);
+        });
+
+        // Broadcast Message — walks all nested project groups, collects active
+        // session IDs, and offers the broadcast dialog when at least one exists.
+        {
+            QStringList activeIds;
+            std::function<void(QTreeWidgetItem *)> walk = [&](QTreeWidgetItem *node) {
+                for (int i = 0; i < node->childCount(); ++i) {
+                    auto *child = node->child(i);
+                    const QString id = child->data(0, Qt::UserRole).toString();
+                    if (!id.isEmpty() && m_activeSessions.contains(id) && !m_activeSessions.value(id).isNull()) {
+                        activeIds.append(id);
+                    }
+                    walk(child);
+                }
+            };
+            walk(item);
+            if (!activeIds.isEmpty()) {
+                menu.addSeparator();
+                QAction *broadcastAction = menu.addAction(QIcon::fromTheme(QStringLiteral("mail-send-symbolic"), QIcon::fromTheme(QStringLiteral("mail-send"))),
+                                                          i18n("Broadcast Message... (%1)", activeIds.size()));
+                broadcastAction->setObjectName(QStringLiteral("broadcastAction"));
+                connect(broadcastAction, &QAction::triggered, this, [this, activeIds]() {
+                    openBroadcastDialog(activeIds);
+                });
+            }
+        }
+
+        // Ungroup category — dissolve alias/override or add to suppress list.
+        {
+            const QString catKey = compositeKey.mid(QStringLiteral("category:").size());
+            menu.addSeparator();
+            QAction *ungroupAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-cut")), i18n("Ungroup (Promote to Top Level)"));
+            ungroupAction->setObjectName(QStringLiteral("ungroupCategoryAction"));
+            connect(ungroupAction, &QAction::triggered, this, [this, catKey]() {
+                ungroupCategory(catKey);
+            });
+
+            // Rename category — persists a CategoryAliases entry so any
+            // reference to catKey (LCP-derived, user-created, or dropped)
+            // reroutes into the new bucket everywhere.
+            QAction *renameAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-rename")), i18n("Rename Category…"));
+            renameAction->setObjectName(QStringLiteral("renameCategoryAction"));
+            connect(renameAction, &QAction::triggered, this, [this, catKey]() {
+                renameCategory(catKey);
+            });
+
+            // Suggest Name — ask Claude for a short name based on this category's projects.
+            QAction *suggestAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-find")), i18n("Suggest Name for This Category…"));
+            suggestAction->setObjectName(QStringLiteral("suggestCategoryNameAction"));
+            connect(suggestAction, &QAction::triggered, this, [this, catKey]() {
+                QStringList workdirs;
+                for (auto it = m_categoryMap.cbegin(); it != m_categoryMap.cend(); ++it) {
+                    if (it.value() == catKey) {
+                        workdirs.append(it.key());
+                    }
+                }
+                suggestCategoryName(workdirs);
+            });
+
+            menu.addSeparator();
+            QAction *reorgAction = menu.addAction(QIcon::fromTheme(QStringLiteral("view-list-tree")), i18n("Reorganize Tree with AI…"));
+            reorgAction->setObjectName(QStringLiteral("reorganizeTreeAction"));
+            connect(reorgAction, &QAction::triggered, this, &SessionManagerPanel::openReorganizeTreeDialog);
+        }
+
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        return;
+    }
+
+    // Project-group items — expand/collapse plus bulk actions filtered by child state.
     if (compositeKey.startsWith(QStringLiteral("group:"))) {
         QMenu menu(this);
         QAction *expandAction = menu.addAction(i18n("Expand All"));
@@ -1556,18 +2307,45 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             item->setExpanded(false);
         });
 
-        // Collect active session IDs in this group for restart action
-        QStringList activeIds;
-        for (int i = 0; i < item->childCount(); ++i) {
-            QString childId = item->child(i)->data(0, Qt::UserRole).toString();
-            if (!childId.isEmpty() && m_activeSessions.contains(childId)) {
-                activeIds << childId;
+        // Collect child session IDs bucketed by state token.
+        // Group children are direct sessions in the new architecture.
+        auto childIdsByState = [this](QTreeWidgetItem *group) -> QHash<QString, QStringList> {
+            QHash<QString, QStringList> bucket;
+            for (int i = 0; i < group->childCount(); ++i) {
+                auto *child = group->child(i);
+                const QString id = child->data(0, Qt::UserRole).toString();
+                if (id.isEmpty()) {
+                    continue;
+                }
+                const SessionMetadata *meta = sessionMetadata(id);
+                if (!meta) {
+                    // Discovered session item (no SessionMetadata) — tag from UserRole+5.
+                    const QString tag = child->data(0, Qt::UserRole + 5).toString();
+                    if (!tag.isEmpty()) {
+                        bucket[tag].append(id);
+                    }
+                    continue;
+                }
+                const bool isLive = m_activeSessions.contains(meta->sessionId) || m_cachedLiveNames.contains(meta->sessionName)
+                    || (meta->isRemote && m_cachedRemoteLiveNames.contains(meta->sessionName));
+                bucket[stateTokenFor(*meta, isLive)].append(id);
             }
-        }
+            return bucket;
+        };
+
+        const QHash<QString, QStringList> buckets = childIdsByState(item);
+        const QStringList activeIds = buckets.value(QStringLiteral("active"));
+        const QStringList detachedIds = buckets.value(QStringLiteral("detached"));
+        const QStringList closedIds = buckets.value(QStringLiteral("closed"));
+        const QStringList pinnedIds = buckets.value(QStringLiteral("pinned"));
+        const QStringList archivedIds = buckets.value(QStringLiteral("archived"));
+        const QStringList dismissedIds = buckets.value(QStringLiteral("dismissed"));
+
+        // Restart all active sessions in this group
         if (!activeIds.isEmpty()) {
             menu.addSeparator();
             QAction *restartAllAction =
-                menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart All Sessions in Group (%1)", activeIds.size()));
+                menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart All Active in Group (%1)", activeIds.size()));
             restartAllAction->setToolTip(i18n("Restart all active Claude sessions in this group to pick up CLI/MCP/plugin updates"));
             QString groupLabel = item->text(0);
             connect(restartAllAction, &QAction::triggered, this, [this, activeIds, groupLabel]() {
@@ -1590,56 +2368,35 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                     }
                 }
             });
+
+            // Broadcast Message — open the broadcast dialog pre-populated with
+            // this group's active sessions.
+            QAction *broadcastAction = menu.addAction(QIcon::fromTheme(QStringLiteral("mail-send-symbolic"), QIcon::fromTheme(QStringLiteral("mail-send"))),
+                                                      i18n("Broadcast Message... (%1)", activeIds.size()));
+            broadcastAction->setObjectName(QStringLiteral("broadcastAction"));
+            connect(broadcastAction, &QAction::triggered, this, [this, activeIds]() {
+                openBroadcastDialog(activeIds);
+            });
         }
 
-        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
-        return;
-    }
-
-    // Category header context menus — bulk actions
-    if (item == m_pinnedCategory || item == m_activeCategory || item == m_detachedCategory
-        || item == m_closedCategory || item == m_archivedCategory || item == m_dismissedCategory
-        || item == m_discoveredCategory) {
-        if (item->childCount() == 0) {
-            return; // No children, no actions
-        }
-        QMenu menu(this);
-
-        // Collect child session IDs for this category (walks into group items)
-        auto collectChildIds = [](QTreeWidgetItem *category) {
-            QStringList ids;
-            std::function<void(QTreeWidgetItem *)> walk = [&](QTreeWidgetItem *parent) {
-                for (int i = 0; i < parent->childCount(); ++i) {
-                    auto *child = parent->child(i);
-                    QString id = child->data(0, Qt::UserRole).toString();
-                    if (!id.isEmpty()) {
-                        ids << id;
-                    }
-                    // Recurse into group items
-                    if (child->childCount() > 0 && child->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"))) {
-                        walk(child);
-                    }
+        // Attach All Detached
+        if (!detachedIds.isEmpty()) {
+            menu.addSeparator();
+            QAction *attachAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach All Detached (%1)", detachedIds.size()));
+            connect(attachAll, &QAction::triggered, this, [this, detachedIds]() {
+                int ret = QMessageBox::question(this,
+                                                i18n("Attach All Detached"),
+                                                i18n("Attach all %1 detached sessions in this group?", detachedIds.size()),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+                if (ret != QMessageBox::Yes) {
+                    return;
                 }
-            };
-            walk(category);
-            return ids;
-        };
-
-        // Identify which category this is, so lambdas use stable member pointers
-        QTreeWidgetItem *categoryPtr = item; // item == one of our m_*Category members (never deleted)
-
-        if (categoryPtr == m_detachedCategory) {
-            QAction *attachAll = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Attach All (%1)", categoryPtr->childCount()));
-            connect(attachAll, &QAction::triggered, this, [this, collectChildIds]() {
-                QStringList ids = collectChildIds(m_detachedCategory);
-                if (ids.isEmpty()) return;
-                int ret = QMessageBox::question(this, i18n("Attach All"),
-                    i18n("Attach all %1 detached sessions?", ids.size()),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                for (const auto &id : std::as_const(ids)) {
+                for (const QString &id : detachedIds) {
                     auto *meta = findMetadata(id);
-                    if (!meta) continue;
+                    if (!meta) {
+                        continue;
+                    }
                     if (meta->isRemote) {
                         Q_EMIT remoteAttachRequested(meta->sshHost, meta->sshUsername, meta->sshPort, meta->workingDirectory, meta->sessionName);
                     } else {
@@ -1647,124 +2404,187 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                     }
                 }
             });
-            menu.addSeparator();
         }
 
-        if (categoryPtr == m_detachedCategory || categoryPtr == m_closedCategory || categoryPtr == m_pinnedCategory) {
-            QAction *archiveAll = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-insert")), i18n("Archive All (%1)", categoryPtr->childCount()));
-            // Capture the member pointer directly — category headers are never deleted during tree rebuilds
-            QTreeWidgetItem **categoryMember = (categoryPtr == m_detachedCategory) ? &m_detachedCategory
-                                             : (categoryPtr == m_closedCategory)   ? &m_closedCategory
-                                                                                   : &m_pinnedCategory;
-            connect(archiveAll, &QAction::triggered, this, [this, categoryMember, collectChildIds]() {
-                QStringList ids = collectChildIds(*categoryMember);
-                if (ids.isEmpty()) return;
-                int ret = QMessageBox::question(this, i18n("Archive All"),
-                    i18n("Archive all %1 sessions in this category?", ids.size()),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                for (const auto &id : std::as_const(ids)) {
+        // Close All Active
+        if (!activeIds.isEmpty() || !detachedIds.isEmpty()) {
+            QStringList closableIds = activeIds;
+            closableIds.append(detachedIds);
+            if (!closableIds.isEmpty()) {
+                QAction *closeAll =
+                    menu.addAction(QIcon::fromTheme(QStringLiteral("window-close")), i18n("Close All Active/Detached (%1)", closableIds.size()));
+                connect(closeAll, &QAction::triggered, this, [this, closableIds]() {
+                    int ret = QMessageBox::question(this,
+                                                    i18n("Close All"),
+                                                    i18n("Close all %1 sessions in this group? This kills their tmux backends.", closableIds.size()),
+                                                    QMessageBox::Yes | QMessageBox::No,
+                                                    QMessageBox::No);
+                    if (ret != QMessageBox::Yes) {
+                        return;
+                    }
+                    for (const QString &id : closableIds) {
+                        closeSession(id);
+                    }
+                });
+            }
+        }
+
+        // Archive everything that can be archived (active/detached/closed/pinned)
+        QStringList archivableIds = activeIds;
+        archivableIds.append(detachedIds);
+        archivableIds.append(closedIds);
+        archivableIds.append(pinnedIds);
+        if (!archivableIds.isEmpty()) {
+            menu.addSeparator();
+            QAction *archiveAll = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-insert")), i18n("Archive All in Group (%1)", archivableIds.size()));
+            connect(archiveAll, &QAction::triggered, this, [this, archivableIds]() {
+                int ret = QMessageBox::question(this,
+                                                i18n("Archive All"),
+                                                i18n("Archive all %1 sessions in this group?", archivableIds.size()),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+                if (ret != QMessageBox::Yes) {
+                    return;
+                }
+                for (const QString &id : archivableIds) {
                     archiveSession(id);
                 }
             });
         }
 
-        if (categoryPtr == m_detachedCategory) {
-            menu.addSeparator();
-            QAction *closeAll = menu.addAction(QIcon::fromTheme(QStringLiteral("window-close")), i18n("Close All (%1)", categoryPtr->childCount()));
-            connect(closeAll, &QAction::triggered, this, [this, collectChildIds]() {
-                QStringList ids = collectChildIds(m_detachedCategory);
-                if (ids.isEmpty()) return;
-                int ret = QMessageBox::question(this, i18n("Close All"),
-                    i18n("Close all %1 detached sessions? This kills their tmux backends.", ids.size()),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                for (const auto &id : std::as_const(ids)) {
-                    closeSession(id);
-                }
-            });
-        }
-
-        if (categoryPtr == m_archivedCategory) {
-            QAction *dismissAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Dismiss All (%1)", categoryPtr->childCount()));
-            connect(dismissAll, &QAction::triggered, this, [this, collectChildIds]() {
-                QStringList ids = collectChildIds(m_archivedCategory);
-                if (ids.isEmpty()) return;
-                int ret = QMessageBox::question(this, i18n("Dismiss All"),
-                    i18n("Dismiss all %1 archived sessions? They can be restored later.", ids.size()),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                for (const auto &id : std::as_const(ids)) {
-                    dismissSession(id);
-                }
-            });
-
-            menu.addSeparator();
-
-            // Age-based dismiss options
-            auto dismissOlderThan = [this, collectChildIds](int days, const QString &label) {
-                QStringList ids = collectChildIds(m_archivedCategory);
-                QDateTime cutoff = QDateTime::currentDateTime().addDays(-days);
-                QStringList old;
-                for (const auto &id : std::as_const(ids)) {
-                    auto *meta = findMetadata(id);
-                    if (meta && meta->lastAccessed.isValid() && meta->lastAccessed < cutoff) {
-                        old << id;
-                    }
-                }
-                if (old.isEmpty()) {
-                    QMessageBox::information(this, i18n("Nothing to Dismiss"),
-                        i18n("No archived sessions older than %1.", label));
+        // Dismiss All Archived
+        if (!archivedIds.isEmpty()) {
+            QAction *dismissAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), i18n("Dismiss All Archived (%1)", archivedIds.size()));
+            connect(dismissAll, &QAction::triggered, this, [this, archivedIds]() {
+                int ret = QMessageBox::question(this,
+                                                i18n("Dismiss All Archived"),
+                                                i18n("Dismiss all %1 archived sessions in this group? They can be restored later.", archivedIds.size()),
+                                                QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::No);
+                if (ret != QMessageBox::Yes) {
                     return;
                 }
-                int ret = QMessageBox::question(this, i18n("Dismiss Old Sessions"),
-                    i18n("Dismiss %1 archived sessions older than %2?", old.size(), label),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                for (const auto &id : std::as_const(old)) {
+                for (const QString &id : archivedIds) {
                     dismissSession(id);
                 }
-            };
-
-            QAction *dismiss1w = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Dismiss > 1 Week Old"));
-            connect(dismiss1w, &QAction::triggered, this, [dismissOlderThan]() {
-                dismissOlderThan(7, i18n("1 week"));
-            });
-
-            QAction *dismiss1m = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Dismiss > 1 Month Old"));
-            connect(dismiss1m, &QAction::triggered, this, [dismissOlderThan]() {
-                dismissOlderThan(30, i18n("1 month"));
             });
         }
 
-        if (categoryPtr == m_dismissedCategory) {
-            QAction *purgeAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete-remove")), i18n("Purge All (%1)", categoryPtr->childCount()));
-            connect(purgeAll, &QAction::triggered, this, [this]() {
-                int count = m_dismissedCategory->childCount();
-                int ret = QMessageBox::question(this, i18n("Purge All Dismissed"),
-                    i18n("Permanently delete metadata for all %1 dismissed sessions? This cannot be undone.", count),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                purgeDismissed();
-            });
-
-            QAction *restoreAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore All (%1)", categoryPtr->childCount()));
-            connect(restoreAll, &QAction::triggered, this, [this, collectChildIds]() {
-                QStringList ids = collectChildIds(m_dismissedCategory);
-                if (ids.isEmpty()) return;
-                int ret = QMessageBox::question(this, i18n("Restore All"),
-                    i18n("Restore all %1 dismissed sessions back to Archived?", ids.size()),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (ret != QMessageBox::Yes) return;
-                for (const auto &id : std::as_const(ids)) {
-                    restoreSession(id);
+        // Purge All Dismissed (in this group)
+        if (!dismissedIds.isEmpty()) {
+            QAction *purgeAll = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete-remove")), i18n("Purge All Dismissed (%1)", dismissedIds.size()));
+            connect(purgeAll, &QAction::triggered, this, [this, dismissedIds]() {
+                int ret = QMessageBox::question(
+                    this,
+                    i18n("Purge All Dismissed"),
+                    i18n("Permanently delete metadata for %1 dismissed sessions in this group? This cannot be undone.", dismissedIds.size()),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No);
+                if (ret != QMessageBox::Yes) {
+                    return;
+                }
+                for (const QString &id : dismissedIds) {
+                    purgeSession(id);
                 }
             });
         }
 
-        if (!menu.isEmpty()) {
-            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+        // Consolidate Duplicates — surface when the underlying project has
+        // ≥2 known sessions (any state). Reuses MergeSessionsDialog machinery.
+        const QString projectKey = compositeKey.mid(QStringLiteral("group:").size());
+        if (canOfferConsolidateForProject(projectKey)) {
+            int projSessionCount = 0;
+            for (auto it = m_metadata.cbegin(); it != m_metadata.cend(); ++it) {
+                if (it.value().workingDirectory == projectKey) {
+                    ++projSessionCount;
+                }
+            }
+            menu.addSeparator();
+            QAction *consolidateAction =
+                menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Consolidate Duplicates... (%1 sessions)", projSessionCount));
+            consolidateAction->setObjectName(QStringLiteral("consolidateDuplicatesAction"));
+            connect(consolidateAction, &QAction::triggered, this, [this, projectKey]() {
+                openConsolidateDialog(projectKey);
+            });
         }
+
+        // Reset auto-grouping — if this workdir's LCP category is suppressed,
+        // offer to un-suppress. Only visible when the suppression actually
+        // applies to this workdir (the workdir has an LCP-derived category
+        // in the SuppressCategories list). This is the reverse of the
+        // "Ungroup" action on a category node.
+        {
+            auto *settings = KonsolaiSettings::instance();
+            if (settings) {
+                const QStringList suppressList = settings->suppressedCategories();
+                if (!suppressList.isEmpty()) {
+                    // Rebuild the raw LCP map (ignoring user rules) to discover
+                    // this workdir's native category. If it's currently in the
+                    // suppress list, offer the reset action.
+                    QSet<QString> allWorkdirs;
+                    for (auto it = m_metadata.cbegin(); it != m_metadata.cend(); ++it) {
+                        const QString &wd = it.value().workingDirectory;
+                        if (!wd.isEmpty()) {
+                            allWorkdirs.insert(wd);
+                        }
+                    }
+                    const QHash<QString, QString> rawMap = buildCategoryMap(QList<QString>(allWorkdirs.cbegin(), allWorkdirs.cend()));
+                    const QString nativeCat = rawMap.value(projectKey);
+                    if (!nativeCat.isEmpty() && suppressList.contains(nativeCat)) {
+                        menu.addSeparator();
+                        QAction *resetAction =
+                            menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Reset auto-grouping (regroup under \"%1\")", nativeCat));
+                        resetAction->setObjectName(QStringLiteral("resetAutoGroupingAction"));
+                        connect(resetAction, &QAction::triggered, this, [this, nativeCat]() {
+                            auto *s = KonsolaiSettings::instance();
+                            if (s) {
+                                s->removeSuppressedCategory(nativeCat);
+                                scheduleTreeUpdate();
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Suggest Name — walk selected group items (or fall back to just this one)
+        // and ask Claude for a short category name. Also renders as "Selected"
+        // when the user has multi-selected groups.
+        {
+            const QList<QTreeWidgetItem *> selectedGroupItems = [this, item]() {
+                QList<QTreeWidgetItem *> out;
+                const auto sel = m_treeWidget->selectedItems();
+                for (auto *s : sel) {
+                    if (s->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"))) {
+                        out.append(s);
+                    }
+                }
+                if (out.isEmpty()) {
+                    out.append(item);
+                }
+                return out;
+            }();
+
+            QStringList workdirs;
+            for (auto *g : selectedGroupItems) {
+                const QString ck = g->data(0, Qt::UserRole + 6).toString();
+                if (ck.startsWith(QStringLiteral("group:"))) {
+                    workdirs.append(ck.mid(QStringLiteral("group:").size()));
+                }
+            }
+            if (!workdirs.isEmpty()) {
+                menu.addSeparator();
+                const QString label =
+                    selectedGroupItems.size() > 1 ? i18n("Suggest Name for Selected… (%1)", selectedGroupItems.size()) : i18n("Suggest Name for This Project…");
+                QAction *suggestAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-find")), label);
+                suggestAction->setObjectName(QStringLiteral("suggestCategoryNameAction"));
+                connect(suggestAction, &QAction::triggered, this, [this, workdirs]() {
+                    suggestCategoryName(workdirs);
+                });
+            }
+        }
+
+        menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
         return;
     }
 
@@ -1917,79 +2737,16 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         return;
     }
 
-    // Handle right-click on the Closed category header
-    if (item == m_closedCategory) {
-        int closedCount = m_closedCategory->childCount();
-        if (closedCount > 0) {
-            QMenu menu(this);
-            QAction *archiveAllAction = menu.addAction(QIcon::fromTheme(QStringLiteral("archive-insert")), i18n("Archive All Closed (%1)", closedCount));
-            connect(archiveAllAction, &QAction::triggered, this, [this, closedCount]() {
-                auto answer = QMessageBox::question(this,
-                                                    i18n("Archive Closed Sessions"),
-                                                    i18n("Archive %1 closed session(s)?\n\n"
-                                                         "They will be moved to the Archived category.",
-                                                         closedCount),
-                                                    QMessageBox::Yes | QMessageBox::No,
-                                                    QMessageBox::No);
-                if (answer == QMessageBox::Yes) {
-                    // Collect session IDs first (archiveSession modifies the tree)
-                    QStringList toArchive;
-                    for (int i = 0; i < m_closedCategory->childCount(); ++i) {
-                        auto *child = m_closedCategory->child(i);
-                        if (!child) {
-                            continue;
-                        }
-                        QString sid = child->data(0, Qt::UserRole).toString();
-                        if (!sid.isEmpty()) {
-                            toArchive.append(sid);
-                        }
-                    }
-                    for (const auto &sid : toArchive) {
-                        archiveSession(sid);
-                    }
-                }
-            });
-            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
-        }
-        return;
-    }
-
-    // Handle right-click on the Dismissed category header
-    if (item == m_dismissedCategory) {
-        // Count dismissed sessions
-        int dismissedCount = 0;
-        for (const auto &meta : m_metadata) {
-            if (meta.isDismissed) {
-                dismissedCount++;
-            }
-        }
-        if (dismissedCount > 0) {
-            QMenu menu(this);
-            QAction *purgeAllAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Purge All Dismissed (%1)", dismissedCount));
-            connect(purgeAllAction, &QAction::triggered, this, [this, dismissedCount]() {
-                auto answer = QMessageBox::question(this,
-                                                    i18n("Purge Dismissed Sessions"),
-                                                    i18n("Permanently remove metadata for %1 dismissed session(s)?\n\n"
-                                                         "Project folders will NOT be affected.",
-                                                         dismissedCount),
-                                                    QMessageBox::Yes | QMessageBox::No,
-                                                    QMessageBox::No);
-                if (answer == QMessageBox::Yes) {
-                    purgeDismissed();
-                }
-            });
-            menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
-        }
-        return;
-    }
+    // (Category-header right-click branches removed — bulk actions live on the
+    // project-group context menu now, filtered by child state.)
 
     QString sessionId = item->data(0, Qt::UserRole).toString();
     if (sessionId.isEmpty()) {
         return;
     }
 
-    // Handle discovered sessions
-    if (item->parent() == m_discoveredCategory) {
+    // Handle discovered sessions (tagged with state token at UserRole+5).
+    if (item->data(0, Qt::UserRole + 5).toString() == QLatin1String("discovered")) {
         QString workDir = item->data(0, Qt::UserRole + 1).toString();
         if (workDir.isEmpty()) {
             return;
@@ -2067,15 +2824,14 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     QMenu menu(this);
 
     if (meta.isDismissed) {
-        // Collect all selected dismissed session IDs for batch operations
+        // Collect all selected dismissed session IDs for batch operations.
+        // Any selected item whose metadata is dismissed qualifies, regardless of group.
         QStringList selectedDismissed;
         const auto selectedItemsDismissed = m_treeWidget->selectedItems();
         for (auto *sel : selectedItemsDismissed) {
-            if (sel->parent() == m_dismissedCategory) {
-                QString sid = sel->data(0, Qt::UserRole).toString();
-                if (!sid.isEmpty() && m_metadata.contains(sid) && m_metadata[sid].isDismissed) {
-                    selectedDismissed.append(sid);
-                }
+            QString sid = sel->data(0, Qt::UserRole).toString();
+            if (!sid.isEmpty() && m_metadata.contains(sid) && m_metadata[sid].isDismissed) {
+                selectedDismissed.append(sid);
             }
         }
         if (!selectedDismissed.contains(sessionId)) {
@@ -2112,6 +2868,24 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         } else {
             // Single item menu
+            // Unmerge entry — only when this dismissed session was merged into another.
+            if (canOfferUnmergeForSession(sessionId)) {
+                QString primaryLabel;
+                if (m_metadata.contains(meta.mergedInto)) {
+                    const auto &primaryMeta = m_metadata[meta.mergedInto];
+                    primaryLabel = !primaryMeta.description.trimmed().isEmpty() ? primaryMeta.description.trimmed()
+                        : !primaryMeta.workingDirectory.isEmpty()               ? QDir(primaryMeta.workingDirectory).dirName()
+                                                                                : primaryMeta.sessionName;
+                } else {
+                    primaryLabel = meta.mergedInto;
+                }
+                QAction *unmergeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Unmerge (was merged into %1)", primaryLabel));
+                connect(unmergeAction, &QAction::triggered, this, [this, sessionId]() {
+                    unmergeSession(sessionId);
+                });
+                menu.addSeparator();
+            }
+
             QAction *restoreAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Restore"));
             connect(restoreAction, &QAction::triggered, this, [this, sessionId]() {
                 restoreSession(sessionId);
@@ -2137,11 +2911,9 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         QStringList selectedArchived;
         const auto selectedItems = m_treeWidget->selectedItems();
         for (auto *sel : selectedItems) {
-            if (sel->parent() == m_archivedCategory) {
-                QString sid = sel->data(0, Qt::UserRole).toString();
-                if (!sid.isEmpty() && m_metadata.contains(sid) && m_metadata[sid].isArchived) {
-                    selectedArchived.append(sid);
-                }
+            QString sid = sel->data(0, Qt::UserRole).toString();
+            if (!sid.isEmpty() && m_metadata.contains(sid) && m_metadata[sid].isArchived) {
+                selectedArchived.append(sid);
             }
         }
         // Ensure the right-clicked item is included
@@ -2214,7 +2986,8 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
     } else {
         // Active, detached, or closed session
         bool isActive = m_activeSessions.contains(sessionId);
-        bool isClosed = isUnderCategory(item, m_closedCategory);
+        const bool isLive = isActive || m_cachedLiveNames.contains(meta.sessionName) || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+        const bool isClosed = stateTokenFor(meta, isLive) == QLatin1String("closed");
         QPointer<ClaudeSession> activeSession = isActive ? m_activeSessions[sessionId] : nullptr;
 
         if (isActive && activeSession) {
@@ -2488,6 +3261,49 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
                 dismissSession(sessionId);
             });
         }
+
+        // Merge Selected (N)... — only when ≥2 non-dismissed session items are
+        // selected and they all share the same workingDirectory. Cross-project
+        // merges are out of scope for v1.
+        {
+            const auto selectedItems = m_treeWidget->selectedItems();
+            QStringList selectedSessionIds;
+            for (auto *sel : selectedItems) {
+                const QString sid = sel->data(0, Qt::UserRole).toString();
+                if (sid.isEmpty() || !m_metadata.contains(sid)) {
+                    continue;
+                }
+                if (m_metadata[sid].isDismissed) {
+                    continue;
+                }
+                selectedSessionIds.append(sid);
+            }
+            if (canOfferMergeForSelection(selectedSessionIds) && selectedSessionIds.contains(sessionId)) {
+                menu.addSeparator();
+                QAction *mergeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("merge")), i18n("Merge Selected (%1)...", selectedSessionIds.size()));
+                connect(mergeAction, &QAction::triggered, this, [this, selectedSessionIds]() {
+                    QList<SessionMetadata> candidates;
+                    QStringList resumeIds;
+                    QString workdir;
+                    for (const QString &sid : selectedSessionIds) {
+                        if (!m_metadata.contains(sid)) {
+                            continue;
+                        }
+                        const auto &m = m_metadata[sid];
+                        candidates.append(m);
+                        resumeIds.append(m.lastResumeSessionId);
+                        if (workdir.isEmpty()) {
+                            workdir = m.workingDirectory;
+                        }
+                    }
+                    const QHash<QString, qint64> jsonlSizes = jsonlSizesForResumeIds(workdir, resumeIds);
+                    MergeSessionsDialog dlg(candidates, jsonlSizes, this);
+                    if (dlg.exec() == QDialog::Accepted) {
+                        mergeSessions(selectedSessionIds, dlg.primarySessionId(), dlg.choices());
+                    }
+                });
+            }
+        }
     }
 
     menu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
@@ -2615,15 +3431,14 @@ void SessionManagerPanel::updateDurationLabels()
         }
     };
 
-    // Walk all category items
-    auto categories = {m_pinnedCategory, m_activeCategory, m_detachedCategory, m_closedCategory, m_archivedCategory};
-    for (auto *category : categories) {
-        if (!category) {
+    // Walk all top-level project groups; each contains session items as children.
+    for (int g = 0; g < m_treeWidget->topLevelItemCount(); ++g) {
+        QTreeWidgetItem *group = m_treeWidget->topLevelItem(g);
+        if (!group) {
             continue;
         }
-        for (int i = 0; i < category->childCount(); ++i) {
-            auto *sessionItem = category->child(i);
-            walkChildren(sessionItem);
+        for (int i = 0; i < group->childCount(); ++i) {
+            walkChildren(group->child(i));
         }
     }
 
@@ -2920,28 +3735,101 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     // Suppress repaints during rebuild to eliminate flicker
     m_treeWidget->setUpdatesEnabled(false);
 
-    // Clear existing items (except categories)
-    while (m_pinnedCategory->childCount() > 0) {
-        delete m_pinnedCategory->takeChild(0);
-    }
-    while (m_activeCategory->childCount() > 0) {
-        delete m_activeCategory->takeChild(0);
-    }
-    while (m_detachedCategory->childCount() > 0) {
-        delete m_detachedCategory->takeChild(0);
-    }
-    while (m_closedCategory->childCount() > 0) {
-        delete m_closedCategory->takeChild(0);
-    }
-    while (m_archivedCategory->childCount() > 0) {
-        delete m_archivedCategory->takeChild(0);
-    }
-    while (m_dismissedCategory->childCount() > 0) {
-        delete m_dismissedCategory->takeChild(0);
+    // Clear everything — project groups are recreated lazily via ensureProjectGroup().
+    // Cached group pointers are now stale, so flush them.
+    m_treeWidget->clear();
+    m_projectGroups.clear();
+    m_categoryGroups.clear();
+
+    // Build the category map from the full set of distinct workdirs we know about
+    // (m_metadata plus discovered sessions, if visible). We do this BEFORE rendering
+    // so ensureProjectGroup() can route each project to its category bucket.
+    {
+        QSet<QString> workdirSet;
+        // resolveProjectKey is defined below; inline an equivalent here to avoid
+        // forward-reference plumbing. Worktrees collapse to their parent project.
+        auto resolveKey = [](const QString &workDir) -> QString {
+            const int idx = workDir.indexOf(QStringLiteral("/.claude/worktrees/"));
+            return idx > 0 ? workDir.left(idx) : workDir;
+        };
+        for (auto it = m_metadata.cbegin(); it != m_metadata.cend(); ++it) {
+            const QString &wd = it.value().workingDirectory;
+            if (!wd.isEmpty()) {
+                workdirSet.insert(resolveKey(wd));
+            }
+        }
+        // Include discovered workdirs when either the Discovered chip or
+        // the Subagents chip is on — subagent items are surfaced via the
+        // same discovered pipeline.
+        if (m_registry && (m_visibleStates.contains(QStringLiteral("discovered")) || m_visibleStates.contains(QStringLiteral("subagent")))) {
+            for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
+                if (!state.workingDirectory.isEmpty()) {
+                    workdirSet.insert(resolveKey(state.workingDirectory));
+                }
+            }
+        }
+        m_categoryMap = buildCategoryMap(QList<QString>(workdirSet.cbegin(), workdirSet.cend()));
+
+        // Apply user rules on top of LCP grouping (order matters):
+        //   1. Per-workdir overrides — most specific, always win
+        //   2. Category aliases — rename bucket keys (cowardly-irregular → cowir)
+        //   3. Suppress list — dissolve unwanted LCP-created buckets
+        // Aliases/overrides beat suppression by design: an explicit user rule
+        // always trumps a bulk suppression.
+        auto *settings = KonsolaiSettings::instance();
+        if (settings) {
+            const QHash<QString, QString> workdirOverrides = settings->workdirCategoryOverrides();
+            const QHash<QString, QString> aliases = settings->categoryAliases();
+            const QStringList suppressList = settings->suppressedCategories();
+            const QSet<QString> suppressed(suppressList.cbegin(), suppressList.cend());
+
+            // Per-workdir overrides (highest priority)
+            for (auto it = m_categoryMap.begin(); it != m_categoryMap.end(); ++it) {
+                const QString &wd = it.key();
+                auto ov = workdirOverrides.constFind(wd);
+                if (ov != workdirOverrides.constEnd() && !ov.value().isEmpty()) {
+                    it.value() = ov.value();
+                }
+            }
+            // Category aliases
+            for (auto it = m_categoryMap.begin(); it != m_categoryMap.end(); ++it) {
+                auto aliasIt = aliases.constFind(it.value());
+                if (aliasIt != aliases.constEnd() && !aliasIt.value().isEmpty()) {
+                    it.value() = aliasIt.value();
+                }
+            }
+            // Suppress LCP categories the user has dissolved: fall back to
+            // standalone (basename), so the workdir renders top-level.
+            for (auto it = m_categoryMap.begin(); it != m_categoryMap.end(); ++it) {
+                if (suppressed.contains(it.value())) {
+                    it.value() = QDir(it.key()).dirName();
+                }
+            }
+        }
     }
 
-    // Note: We no longer auto-archive dead tmux sessions.
-    // Dead sessions go to "Closed", user-archived sessions go to "Archived".
+    // User-defined empty categories: pre-create the top-level nodes so that
+    // (a) ensureProjectGroup can find and reuse them even when only one
+    // project routes here (the LCP >=2 rule would normally standalone it),
+    // and (b) categories with zero projects still surface for the user to
+    // drop things into.  The label starts as "name (empty)" but the label-
+    // annotation pass later replaces it with "name (N)" when N > 0.
+    if (auto *settingsForUserCats = KonsolaiSettings::instance()) {
+        const QStringList userCats = settingsForUserCats->userCategories();
+        for (const QString &name : userCats) {
+            if (name.isEmpty() || m_categoryGroups.contains(name)) {
+                continue;
+            }
+            auto *cat = new QTreeWidgetItem(m_treeWidget);
+            cat->setText(0, name + QLatin1Char(' ') + i18n("(empty)"));
+            cat->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-symbolic"), QIcon::fromTheme(QStringLiteral("folder"))));
+            cat->setToolTip(0, i18n("User category: %1", name));
+            cat->setFlags(Qt::ItemIsEnabled);
+            cat->setExpanded(false);
+            cat->setData(0, Qt::UserRole + 6, QString(QStringLiteral("category:") + name));
+            m_categoryGroups.insert(name, cat);
+        }
+    }
 
     // Sort sessions by last accessed (most recent first)
     QList<SessionMetadata> sortedMeta = m_metadata.values();
@@ -2949,29 +3837,24 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         return a.lastAccessed > b.lastAccessed;
     });
 
-    // --- Session grouping ---
-    // Two-tier auto-grouping:
-    //  1. Worktree: paths containing /.claude/worktrees/ resolve to the parent project
-    //  2. Prefix:   directory basenames sharing a 4+ char prefix cluster together
-    // Worktree groups show 🌳, prefix groups show 📁.
-
-    // Resolve worktree root (tier 1): strip /.claude/worktrees/... suffix
-    auto resolveWorktreeRoot = [](const QString &workDir) -> QString {
+    // Helper: collapse to a single working-directory key for grouping.
+    // Worktree paths (.../.claude/worktrees/...) collapse to the parent project,
+    // so all worktree variants share a single group with the main repo.
+    auto resolveProjectKey = [](const QString &workDir) -> QString {
         int idx = workDir.indexOf(QStringLiteral("/.claude/worktrees/"));
         if (idx > 0) {
             return workDir.left(idx);
         }
-        return QString(); // not a worktree
+        return workDir;
     };
 
-    // Pre-pass 1: determine each session's category
+    // Pre-pass: determine state token and project key for each session, applying
+    // the visible-state filter chip set so we only render what the user wants.
     struct SessionEntry {
         SessionMetadata meta;
-        QString cat;
-        QTreeWidgetItem *categoryItem = nullptr;
-        QString dirName; // basename of workingDirectory
-        QString groupKey; // resolved group key (worktree root or prefix cluster)
-        bool isWorktreeGrouped = false;
+        QString stateToken;
+        QString projectKey;
+        bool isLive = false;
     };
     QList<SessionEntry> entries;
     entries.reserve(sortedMeta.size());
@@ -2984,197 +3867,259 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             m_explicitlyClosed.remove(meta.sessionId);
             wasClosed = false;
         }
+        bool isLive = isAct || (alive && !wasClosed);
 
         SessionEntry e;
         e.meta = meta;
-        e.dirName = QDir(meta.workingDirectory).dirName();
-        if (meta.isDismissed) {
-            e.cat = QStringLiteral("dismissed");
-            e.categoryItem = m_dismissedCategory;
-        } else if (meta.isArchived) {
-            e.cat = QStringLiteral("archived");
-            e.categoryItem = m_archivedCategory;
-        } else if (meta.isPinned) {
-            e.cat = QStringLiteral("pinned");
-            e.categoryItem = m_pinnedCategory;
-        } else if (isAct) {
-            e.cat = QStringLiteral("active");
-            e.categoryItem = m_activeCategory;
-        } else if (alive && !wasClosed) {
-            e.cat = QStringLiteral("detached");
-            e.categoryItem = m_detachedCategory;
-        } else {
-            e.cat = QStringLiteral("closed");
-            e.categoryItem = m_closedCategory;
-        }
+        e.isLive = isLive;
+        e.stateToken = stateTokenFor(meta, isLive);
+        e.projectKey = resolveProjectKey(meta.workingDirectory);
 
-        // Tier 1: worktree grouping
-        QString wtRoot = resolveWorktreeRoot(meta.workingDirectory);
-        if (!wtRoot.isEmpty()) {
-            e.groupKey = wtRoot;
-            e.isWorktreeGrouped = true;
+        // Filter by visible state-token chips
+        if (!m_visibleStates.contains(e.stateToken)) {
+            continue;
         }
         entries.append(e);
     }
 
-    // Tier 2: prefix-based clustering for sessions NOT already worktree-grouped.
-    // Within each category, find directory basenames sharing a 4+ char prefix.
-    // Group key = the shared prefix (trimmed of trailing hyphens/underscores).
-    {
-        // Collect (cat, dirName) → list of entry indices for non-worktree sessions
-        QHash<QString, QList<int>> catDirNames; // cat → [entry indices]
-        for (int i = 0; i < entries.size(); ++i) {
-            if (!entries[i].isWorktreeGrouped) {
-                catDirNames[entries[i].cat].append(i);
+    // Sibling-disambiguation count: how many entries share the same workingDirectory?
+    QHash<QString, int> dirCount;
+    for (const auto &e : entries) {
+        dirCount[e.meta.workingDirectory]++;
+    }
+
+    // Track per-project: max lastAccessed (for group sort) and session count (for label).
+    QHash<QString, QDateTime> groupMaxAccess;
+    QHash<QString, int> groupSessionCount;
+
+    // Add each session under its project group (created on demand).
+    for (const auto &e : entries) {
+        QTreeWidgetItem *group = ensureProjectGroup(e.projectKey);
+        bool hasSiblings = dirCount.value(e.meta.workingDirectory, 0) > 1;
+        addSessionToTree(e.meta, group, hasSiblings);
+
+        const QString gKey = projectGroupKey(e.projectKey);
+        if (e.meta.lastAccessed.isValid()) {
+            auto it = groupMaxAccess.find(gKey);
+            if (it == groupMaxAccess.end() || e.meta.lastAccessed > it.value()) {
+                groupMaxAccess[gKey] = e.meta.lastAccessed;
             }
         }
+        groupSessionCount[gKey]++;
+    }
 
-        static constexpr int MIN_PREFIX_LEN = 3;
+    // Discovered sessions: only render if the Discovered chip is on, OR the
+    // Subagents chip is on (subagent jsonls surface via discovery too).
+    // Group them under their own project key alongside regular sessions.
+    const bool showDiscovered = m_visibleStates.contains(QStringLiteral("discovered"));
+    const bool showSubagentsFromDiscovery = m_visibleStates.contains(QStringLiteral("subagent"));
+    static const QRegularExpression discoveredSubagentPattern(QStringLiteral("agent-[a-f0-9]{16}"));
+    if (m_registry && (showDiscovered || showSubagentsFromDiscovery)) {
+        for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
+            // Classify: subagent if its sessionName matches the agent-fleet
+            // pattern OR if the newest jsonl lives under a /subagents/ dir.
+            // Otherwise it's a plain "discovered" session.
+            bool isSubagentDiscovered = discoveredSubagentPattern.match(state.sessionName).hasMatch();
+            if (!isSubagentDiscovered && !state.workingDirectory.isEmpty()) {
+                const QString hashed = ClaudeSessionRegistry::hashedProjectPath(state.workingDirectory);
+                const QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashed;
+                QDir dir(projectDir);
+                if (dir.exists()) {
+                    QDirIterator dit(dir.absolutePath(), {QStringLiteral("*.jsonl")}, QDir::Files, QDirIterator::Subdirectories);
+                    while (dit.hasNext()) {
+                        dit.next();
+                        if (dit.fileInfo().absoluteFilePath().contains(QStringLiteral("/subagents/"))) {
+                            isSubagentDiscovered = true;
+                            break;
+                        }
+                    }
+                }
+            }
 
-        for (auto it = catDirNames.constBegin(); it != catDirNames.constEnd(); ++it) {
-            const QList<int> &indices = it.value();
-            if (indices.size() < 2) {
+            const QString effectiveState = isSubagentDiscovered ? QStringLiteral("subagent") : QStringLiteral("discovered");
+            // Respect the chip filter: skip if this item's effective state
+            // isn't in the visible set (avoids showing a subagent when only
+            // Discovered is enabled, and vice-versa).
+            if (!m_visibleStates.contains(effectiveState)) {
                 continue;
             }
 
-            // Sort indices by dirName for prefix comparison
-            QList<int> sorted = indices;
-            std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
-                return entries[a].dirName < entries[b].dirName;
-            });
-
-            // Greedy prefix clustering: walk sorted names, extend cluster while
-            // adjacent names share a 4+ char prefix with the cluster seed.
-            auto commonPrefix = [](const QString &a, const QString &b) -> QString {
-                int len = qMin(a.size(), b.size());
-                int i = 0;
-                while (i < len && a[i] == b[i]) {
-                    ++i;
-                }
-                return a.left(i);
-            };
-
-            int ci = 0;
-            while (ci < sorted.size()) {
-                // Start a new cluster with sorted[ci]
-                QString seed = entries[sorted[ci]].dirName;
-                QString prefix = seed;
-                QList<int> cluster = {sorted[ci]};
-                int cj = ci + 1;
-                while (cj < sorted.size()) {
-                    QString shared = commonPrefix(prefix, entries[sorted[cj]].dirName);
-                    if (shared.size() >= MIN_PREFIX_LEN) {
-                        prefix = shared;
-                        cluster.append(sorted[cj]);
-                        ++cj;
-                    } else {
-                        break;
-                    }
-                }
-
-                if (cluster.size() >= 2) {
-                    // Trim trailing hyphens/underscores from prefix for display
-                    while (prefix.endsWith(QLatin1Char('-')) || prefix.endsWith(QLatin1Char('_'))) {
-                        prefix.chop(1);
-                    }
-                    for (int idx : cluster) {
-                        entries[idx].groupKey = prefix;
-                    }
-                }
-                ci = cj;
-            }
-        }
-    }
-
-    // Pre-pass 2: count sessions per (groupKey, category) for grouping and sibling detection
-    QHash<QString, int> groupCategoryCount; // "groupKey|cat" → count
-    QHash<QString, int> dirCategoryCount; // "workDir|cat" → count
-    QHash<QString, bool> groupIsWorktree; // "groupKey|cat" → is worktree-based
-    for (const auto &e : entries) {
-        if (!e.groupKey.isEmpty()) {
-            QString gk = e.groupKey + QStringLiteral("|") + e.cat;
-            groupCategoryCount[gk]++;
-            if (e.isWorktreeGrouped) {
-                groupIsWorktree[gk] = true;
-            }
-        }
-        dirCategoryCount[e.meta.workingDirectory + QStringLiteral("|") + e.cat]++;
-    }
-
-    // Create group headers for groups with 2+ sessions in the same category
-    auto categoryItemFor = [&](const QString &cat) -> QTreeWidgetItem * {
-        if (cat == QStringLiteral("dismissed"))
-            return m_dismissedCategory;
-        if (cat == QStringLiteral("archived"))
-            return m_archivedCategory;
-        if (cat == QStringLiteral("pinned"))
-            return m_pinnedCategory;
-        if (cat == QStringLiteral("active"))
-            return m_activeCategory;
-        if (cat == QStringLiteral("detached"))
-            return m_detachedCategory;
-        return m_closedCategory;
-    };
-
-    QHash<QString, QTreeWidgetItem *> groupItems; // "groupKey|cat" → group item
-    for (auto it = groupCategoryCount.constBegin(); it != groupCategoryCount.constEnd(); ++it) {
-        if (it.value() < 2) {
-            continue;
-        }
-        int sep = it.key().lastIndexOf(QLatin1Char('|'));
-        QString key = it.key().left(sep);
-        QString cat = it.key().mid(sep + 1);
-        bool isWT = groupIsWorktree.value(it.key(), false);
-
-        auto *groupItem = new QTreeWidgetItem(categoryItemFor(cat));
-        QString groupName = isWT ? QDir(key).dirName() : key;
-        QString icon = isWT ? QStringLiteral("folder-sync") : QStringLiteral("folder-favorites");
-        groupItem->setText(0, QStringLiteral("%1 (%2)").arg(groupName).arg(it.value()));
-        groupItem->setIcon(0, QIcon::fromTheme(icon, QIcon::fromTheme(QStringLiteral("folder-open"))));
-        groupItem->setFlags(Qt::ItemIsEnabled);
-        groupItem->setToolTip(0, isWT ? i18n("Worktree group: %1", key) : i18n("Prefix group: %1*", key));
-        QString expandKey = QStringLiteral("group:") + it.key();
-        groupItem->setData(0, Qt::UserRole + 6, expandKey);
-        groupItem->setExpanded(m_expansionState.value(expandKey, true));
-        groupItems[it.key()] = groupItem;
-    }
-
-    // Add sessions to appropriate categories (under group headers when applicable)
-    for (const auto &e : entries) {
-        QTreeWidgetItem *parent = e.categoryItem;
-        if (!e.groupKey.isEmpty()) {
-            QString gk = e.groupKey + QStringLiteral("|") + e.cat;
-            if (groupItems.contains(gk)) {
-                parent = groupItems[gk];
-            }
-        }
-        bool hasSiblings = dirCategoryCount.value(e.meta.workingDirectory + QStringLiteral("|") + e.cat, 0) > 1;
-        addSessionToTree(e.meta, parent, hasSiblings);
-    }
-
-    // Add discovered sessions (from project folder scanning)
-    while (m_discoveredCategory->childCount() > 0) {
-        delete m_discoveredCategory->takeChild(0);
-    }
-    if (m_registry) {
-        // Use cached data only — background refreshCachesAsync() keeps it fresh.
-        // Never call discoverSessions() or readClaudeConversations() here
-        // to avoid blocking the main thread.
-        for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
-            auto *item = new QTreeWidgetItem(m_discoveredCategory);
+            QString pKey = resolveProjectKey(state.workingDirectory);
+            QTreeWidgetItem *group = ensureProjectGroup(pKey);
+            auto *item = new QTreeWidgetItem(group);
             QString displayName = QDir(state.workingDirectory).dirName();
             item->setText(0, displayName);
             item->setData(0, Qt::UserRole, state.sessionId);
             item->setData(0, Qt::UserRole + 1, state.workingDirectory);
             item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-cloud")));
+            // State token marker — kept as "discovered" for double-click
+            // routing (unarchive path) even when bucketed as "subagent" in
+            // the chip filter.  The runtime action is identical.
+            item->setData(0, Qt::UserRole + 5, QStringLiteral("discovered"));
+
+            // Per-session state icon in column 1 reflects the effective state
+            // so the user visually distinguishes a subagent from a plain
+            // discovered project.
+            item->setIcon(1, stateIcon(effectiveState));
+            item->setToolTip(1, stateLabel(effectiveState));
 
             // Show conversation count from cache (populated by refreshCachesAsync)
             const auto &conversations = m_conversationCache[state.workingDirectory];
             if (!conversations.isEmpty()) {
-                item->setText(1, QStringLiteral("%1 conv").arg(conversations.size()));
+                QString existing = item->text(1);
+                if (!existing.isEmpty()) {
+                    existing += QStringLiteral(" ");
+                }
+                existing += QStringLiteral("%1 conv").arg(conversations.size());
+                item->setText(1, existing);
             }
 
             item->setToolTip(0, QStringLiteral("%1\n%2\nLast modified: %3").arg(state.profileName, state.workingDirectory, state.lastAccessed.toString()));
+
+            const QString gKey = projectGroupKey(pKey);
+            if (state.lastAccessed.isValid()) {
+                auto it = groupMaxAccess.find(gKey);
+                if (it == groupMaxAccess.end() || state.lastAccessed > it.value()) {
+                    groupMaxAccess[gKey] = state.lastAccessed;
+                }
+            }
+            groupSessionCount[gKey]++;
+        }
+    }
+
+    // Sort each project group's children: pinned first, then by lastAccessed desc.
+    auto childSessionId = [](QTreeWidgetItem *child) -> QString {
+        return child->data(0, Qt::UserRole).toString();
+    };
+
+    for (auto git = m_projectGroups.constBegin(); git != m_projectGroups.constEnd(); ++git) {
+        QTreeWidgetItem *group = git.value();
+        QList<QTreeWidgetItem *> children;
+        while (group->childCount() > 0) {
+            children.append(group->takeChild(0));
+        }
+        std::sort(children.begin(), children.end(), [&](QTreeWidgetItem *a, QTreeWidgetItem *b) {
+            const QString aId = childSessionId(a);
+            const QString bId = childSessionId(b);
+            const SessionMetadata *aMeta = aId.isEmpty() ? nullptr : sessionMetadata(aId);
+            const SessionMetadata *bMeta = bId.isEmpty() ? nullptr : sessionMetadata(bId);
+            const bool aPinned = aMeta ? aMeta->isPinned : false;
+            const bool bPinned = bMeta ? bMeta->isPinned : false;
+            if (aPinned != bPinned) {
+                return aPinned;
+            }
+            const QDateTime aWhen = aMeta ? aMeta->lastAccessed : QDateTime();
+            const QDateTime bWhen = bMeta ? bMeta->lastAccessed : QDateTime();
+            if (aWhen != bWhen) {
+                return aWhen > bWhen;
+            }
+            return a->text(0) < b->text(0);
+        });
+        for (QTreeWidgetItem *c : std::as_const(children)) {
+            group->addChild(c);
+        }
+        // Append (count) to the existing label set by ensureProjectGroup.
+        // (For multi-project categories, the label is the prefix-stripped sub-label
+        // — we must not regenerate it from the workdir basename here.)
+        const int count = groupSessionCount.value(git.key(), 0);
+        const QString existing = group->text(0);
+        if (count > 0 && !existing.endsWith(QStringLiteral(")"))) {
+            group->setText(0, QStringLiteral("%1 (%2)").arg(existing).arg(count));
+        }
+        const QString expandKey = QStringLiteral("group:") + git.key();
+        // Default to expanded for new groups; preserve saved state for known groups.
+        const bool expanded = m_expansionState.value(expandKey, true);
+        group->setExpanded(expanded);
+    }
+
+    // Sort projects inside each multi-project category by max-lastAccessed of any descendant.
+    // Also annotate category labels with total session count across all sub-projects.
+    for (auto cit = m_categoryGroups.constBegin(); cit != m_categoryGroups.constEnd(); ++cit) {
+        QTreeWidgetItem *cat = cit.value();
+        QList<QTreeWidgetItem *> subProjects;
+        while (cat->childCount() > 0) {
+            subProjects.append(cat->takeChild(0));
+        }
+        std::sort(subProjects.begin(), subProjects.end(), [&](QTreeWidgetItem *a, QTreeWidgetItem *b) {
+            QString aKey = a->data(0, Qt::UserRole + 6).toString();
+            QString bKey = b->data(0, Qt::UserRole + 6).toString();
+            if (aKey.startsWith(QStringLiteral("group:"))) {
+                aKey = aKey.mid(6);
+            }
+            if (bKey.startsWith(QStringLiteral("group:"))) {
+                bKey = bKey.mid(6);
+            }
+            const QDateTime aWhen = groupMaxAccess.value(aKey);
+            const QDateTime bWhen = groupMaxAccess.value(bKey);
+            if (aWhen != bWhen) {
+                return aWhen > bWhen;
+            }
+            return a->text(0) < b->text(0);
+        });
+        int catTotalSessions = 0;
+        for (QTreeWidgetItem *sp : std::as_const(subProjects)) {
+            cat->addChild(sp);
+            QString sKey = sp->data(0, Qt::UserRole + 6).toString();
+            if (sKey.startsWith(QStringLiteral("group:"))) {
+                sKey = sKey.mid(6);
+            }
+            catTotalSessions += groupSessionCount.value(sKey, 0);
+            // Re-apply sub-project expansion state since takeChild/addChild clears it.
+            sp->setExpanded(m_expansionState.value(QStringLiteral("group:") + sKey, true));
+        }
+        if (catTotalSessions > 0) {
+            cat->setText(0, QStringLiteral("%1 (%2)").arg(cit.key()).arg(catTotalSessions));
+        }
+        cat->setExpanded(m_expansionState.value(QStringLiteral("category:") + cit.key(), true));
+    }
+
+    // Sort top-level items (standalone projects + multi-project category buckets)
+    // by max-lastAccessed of any descendant session, desc.
+    auto topLevelMaxAccess = [&](QTreeWidgetItem *t) -> QDateTime {
+        const QString eKey = t->data(0, Qt::UserRole + 6).toString();
+        if (eKey.startsWith(QStringLiteral("category:"))) {
+            const QString cKey = eKey.mid(9);
+            // Walk member projects; pick the max.
+            QDateTime best;
+            for (auto mit = m_categoryMap.cbegin(); mit != m_categoryMap.cend(); ++mit) {
+                if (mit.value() != cKey) {
+                    continue;
+                }
+                const QDateTime when = groupMaxAccess.value(projectGroupKey(mit.key()));
+                if (when.isValid() && (!best.isValid() || when > best)) {
+                    best = when;
+                }
+            }
+            return best;
+        }
+        if (eKey.startsWith(QStringLiteral("group:"))) {
+            return groupMaxAccess.value(eKey.mid(6));
+        }
+        return {};
+    };
+
+    if (m_treeWidget->topLevelItemCount() > 1) {
+        QList<QTreeWidgetItem *> tops;
+        while (m_treeWidget->topLevelItemCount() > 0) {
+            tops.append(m_treeWidget->takeTopLevelItem(0));
+        }
+        std::sort(tops.begin(), tops.end(), [&](QTreeWidgetItem *a, QTreeWidgetItem *b) {
+            const QDateTime aWhen = topLevelMaxAccess(a);
+            const QDateTime bWhen = topLevelMaxAccess(b);
+            if (aWhen != bWhen) {
+                return aWhen > bWhen;
+            }
+            return a->text(0) < b->text(0);
+        });
+        for (QTreeWidgetItem *t : std::as_const(tops)) {
+            m_treeWidget->addTopLevelItem(t);
+            // Re-apply expansion state since insertion clears it.
+            const QString eKey = t->data(0, Qt::UserRole + 6).toString();
+            if (eKey.startsWith(QStringLiteral("group:"))) {
+                t->setExpanded(m_expansionState.value(eKey, true));
+            } else if (eKey.startsWith(QStringLiteral("category:"))) {
+                t->setExpanded(m_expansionState.value(eKey, true));
+            }
         }
     }
 
@@ -3192,28 +4137,8 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         }
     }
 
-    // Update category visibility and counts in headers
-    auto updateCategory = [](QTreeWidgetItem *cat, const QString &baseName) {
-        int count = cat->childCount();
-        cat->setHidden(count == 0);
-        if (count > 0) {
-            cat->setText(0, QStringLiteral("%1 (%2)").arg(baseName).arg(count));
-        } else {
-            cat->setText(0, baseName);
-        }
-    };
-    updateCategory(m_pinnedCategory, i18n("Pinned"));
-    updateCategory(m_activeCategory, i18n("Active"));
-    updateCategory(m_detachedCategory, i18n("Detached"));
-    updateCategory(m_closedCategory, i18n("Closed"));
-    updateCategory(m_archivedCategory, i18n("Archived"));
-    updateCategory(m_dismissedCategory, i18n("Dismissed"));
-    updateCategory(m_discoveredCategory, i18n("Discovered"));
-
-    // Show empty state if no sessions at all
-    int totalChildren = m_pinnedCategory->childCount() + m_activeCategory->childCount() + m_detachedCategory->childCount()
-        + m_closedCategory->childCount() + m_archivedCategory->childCount() + m_dismissedCategory->childCount() + m_discoveredCategory->childCount();
-    m_emptyStateLabel->setVisible(totalChildren == 0);
+    // Show empty state when no project groups exist (nothing to render)
+    m_emptyStateLabel->setVisible(m_projectGroups.isEmpty());
 
     // Re-apply active filter after tree rebuild
     if (!m_filterEdit->text().isEmpty()) {
@@ -3233,62 +4158,42 @@ void SessionManagerPanel::applyFilter(const QString &text)
         return;
     }
 
-    // Helper: check if a leaf item matches the filter text
+    // Helper: check if a leaf (session) item matches the filter text
     auto itemMatchesFilter = [&text](QTreeWidgetItem *item) -> bool {
         QString sessionId = item->data(0, Qt::UserRole).toString();
         return item->text(0).contains(text, Qt::CaseInsensitive) || item->toolTip(0).contains(text, Qt::CaseInsensitive)
             || sessionId.contains(text, Qt::CaseInsensitive);
     };
 
-    // Iterate all category items, show/hide children based on filter match
-    const QList<QTreeWidgetItem *> categories = {m_pinnedCategory, m_activeCategory,    m_detachedCategory,  m_closedCategory,
-                                                  m_archivedCategory, m_dismissedCategory, m_discoveredCategory};
+    // Tree shape is now 2-3 levels:
+    //   category (optional) → project group → session
+    //   project group (standalone)         → session
+    // Recursively show/hide so a category bucket whose every session is filtered out hides too.
+    std::function<int(QTreeWidgetItem *)> walkVisible;
+    walkVisible = [&](QTreeWidgetItem *item) -> int {
+        // Leaf (session) item — UserRole + 6 starts with "s:".
+        const QString key = item->data(0, Qt::UserRole + 6).toString();
+        const bool isLeaf = key.startsWith(QStringLiteral("s:")) || key.startsWith(QStringLiteral("discovered:"));
+        if (isLeaf) {
+            const bool matches = text.isEmpty() || itemMatchesFilter(item);
+            item->setHidden(!matches);
+            return matches ? 1 : 0;
+        }
+        // Group (project or category): aggregate from children.
+        int visible = 0;
+        for (int i = 0; i < item->childCount(); ++i) {
+            visible += walkVisible(item->child(i));
+        }
+        item->setHidden(text.isEmpty() ? item->childCount() == 0 : visible == 0);
+        return visible;
+    };
 
-    for (auto *cat : categories) {
-        if (!cat) {
+    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = m_treeWidget->topLevelItem(i);
+        if (!top) {
             continue;
         }
-        int visibleChildren = 0;
-        for (int i = 0; i < cat->childCount(); ++i) {
-            auto *child = cat->child(i);
-            if (text.isEmpty()) {
-                child->setHidden(false);
-                // Also unhide grandchildren (group subnodes)
-                for (int j = 0; j < child->childCount(); ++j) {
-                    child->child(j)->setHidden(false);
-                }
-                ++visibleChildren;
-            } else {
-                // Check if this is a group item (has children that are sessions)
-                bool isGroup = child->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"));
-                if (isGroup) {
-                    // Filter group subnodes individually; show group if any child matches
-                    int visibleGroupChildren = 0;
-                    for (int j = 0; j < child->childCount(); ++j) {
-                        auto *grandchild = child->child(j);
-                        bool matches = itemMatchesFilter(grandchild);
-                        grandchild->setHidden(!matches);
-                        if (matches) {
-                            ++visibleGroupChildren;
-                        }
-                    }
-                    child->setHidden(visibleGroupChildren == 0);
-                    if (visibleGroupChildren > 0) {
-                        child->setExpanded(true);
-                        ++visibleChildren;
-                    }
-                } else {
-                    // Match against display name (col 0), tooltip (working dir + session name),
-                    // and the raw sessionId (for ID-based lookup)
-                    bool matches = itemMatchesFilter(child);
-                    child->setHidden(!matches);
-                    if (matches) {
-                        ++visibleChildren;
-                    }
-                }
-            }
-        }
-        cat->setHidden(text.isEmpty() ? cat->childCount() == 0 : visibleChildren == 0);
+        walkVisible(top);
     }
 }
 
@@ -3296,20 +4201,38 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
 {
     auto *item = new QTreeWidgetItem(parent);
 
-    // Display name: project directory or session name
+    // Display name: prefer user-set/auto-derived description as the PRIMARY label
+    // (replacing the workdir basename). Falls back to dirname, then session name.
+    // Branch/time/state suffixes get appended below regardless of source.
     QString displayName;
-    if (!meta.workingDirectory.isEmpty() && meta.workingDirectory != QStringLiteral(".") && meta.workingDirectory != QDir::homePath()) {
+    if (!meta.description.trimmed().isEmpty()) {
+        displayName = meta.description.trimmed();
+    } else if (!meta.workingDirectory.isEmpty() && meta.workingDirectory != QStringLiteral(".") && meta.workingDirectory != QDir::homePath()) {
         displayName = QDir(meta.workingDirectory).dirName();
+    } else {
+        displayName = meta.sessionName;
     }
     // Fallback to session name if display name is empty or just "." or "build" (which is misleading)
     if (displayName.isEmpty() || displayName == QStringLiteral(".") || displayName == QStringLiteral("build")) {
         displayName = meta.sessionName;
     }
 
-    // Add task description for disambiguation
+    // Trim displayName if it came from a long description so the tree stays compact.
+    if (displayName.length() > 50) {
+        displayName = displayName.left(47) + QStringLiteral("...");
+    }
+
+    // Snapshot the clean primary label for the tooltip's first line. The
+    // displayName below gets decorated with branch/time/badges; the tooltip
+    // wants the original.
+    const QString primaryLabel = displayName;
+
+    // Add task description for disambiguation only when we did NOT already
+    // use meta.description as the primary label (avoids duplication).
     // Priority: active taskDescription > persisted description > Claude CLI conversation > nothing
     bool isActive = m_activeSessions.contains(meta.sessionId);
     QString description;
+    const bool descriptionIsPrimary = !meta.description.trimmed().isEmpty();
 
     // 1. Live session task description
     if (isActive) {
@@ -3319,8 +4242,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         }
     }
 
-    // 2. Persisted description from previous run
-    if (description.isEmpty() && !meta.description.isEmpty()) {
+    // 2. Persisted description from previous run (suppressed if already used as primary label)
+    if (description.isEmpty() && !meta.description.isEmpty() && !descriptionIsPrimary) {
         description = meta.description;
     }
 
@@ -3475,6 +4398,13 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         displayName += QStringLiteral(" [muted]");
     }
 
+    // Merged-away indicator: this session was collapsed into another via
+    // mergeSessions(). Adds a small suffix and is annotated in the tooltip
+    // (appended below).
+    if (!meta.mergedInto.isEmpty()) {
+        displayName += QStringLiteral(" \xE2\x86\x92 merged");
+    }
+
     item->setText(0, displayName);
     item->setData(0, Qt::UserRole, meta.sessionId);
 
@@ -3490,18 +4420,37 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         item->setForeground(0, QBrush(QColor(140, 140, 140)));
     }
 
-    // Enhanced tooltip
+    // Enhanced tooltip — always preserves the original session/project identity
+    // even when the displayName is a free-text description.
     QString tooltip;
     if (meta.isRemote) {
         QString userHost = meta.sshUsername.isEmpty() ? meta.sshHost : QStringLiteral("%1@%2").arg(meta.sshUsername, meta.sshHost);
-        tooltip =
-            QStringLiteral("%1\nRemote: %2\nPath: %3\nLast accessed: %4").arg(meta.sessionName, userHost, meta.workingDirectory, meta.lastAccessed.toString());
+        tooltip = i18n("%1\nProject: %2\nSession: %3\nRemote: %4\nLast accessed: %5",
+                       primaryLabel,
+                       meta.workingDirectory,
+                       meta.sessionName,
+                       userHost,
+                       meta.lastAccessed.toString());
     } else {
-        tooltip = QStringLiteral("%1\n%2\nLast accessed: %3").arg(meta.sessionName, meta.workingDirectory, meta.lastAccessed.toString());
+        tooltip = i18n("%1\nProject: %2\nSession: %3\nLast accessed: %4", primaryLabel, meta.workingDirectory, meta.sessionName, meta.lastAccessed.toString());
     }
     // Append git branch to tooltip (always, including main/master)
     if (m_gitBranchCache.contains(meta.workingDirectory) && !m_gitBranchCache[meta.workingDirectory].isEmpty()) {
         tooltip += QStringLiteral("\nBranch: %1").arg(m_gitBranchCache[meta.workingDirectory]);
+    }
+    if (!meta.mergedInto.isEmpty()) {
+        QString primaryLabel = meta.mergedInto;
+        if (m_metadata.contains(meta.mergedInto)) {
+            const auto &primaryMeta = m_metadata[meta.mergedInto];
+            if (!primaryMeta.description.trimmed().isEmpty()) {
+                primaryLabel = primaryMeta.description.trimmed();
+            } else if (!primaryMeta.workingDirectory.isEmpty()) {
+                primaryLabel = QDir(primaryMeta.workingDirectory).dirName();
+            } else {
+                primaryLabel = primaryMeta.sessionName;
+            }
+        }
+        tooltip += QStringLiteral("\nMerged into: %1").arg(primaryLabel);
     }
     item->setToolTip(0, tooltip);
 
@@ -3565,11 +4514,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-grey")));
     } else if (meta.isRemote) {
         // Remote sessions use network icons
-        if (isActive) {
-            item->setIcon(0, QIcon::fromTheme(QStringLiteral("network-server"), QIcon::fromTheme(QStringLiteral("folder-remote"))));
-        } else {
-            item->setIcon(0, QIcon::fromTheme(QStringLiteral("network-server"), QIcon::fromTheme(QStringLiteral("folder-remote"))));
-        }
+        item->setIcon(0, QIcon::fromTheme(QStringLiteral("network-server"), QIcon::fromTheme(QStringLiteral("folder-remote"))));
     } else if (isActive) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-open")));
     } else {
@@ -3583,6 +4528,33 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             item->setForeground(0, QBrush(Qt::cyan));
         } else {
             item->setForeground(0, QBrush(Qt::darkGreen));
+        }
+    }
+
+    // Stamp the session's state token at UserRole+5 and surface a small
+    // state-icon in column 1 (alongside any yolo/budget text). Pinned sessions
+    // additionally get the "📌" pin icon prepended to the name as a badge.
+    {
+        const bool isLiveForState =
+            isActive || m_cachedLiveNames.contains(meta.sessionName) || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+        const QString stateToken = stateTokenFor(meta, isLiveForState);
+        item->setData(0, Qt::UserRole + 5, stateToken);
+        // For column 1, prefer the state icon when no text/bolts present.
+        if (item->text(1).isEmpty()) {
+            item->setIcon(1, stateIcon(stateToken));
+            item->setToolTip(1, stateLabel(stateToken));
+        }
+        // Pin indicator for pinned sessions: bold font on the name column.
+        // (Previously a "📌 " emoji prefix; replaced because some font/encoding
+        // stacks render it as mojibake.) A pin theme icon is only set when no
+        // column-0 icon is already in place — folder/remote/archived icons win.
+        if (meta.isPinned) {
+            QFont f = item->font(0);
+            f.setBold(true);
+            item->setFont(0, f);
+            if (item->icon(0).isNull()) {
+                item->setIcon(0, QIcon::fromTheme(QStringLiteral("pin")));
+            }
         }
     }
 }
@@ -3622,6 +4594,8 @@ void SessionManagerPanel::loadMetadata()
         meta.isArchived = obj[QStringLiteral("isArchived")].toBool();
         meta.isExpired = obj[QStringLiteral("isExpired")].toBool();
         meta.isDismissed = obj[QStringLiteral("isDismissed")].toBool();
+        // Optional flag — false by default; writer only emits it when true.
+        meta.isSubagent = obj[QStringLiteral("isSubagent")].toBool(false);
         meta.lastAccessed = QDateTime::fromString(obj[QStringLiteral("lastAccessed")].toString(), Qt::ISODate);
         meta.createdAt = QDateTime::fromString(obj[QStringLiteral("createdAt")].toString(), Qt::ISODate);
 
@@ -3659,6 +4633,7 @@ void SessionManagerPanel::loadMetadata()
         meta.lastResumeSessionId = obj[QStringLiteral("lastResumeSessionId")].toString();
         meta.description = obj[QStringLiteral("description")].toString();
         meta.agentId = obj[QStringLiteral("agentId")].toString();
+        meta.mergedInto = obj[QStringLiteral("mergedInto")].toString();
 
         // Budget settings
         meta.budgetTimeLimitMinutes = obj[QStringLiteral("budgetTimeLimitMinutes")].toInt();
@@ -3742,6 +4717,11 @@ void SessionManagerPanel::saveMetadata(bool sync)
         if (meta.isDismissed) {
             obj[QStringLiteral("isDismissed")] = true;
         }
+        // Same optional-write pattern as isDismissed / mergedInto — only
+        // emit when true so the JSON stays clean for the common case.
+        if (meta.isSubagent) {
+            obj[QStringLiteral("isSubagent")] = true;
+        }
 
         // Approval counts (only save if non-zero)
         int totalApprovals = meta.yoloApprovalCount + meta.doubleYoloApprovalCount;
@@ -3785,6 +4765,9 @@ void SessionManagerPanel::saveMetadata(bool sync)
         }
         if (!meta.agentId.isEmpty()) {
             obj[QStringLiteral("agentId")] = meta.agentId;
+        }
+        if (!meta.mergedInto.isEmpty()) {
+            obj[QStringLiteral("mergedInto")] = meta.mergedInto;
         }
 
         // Budget settings (only save if any limit is set)
@@ -3920,10 +4903,11 @@ SessionMetadata *SessionManagerPanel::findMetadata(const QString &sessionId)
 
 QTreeWidgetItem *SessionManagerPanel::findTreeItem(const QString &sessionId)
 {
+    // Tree layout: top-level = project group, children = session items.
     for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *category = m_treeWidget->topLevelItem(i);
-        for (int j = 0; j < category->childCount(); ++j) {
-            QTreeWidgetItem *item = category->child(j);
+        QTreeWidgetItem *group = m_treeWidget->topLevelItem(i);
+        for (int j = 0; j < group->childCount(); ++j) {
+            QTreeWidgetItem *item = group->child(j);
             if (item->data(0, Qt::UserRole).toString() == sessionId) {
                 return item;
             }
@@ -4881,7 +5865,8 @@ void SessionManagerPanel::saveTreeState()
         m_savedSelectedKey = compositeKeyForItem(sel);
     }
 
-    // Walk all categories → session items → children recursively
+    // Walk every tree item (including top-level project/category groups)
+    // and capture its expansion state.
     auto walkItem = [this](QTreeWidgetItem *item, auto &&self) -> void {
         QString key = compositeKeyForItem(item);
         if (!key.isEmpty()) {
@@ -4893,10 +5878,7 @@ void SessionManagerPanel::saveTreeState()
     };
 
     for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *category = m_treeWidget->topLevelItem(i);
-        for (int j = 0; j < category->childCount(); ++j) {
-            walkItem(category->child(j), walkItem);
-        }
+        walkItem(m_treeWidget->topLevelItem(i), walkItem);
     }
 }
 
@@ -4923,10 +5905,7 @@ void SessionManagerPanel::restoreTreeState()
             }
         };
         for (int i = 0; i < m_treeWidget->topLevelItemCount() && !found; ++i) {
-            QTreeWidgetItem *cat = m_treeWidget->topLevelItem(i);
-            for (int j = 0; j < cat->childCount() && !found; ++j) {
-                walkRestore(cat->child(j), walkRestore);
-            }
+            walkRestore(m_treeWidget->topLevelItem(i), walkRestore);
         }
     }
 
@@ -5020,6 +5999,22 @@ bool SessionManagerPanel::isTreeInteractionActive() const
 
 bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
 {
+    // Filter box Esc: clear text and shift focus back to the tree.  Without
+    // this, Esc in the QLineEdit is silently swallowed and the user has to
+    // reach for the mouse to clear a stale filter.
+    if (m_filterEdit && watched == m_filterEdit && event->type() == QEvent::KeyPress) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        if (ke->key() == Qt::Key_Escape) {
+            if (!m_filterEdit->text().isEmpty()) {
+                m_filterEdit->clear();
+            }
+            if (m_treeWidget) {
+                m_treeWidget->setFocus();
+            }
+            return true;
+        }
+    }
+
     if (m_treeWidget && (watched == m_treeWidget || watched == m_treeWidget->viewport())) {
         if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) {
             if (m_pendingUpdate && !isTreeInteractionActive()) {
@@ -5038,9 +6033,666 @@ bool SessionManagerPanel::eventFilter(QObject *watched, QEvent *event)
                 return true;
             }
         }
+
+        // F2 renames the currently-selected category header. We intentionally
+        // only handle F2 for category items — session/project-group items keep
+        // whatever default behavior QTreeWidget applies (currently none, but
+        // future features may bind F2 there).
+        if (watched == m_treeWidget && event->type() == QEvent::KeyPress) {
+            auto *ke = static_cast<QKeyEvent *>(event);
+            if (ke->key() == Qt::Key_F2 && !ke->modifiers().testFlag(Qt::ControlModifier)) {
+                QTreeWidgetItem *sel = m_treeWidget->currentItem();
+                if (sel) {
+                    const QString key = sel->data(0, Qt::UserRole + 6).toString();
+                    if (key.startsWith(QStringLiteral("category:"))) {
+                        const QString catKey = key.mid(QStringLiteral("category:").size());
+                        renameCategory(catKey);
+                        return true;
+                    }
+                }
+            }
+        }
     }
 
     return QWidget::eventFilter(watched, event);
+}
+
+// ============================================================
+// Feature 3 — Consolidate Duplicates dialog
+// ============================================================
+
+void SessionManagerPanel::openConsolidateDialog(const QString &projectKey)
+{
+    // Gather ALL sessions in this project (any state).
+    QList<SessionMetadata> candidates;
+    QStringList sessionIds;
+    QStringList resumeIds;
+    for (auto it = m_metadata.cbegin(); it != m_metadata.cend(); ++it) {
+        if (it.value().workingDirectory == projectKey) {
+            candidates.append(it.value());
+            sessionIds.append(it.key());
+            if (!it.value().lastResumeSessionId.isEmpty()) {
+                resumeIds.append(it.value().lastResumeSessionId);
+            }
+        }
+    }
+    if (candidates.size() < 2) {
+        return;
+    }
+
+    const QHash<QString, qint64> jsonlSizes = jsonlSizesForResumeIds(projectKey, resumeIds);
+    MergeSessionsDialog dlg(candidates, jsonlSizes, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        mergeSessions(sessionIds, dlg.primarySessionId(), dlg.choices());
+    }
+}
+
+bool SessionManagerPanel::canOfferConsolidateForProject(const QString &workingDirectory) const
+{
+    if (workingDirectory.isEmpty()) {
+        return false;
+    }
+    int count = 0;
+    for (auto it = m_metadata.cbegin(); it != m_metadata.cend(); ++it) {
+        if (it.value().workingDirectory == workingDirectory) {
+            ++count;
+            if (count >= 2) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// ============================================================
+// Feature 2 — Ungroup a category
+// ============================================================
+
+void SessionManagerPanel::ungroupCategory(const QString &categoryKey)
+{
+    if (categoryKey.isEmpty()) {
+        return;
+    }
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    // 1) If any alias targets this category, remove those aliases.
+    //    (e.g. cowardly-irregular=cowir → removing cowardly-irregular alias
+    //    dissolves the "cowir" bucket back to its LCP-native "cowardly-irregular".)
+    const QHash<QString, QString> aliases = settings->categoryAliases();
+    bool aliasRemoved = false;
+    for (auto it = aliases.constBegin(); it != aliases.constEnd(); ++it) {
+        if (it.value() == categoryKey) {
+            settings->removeCategoryAlias(it.key());
+            aliasRemoved = true;
+        }
+    }
+    if (aliasRemoved) {
+        scheduleTreeUpdate();
+        return;
+    }
+
+    // 2) Otherwise, if any workdir-override points at this category, remove those.
+    const QHash<QString, QString> overrides = settings->workdirCategoryOverrides();
+    bool overrideRemoved = false;
+    for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) {
+        if (it.value() == categoryKey) {
+            settings->removeWorkdirCategoryOverride(it.key());
+            overrideRemoved = true;
+        }
+    }
+    if (overrideRemoved) {
+        scheduleTreeUpdate();
+        return;
+    }
+
+    // 3) Otherwise it was an LCP-derived category — suppress it.
+    settings->addSuppressedCategory(categoryKey);
+    scheduleTreeUpdate();
+}
+
+// ============================================================
+// Feature 1 — Drop handler
+// ============================================================
+
+namespace
+{
+
+// Build a human-readable label for a source composite key. Categories show
+// their raw name; groups show the workdir basename (falling back to full path).
+QString labelForSourceKey(const QString &sourceKey)
+{
+    if (sourceKey.startsWith(QStringLiteral("category:"))) {
+        return sourceKey.mid(QStringLiteral("category:").size());
+    }
+    if (sourceKey.startsWith(QStringLiteral("group:"))) {
+        const QString wd = sourceKey.mid(QStringLiteral("group:").size());
+        const QString base = QDir(wd).dirName();
+        return base.isEmpty() ? wd : base;
+    }
+    return sourceKey;
+}
+
+} // namespace
+
+void SessionManagerPanel::handleDropRequest(const QStringList &sourceKeys, const QString &targetCategoryKey)
+{
+    if (sourceKeys.isEmpty() || !targetCategoryKey.startsWith(QStringLiteral("category:"))) {
+        return;
+    }
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    const QString targetCat = targetCategoryKey.mid(QStringLiteral("category:").size());
+    if (targetCat.isEmpty()) {
+        return;
+    }
+
+    // Pre-filter — drop keys that would collide with the target itself (a
+    // category renaming itself into its own bucket is a no-op). Also drop
+    // unknown source-type strings so a corrupt payload can't crash us.
+    QStringList validSources;
+    validSources.reserve(sourceKeys.size());
+    for (const QString &k : sourceKeys) {
+        if (!k.startsWith(QStringLiteral("group:")) && !k.startsWith(QStringLiteral("category:"))) {
+            continue;
+        }
+        if (k == targetCategoryKey) {
+            continue;
+        }
+        // A category source that IS the target category is a self-drop.
+        if (k.startsWith(QStringLiteral("category:")) && k.mid(QStringLiteral("category:").size()) == targetCat) {
+            continue;
+        }
+        validSources << k;
+    }
+    if (validSources.isEmpty()) {
+        return;
+    }
+
+    // Build the confirmation text: single-source uses the labeled form; multi
+    // uses the counted form. Users still see one prompt for the whole batch.
+    const QString targetLabel = targetCat;
+    const QString confirmText = validSources.size() == 1
+        ? i18n("Move \"%1\" under \"%2\"?\n\nFuture sessions matching this rule will land here too.", labelForSourceKey(validSources.first()), targetLabel)
+        : i18n("Move %1 items under \"%2\"?\n\nFuture sessions matching these rules will land here too.", validSources.size(), targetLabel);
+    const QString titleText =
+        validSources.size() == 1 ? i18n("Move %1?", labelForSourceKey(validSources.first())) : i18n("Move %1 items?", validSources.size());
+
+    const int ret = QMessageBox::question(this, titleText, confirmText, QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    // Block signalsChanged storms during the batch — KonsolaiSettings emits
+    // settingsChanged() from each mutator, and downstream slots trigger a
+    // tree rebuild each time. We want a single rebuild at the end.
+    settings->blockSignals(true);
+    for (const QString &k : validSources) {
+        if (k.startsWith(QStringLiteral("category:"))) {
+            const QString sourceCat = k.mid(QStringLiteral("category:").size());
+            settings->addCategoryAlias(sourceCat, targetCat);
+        } else if (k.startsWith(QStringLiteral("group:"))) {
+            const QString workdir = k.mid(QStringLiteral("group:").size());
+            settings->addWorkdirCategoryOverride(workdir, targetCat);
+        }
+    }
+    // Clear any pre-existing suppression that would fight the new rule.
+    settings->removeSuppressedCategory(targetCat);
+    settings->blockSignals(false);
+
+    scheduleTreeUpdate();
+}
+
+// ============================================================
+// Feature — Vim hotkey dispatch + subagent classification
+// ============================================================
+
+void SessionManagerPanel::handleTreeAction(const QString &action)
+{
+    if (!m_treeWidget) {
+        return;
+    }
+    QTreeWidgetItem *current = m_treeWidget->currentItem();
+    if (!current) {
+        return;
+    }
+    const QString sessionId = current->data(0, Qt::UserRole).toString();
+    const QString compositeKey = current->data(0, Qt::UserRole + 6).toString();
+    const bool isSession = compositeKey.startsWith(QStringLiteral("s:"));
+    const bool isCategory = compositeKey.startsWith(QStringLiteral("category:"));
+
+    if (action == QLatin1String("attach")) {
+        // Same effect as double-click on a session leaf.  For categories/
+        // groups we no-op (Enter-on-category is handled by the widget's own
+        // expand toggle before it emits actionRequested).
+        if (isSession && !sessionId.isEmpty()) {
+            onItemDoubleClicked(current, 0);
+        }
+        return;
+    }
+    if (action == QLatin1String("archive")) {
+        if (isSession && !sessionId.isEmpty()) {
+            archiveSession(sessionId);
+        }
+        return;
+    }
+    if (action == QLatin1String("pin")) {
+        if (isSession && !sessionId.isEmpty()) {
+            const SessionMetadata *m = findMetadata(sessionId);
+            if (m && m->isPinned) {
+                unpinSession(sessionId);
+            } else if (m) {
+                pinSession(sessionId);
+            }
+        }
+        return;
+    }
+    if (action == QLatin1String("close")) {
+        if (isSession && !sessionId.isEmpty()) {
+            closeSession(sessionId);
+        }
+        return;
+    }
+    if (action == QLatin1String("dismiss")) {
+        if (isSession && !sessionId.isEmpty()) {
+            dismissSession(sessionId);
+        }
+        return;
+    }
+    if (action == QLatin1String("rename")) {
+        if (isCategory) {
+            renameCategory(compositeKey.mid(QStringLiteral("category:").size()));
+        } else if (isSession && !sessionId.isEmpty()) {
+            editSessionDescription(sessionId);
+        }
+        return;
+    }
+    if (action == QLatin1String("new-category")) {
+        createUserCategory();
+        return;
+    }
+    // Unknown action: no-op (defensive — future actions might arrive from
+    // a newer SessionTreeWidget subclass).
+}
+
+bool SessionManagerPanel::isSubagentSession(const SessionMetadata &meta) const
+{
+    // 1. Explicit metadata flag — most reliable (future producer will set it
+    // during subagent-spawn plumbing).  No cache consult; the flag is
+    // authoritative.
+    if (meta.isSubagent) {
+        return true;
+    }
+
+    // 2. sessionName heuristic — cheap in-memory check.  Konsolai's own
+    // agent-fleet-launched sessions use "konsolai-...-agent-<16-hex>".
+    // Use a static QRegularExpression to avoid recompiling per call.
+    static const QRegularExpression agentNamePattern(QStringLiteral("agent-[a-f0-9]{16}"));
+    if (agentNamePattern.match(meta.sessionName).hasMatch()) {
+        return true;
+    }
+
+    // 3. jsonl-path heuristic — hits disk; cache by sessionId so repeated
+    // filter checks stay cheap.  Cache is invalidated implicitly when
+    // metadata changes via metadata-mutating slots (scheduleMetadataSave).
+    if (meta.sessionId.isEmpty()) {
+        return false;
+    }
+    auto cachedIt = m_subagentClassificationCache.constFind(meta.sessionId);
+    if (cachedIt != m_subagentClassificationCache.constEnd()) {
+        return cachedIt.value();
+    }
+
+    bool result = false;
+    if (!meta.workingDirectory.isEmpty()) {
+        const QString hashed = ClaudeSessionRegistry::hashedProjectPath(meta.workingDirectory);
+        const QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashed;
+        QDir dir(projectDir);
+        if (dir.exists()) {
+            // Find newest .jsonl by mtime and inspect its PATH for
+            // /subagents/ — Claude Code stores subagent transcripts under
+            // .../subagents/agent-<id>.jsonl beneath the parent.
+            QFileInfoList jsonls;
+            QDirIterator it(dir.absolutePath(), {QStringLiteral("*.jsonl")}, QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                it.next();
+                jsonls.append(it.fileInfo());
+            }
+            if (!jsonls.isEmpty()) {
+                std::sort(jsonls.begin(), jsonls.end(), [](const QFileInfo &a, const QFileInfo &b) {
+                    return a.lastModified() > b.lastModified();
+                });
+                const QString newestPath = jsonls.first().absoluteFilePath();
+                if (newestPath.contains(QStringLiteral("/subagents/"))) {
+                    result = true;
+                }
+            }
+        }
+    }
+    m_subagentClassificationCache.insert(meta.sessionId, result);
+    return result;
+}
+
+// ============================================================
+// Feature — Create a new user-defined empty category
+// ============================================================
+
+void SessionManagerPanel::createUserCategory()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, i18n("New Category"), i18n("Category name:"), QLineEdit::Normal, QString(), &ok).trimmed();
+    if (!ok || name.isEmpty()) {
+        return;
+    }
+
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    // Reject if the name collides with an existing category bucket in the
+    // current tree — the user would be confused if their "new" category
+    // silently merged into an existing one.
+    if (m_categoryGroups.contains(name)) {
+        QMessageBox::information(this, i18n("Category exists"), i18n("A category named \"%1\" already exists.", name));
+        return;
+    }
+    settings->addUserCategory(name);
+    scheduleTreeUpdate();
+}
+
+// ============================================================
+// Feature — Rename a category (uses CategoryAliases)
+// ============================================================
+
+void SessionManagerPanel::renameCategory(const QString &oldKey)
+{
+    if (oldKey.isEmpty()) {
+        return;
+    }
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    bool ok = false;
+    const QString newName =
+        QInputDialog::getText(this, i18n("Rename Category"), i18n("New name for \"%1\":", oldKey), QLineEdit::Normal, oldKey, &ok).trimmed();
+    if (!ok || newName.isEmpty() || newName == oldKey) {
+        return;
+    }
+
+    // If the new name collides with an existing category bucket, prompt the
+    // user — proceeding will silently merge the two.
+    if (m_categoryGroups.contains(newName)) {
+        const int ret = QMessageBox::question(this,
+                                              i18n("Category exists"),
+                                              i18n("A category named \"%1\" already exists — projects would merge into it. Rename anyway?", newName),
+                                              QMessageBox::Yes | QMessageBox::No,
+                                              QMessageBox::No);
+        if (ret != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    settings->addCategoryAlias(oldKey, newName);
+    // If the rename source is itself a user-defined empty category, also drop
+    // that entry so the two categories don't coexist in the settings state.
+    // (The alias handles projects; removeUserCategory prevents a leftover
+    // empty bucket at top level.)
+    settings->removeUserCategory(oldKey);
+    // If the OLD name was in the suppress list, the alias may not fire; wipe
+    // any suppression on both sides so the tree reflects the intent.
+    settings->removeSuppressedCategory(oldKey);
+    scheduleTreeUpdate();
+}
+
+// ============================================================
+// Feature — LLM-assisted tree reorganization
+// ============================================================
+
+TreeInventory SessionManagerPanel::buildTreeInventory() const
+{
+    TreeInventory inv;
+
+    // 1) Group metadata by working directory to compute per-project session counts.
+    QHash<QString, int> countsByWorkdir;
+    QHash<QString, QString> descriptionByWorkdir;
+    for (auto it = m_metadata.cbegin(); it != m_metadata.cend(); ++it) {
+        const SessionMetadata &m = it.value();
+        if (m.isDismissed) {
+            continue;
+        }
+        if (m.workingDirectory.isEmpty()) {
+            continue;
+        }
+        countsByWorkdir[m.workingDirectory] += 1;
+        // Prefer the first non-empty description we come across for that workdir.
+        if (!descriptionByWorkdir.contains(m.workingDirectory) && !m.description.trimmed().isEmpty()) {
+            descriptionByWorkdir.insert(m.workingDirectory, m.description.trimmed());
+        }
+    }
+
+    // 2) Project list — sorted for prompt stability.
+    QStringList workdirs = countsByWorkdir.keys();
+    std::sort(workdirs.begin(), workdirs.end());
+    for (const QString &wd : workdirs) {
+        TreeInventory::Project p;
+        p.workingDirectory = wd;
+        p.basename = QDir(wd).dirName();
+        p.description = descriptionByWorkdir.value(wd);
+        p.sessionCount = countsByWorkdir.value(wd);
+        inv.projects.append(p);
+    }
+
+    // 3) Categories — invert m_categoryMap (workdir → catKey) into catKey → [workdirs].
+    QHash<QString, QStringList> byCategory;
+    for (auto it = m_categoryMap.cbegin(); it != m_categoryMap.cend(); ++it) {
+        if (it.value().isEmpty()) {
+            continue;
+        }
+        byCategory[it.value()].append(it.key());
+    }
+    QStringList catKeys = byCategory.keys();
+    std::sort(catKeys.begin(), catKeys.end());
+    for (const QString &k : catKeys) {
+        TreeInventory::Category c;
+        c.key = k;
+        c.projectWorkdirs = byCategory.value(k);
+        std::sort(c.projectWorkdirs.begin(), c.projectWorkdirs.end());
+        inv.categories.append(c);
+    }
+
+    // 4) Settings-backed metadata.
+    if (auto *settings = KonsolaiSettings::instance()) {
+        inv.userCategories = settings->userCategories();
+        inv.existingAliases = settings->categoryAliases();
+        inv.existingWorkdirOverrides = settings->workdirCategoryOverrides();
+        inv.existingSuppressedCategories = settings->suppressedCategories();
+    }
+
+    return inv;
+}
+
+void SessionManagerPanel::applyReorganizeProposal(const ReorganizeProposal &proposal)
+{
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+    if (proposal.isEmpty()) {
+        return;
+    }
+
+    // Coalesce settingsChanged emissions across the batch so the tree rebuild
+    // fires once at the end.
+    settings->blockSignals(true);
+    for (auto it = proposal.categoryAliases.cbegin(); it != proposal.categoryAliases.cend(); ++it) {
+        settings->addCategoryAlias(it.key(), it.value());
+    }
+    for (auto it = proposal.workdirOverrides.cbegin(); it != proposal.workdirOverrides.cend(); ++it) {
+        settings->addWorkdirCategoryOverride(it.key(), it.value());
+    }
+    for (const QString &s : proposal.suppressedCategories) {
+        settings->addSuppressedCategory(s);
+    }
+    for (const QString &u : proposal.userCategories) {
+        settings->addUserCategory(u);
+    }
+    settings->blockSignals(false);
+
+    scheduleTreeUpdate();
+}
+
+void SessionManagerPanel::openReorganizeTreeDialog()
+{
+    if (!ClaudeAssistant::claudeExecutablePath().isEmpty()) {
+        // OK — CLI available.
+    } else {
+        QMessageBox::warning(this,
+                             i18n("Claude CLI not found"),
+                             i18n("The 'claude' command-line tool is not on your PATH. Install it to use "
+                                  "LLM-assisted tree reorganization."));
+        return;
+    }
+
+    const TreeInventory inv = buildTreeInventory();
+    ReorganizeTreeDialog dlg(inv, this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    applyReorganizeProposal(dlg.proposal());
+}
+
+void SessionManagerPanel::suggestCategoryName(const QStringList &workdirs)
+{
+    if (workdirs.isEmpty()) {
+        return;
+    }
+    if (ClaudeAssistant::claudeExecutablePath().isEmpty()) {
+        QMessageBox::warning(this,
+                             i18n("Claude CLI not found"),
+                             i18n("The 'claude' command-line tool is not on your PATH. Install it to use "
+                                  "LLM-assisted name suggestions."));
+        return;
+    }
+
+    // Collect basenames + descriptions for the prompt.
+    QStringList basenames;
+    QStringList descriptions;
+    QSet<QString> seenWd;
+    QString existingCategoryKey;
+    bool sharedCategory = true;
+    for (const QString &wd : workdirs) {
+        if (wd.isEmpty() || seenWd.contains(wd)) {
+            continue;
+        }
+        seenWd.insert(wd);
+        basenames << QDir(wd).dirName();
+
+        // Pick the first non-empty description across sessions for this workdir.
+        QString desc;
+        for (auto mit = m_metadata.cbegin(); mit != m_metadata.cend(); ++mit) {
+            if (mit->workingDirectory == wd && !mit->description.trimmed().isEmpty()) {
+                desc = mit->description.trimmed();
+                break;
+            }
+        }
+        descriptions << desc;
+
+        // Track shared category (used to decide alias vs. workdir-overrides).
+        const QString cat = m_categoryMap.value(wd);
+        if (existingCategoryKey.isEmpty()) {
+            existingCategoryKey = cat;
+        } else if (cat != existingCategoryKey) {
+            sharedCategory = false;
+        }
+    }
+    if (basenames.isEmpty()) {
+        return;
+    }
+
+    const QString prompt = buildSuggestNamePrompt(basenames, descriptions);
+
+    // Set up a modal wait dialog around the async assistant call.
+    QProgressDialog progress(i18n("Asking Claude for a name suggestion…"), i18n("Cancel"), 0, 0, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.setValue(0);
+
+    ClaudeAssistant assistant(this);
+    QString suggested;
+    QString failureMsg;
+    bool doneFlag = false;
+
+    connect(&assistant, &ClaudeAssistant::finished, this, [&](const QString &output, int exitCode) {
+        if (exitCode == 0) {
+            suggested = parseSuggestNameResponse(output);
+        } else {
+            failureMsg = i18n("Claude returned exit code %1", exitCode);
+        }
+        doneFlag = true;
+        progress.reset();
+    });
+    connect(&assistant, &ClaudeAssistant::failed, this, [&](const QString &err) {
+        failureMsg = err;
+        doneFlag = true;
+        progress.reset();
+    });
+    connect(&progress, &QProgressDialog::canceled, this, [&]() {
+        assistant.cancel();
+        doneFlag = true;
+    });
+
+    assistant.ask(prompt, /*jsonOutput=*/false);
+    while (!doneFlag && !progress.wasCanceled()) {
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+
+    if (progress.wasCanceled() && suggested.isEmpty()) {
+        return;
+    }
+    if (!failureMsg.isEmpty()) {
+        QMessageBox::warning(this, i18n("Claude request failed"), i18n("Claude could not suggest a name: %1", failureMsg));
+        return;
+    }
+    if (suggested.isEmpty()) {
+        QMessageBox::information(this, i18n("No suggestion"), i18n("Claude did not return a usable name."));
+        return;
+    }
+
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, i18n("Suggested Category Name"), i18n("Claude suggests:"), QLineEdit::Normal, suggested, &ok).trimmed();
+    if (!ok || name.isEmpty()) {
+        return;
+    }
+
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return;
+    }
+
+    settings->blockSignals(true);
+    if (sharedCategory && !existingCategoryKey.isEmpty() && existingCategoryKey != name) {
+        // All workdirs share a category — treat as a rename.
+        settings->addCategoryAlias(existingCategoryKey, name);
+        settings->removeUserCategory(existingCategoryKey);
+        settings->removeSuppressedCategory(existingCategoryKey);
+    } else {
+        // Route each workdir explicitly into the new category.
+        for (const QString &wd : seenWd) {
+            settings->addWorkdirCategoryOverride(wd, name);
+        }
+        settings->addUserCategory(name);
+    }
+    settings->blockSignals(false);
+
+    scheduleTreeUpdate();
 }
 
 } // namespace Konsolai

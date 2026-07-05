@@ -68,6 +68,7 @@
 #include "claude/ClaudeSessionWizard.h"
 #include "claude/ClaudeStatusWidget.h"
 #include "claude/KonsolaiSettings.h"
+#include "claude/LettaAgentProvider.h"
 #include "claude/NotificationManager.h"
 #include "claude/SessionManagerPanel.h"
 #include "claude/TmuxManager.h"
@@ -695,6 +696,11 @@ void MainWindow::setupActions()
                 // TODO: Open hooks configuration dialog
                 qDebug() << "Configure hooks requested";
             });
+    connect(_claudeMenu, &Konsolai::ClaudeMenu::reorganizeTreeRequested, this, [this]() {
+        if (_sessionPanel) {
+            _sessionPanel->openReorganizeTreeDialog();
+        }
+    });
 
     // Add Claude menu actions to collection with proper KDE shortcut registration.
     // Using setDefaultShortcut (not QAction::setShortcut) integrates with KDE's
@@ -732,6 +738,16 @@ void MainWindow::setupActions()
         _agentPanel->addProvider(fleetProvider);
     } else {
         delete fleetProvider;
+    }
+
+    // Set up Letta provider (HTTP). isAvailable() always returns true so the
+    // group is visible even when the server is down — errors surface via
+    // lastError() and the empty group node.
+    if (settings && settings->lettaEnabled()) {
+        const QString lettaUrl = settings->lettaBaseUrl();
+        const QString lettaKey = settings->lettaApiKey();
+        auto *lettaProvider = new Konsolai::LettaAgentProvider(lettaUrl, lettaKey);
+        _agentPanel->addProvider(lettaProvider);
     }
 
     // Agent↔Session linker
@@ -1016,6 +1032,10 @@ void MainWindow::setupActions()
         QString taskPrompt = wizard.taskPrompt();
         if (!taskPrompt.isEmpty()) {
             claudeSession->setTaskDescription(taskPrompt);
+        }
+        const QString extraArgs = wizard.claudeArgs();
+        if (!extraArgs.isEmpty()) {
+            claudeSession->setExtraClaudeArgs(extraArgs);
         }
 
         Konsole::SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
@@ -1957,6 +1977,13 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                 QString taskPrompt = wizard.taskPrompt();
                 if (!taskPrompt.isEmpty()) {
                     claudeSession->setTaskDescription(taskPrompt);
+                }
+
+                // Apply per-session extra-args override from the wizard (empty
+                // falls back to KonsolaiSettings::extraClaudeArgs() at run time)
+                const QString extraArgs = wizard.claudeArgs();
+                if (!extraArgs.isEmpty()) {
+                    claudeSession->setExtraClaudeArgs(extraArgs);
                 }
 
                 // Set resume session ID if user picked a previous conversation

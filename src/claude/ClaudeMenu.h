@@ -115,6 +115,11 @@ Q_SIGNALS:
     void configureHooksRequested();
 
     /**
+     * Emitted when user wants to reorganize the session tree with Claude's help.
+     */
+    void reorganizeTreeRequested();
+
+    /**
      * Emitted when Yolo Mode state changes
      */
     void yoloModeChanged(bool enabled);

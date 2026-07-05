@@ -112,6 +112,72 @@ private Q_SLOTS:
     void testAutoArchiveClosedSessions();
     void testAutoArchiveSkipsPinned();
     void testAutoArchiveSkipsRecent();
+
+    // Merge sessions
+    void testMergeSessions_DismissesOthersAndSetsMergedInto();
+    void testMergeSessions_RejectsCrossProjectSelection();
+    void testMergeSessions_RejectsSingleSession();
+    void testUnmergeSession_RestoresDismissedAndClearsMergedInto();
+    void testMergePersistsToMetadataFile();
+    void testContextMenu_MergeActionShownForMultiSameProject();
+    void testContextMenu_MergeActionHiddenForCrossProject();
+    void testContextMenu_UnmergeActionShownForMergedAway();
+
+    // Broadcast message
+    void testContextMenu_BroadcastShownForGroupWithActiveSessions();
+    void testContextMenu_BroadcastHiddenWhenNoActiveSession();
+    void testBroadcastMessage_CallsSendTextOnEachActive();
+    void testBroadcastMessage_SkipsMissingSessions();
+
+    // Category-map (longest common prefix) tests
+    void testCategoryMap_GroupsCommonPrefix();
+    void testCategoryMap_GroupsLongestPrefix();
+    void testCategoryMap_StandaloneNoRelatives();
+    void testCategoryMap_NormalizesUnderscoreToHyphen();
+    void testCategoryMap_SingleTokenProjectWithMultiTokenRelatives();
+    void testCategoryMap_EmptyAndSpecialInputs();
+
+    // Alias / override / suppression routing in the live tree
+    void testAliasReroutesCategoryInTree();
+    void testWorkdirOverrideBeatsAlias();
+    void testSuppressedCategoryUngroupsToStandalone();
+    void testUngroupCategoryClearsAliasIfPresent();
+    void testUngroupCategoryAddsSuppressForLcpCategory();
+
+    // Consolidate duplicates predicate
+    void testConsolidateDialogOpensWithAllProjectSessions();
+    void testCanOfferConsolidate_HiddenWhenSingleSession();
+
+    // User-defined empty categories
+    void testCreateUserCategory_ShowsAsEmptyTopLevel();
+    void testCreateUserCategory_LosesEmptySuffixWhenProjectDrops();
+
+    // Rename category
+    void testRenameCategory_AddsAliasEntry();
+    void testRenameCategory_UsesNewLabelInTree();
+
+    // Multi-select drag
+    void testMultiDrop_AppliesAllSourceRoutingsInOneCall();
+
+    // LLM-assisted reorganize
+    void testBuildTreeInventory_PopulatesProjectsAndCounts();
+    void testBuildTreeInventory_IncludesAliasesAndOverrides();
+    void testReorganizeApplyAtomicallyPersistsAllChanges();
+    void testReorganizeApplyOnEmptyProposalIsNoOp();
+
+    // Vim-style hotkey dispatch (handleTreeAction)
+    void testHandleTreeAction_ArchiveArchivesCurrentSession();
+    void testHandleTreeAction_PinTogglesPin();
+    void testHandleTreeAction_RenameOnCategoryOpensRenameDialog();
+    void testHandleTreeAction_RenameOnSessionUpdatesDescription();
+
+    // Subagent detection + state token routing
+    void testIsSubagentSession_SessionNameHeuristic();
+    void testIsSubagentSession_MetadataFlag();
+    void testIsSubagentSession_NotASubagent();
+    void testStateTokenFor_SubagentFlagReturnsSubagentToken();
+    void testDefaultVisibleStatesExcludesSubagent();
+    void testIsSubagentPersistsToMetadataFile();
 };
 
 }

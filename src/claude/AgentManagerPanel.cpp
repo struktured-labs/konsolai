@@ -5,6 +5,9 @@
 
 #include "AgentManagerPanel.h"
 #include "AgentSessionLinker.h"
+#include "LettaAgentProvider.h"
+#include "LettaSendMessageDialog.h"
+#include "TreeToolbar.h"
 
 #include <QBrush>
 #include <QColor>
@@ -56,6 +59,9 @@ void AgentManagerPanel::setupUi()
 
     // Agent tree
     m_tree = new QTreeWidget(this);
+    auto *toolbar = new TreeToolbar(m_tree, this);
+    layout->addWidget(toolbar);
+
     m_tree->setObjectName(QStringLiteral("agentTree"));
     m_tree->setHeaderLabels({i18n("Agent"), i18n("Status")});
     m_tree->setColumnCount(2);
@@ -241,6 +247,57 @@ void AgentManagerPanel::rebuildTree()
                 QString prefix = (status.state == AgentStatus::Error) ? QStringLiteral("\u26A0 ") : QStringLiteral("\u2713 ");
                 resultItem->setText(0, prefix + status.lastSummary);
                 resultItem->setFlags(resultItem->flags() & ~Qt::ItemIsSelectable);
+            }
+
+            // Letta-specific detail children (model, tools, memory blocks)
+            if (auto *letta = qobject_cast<LettaAgentProvider *>(prov)) {
+                const LettaAgentSummary summary = letta->cachedSummary(info.id);
+
+                if (!summary.model.isEmpty()) {
+                    auto *modelItem = new QTreeWidgetItem(item);
+                    modelItem->setText(0, i18n("Model: %1", summary.model));
+                    modelItem->setFlags(modelItem->flags() & ~Qt::ItemIsSelectable);
+                }
+
+                if (!summary.tools.isEmpty()) {
+                    auto *toolsItem = new QTreeWidgetItem(item);
+                    toolsItem->setText(0, i18n("Tools (%1)", summary.tools.size()));
+                    toolsItem->setFlags(toolsItem->flags() & ~Qt::ItemIsSelectable);
+                    for (const QString &tool : summary.tools) {
+                        auto *toolItem = new QTreeWidgetItem(toolsItem);
+                        toolItem->setText(0, tool);
+                        toolItem->setFlags(toolItem->flags() & ~Qt::ItemIsSelectable);
+                    }
+                }
+
+                const QList<LettaMemoryBlock> blocks = letta->cachedMemoryBlocks(info.id);
+                if (!blocks.isEmpty()) {
+                    auto *memItem = new QTreeWidgetItem(item);
+                    memItem->setText(0, i18n("Memory"));
+                    memItem->setFlags(memItem->flags() & ~Qt::ItemIsSelectable);
+                    for (const LettaMemoryBlock &blk : blocks) {
+                        auto *blkItem = new QTreeWidgetItem(memItem);
+                        QString label = blk.label;
+                        if (blk.limit > 0) {
+                            blkItem->setText(0, i18n("%1: %2 / %3 chars", label, blk.value.size(), blk.limit));
+                        } else {
+                            blkItem->setText(0, i18n("%1: %2 chars", label, blk.value.size()));
+                        }
+                        blkItem->setFlags(blkItem->flags() & ~Qt::ItemIsSelectable);
+                        // Show the actual content as a leaf child for quick scan.
+                        auto *valItem = new QTreeWidgetItem(blkItem);
+                        valItem->setText(0, blk.value);
+                        valItem->setFlags(valItem->flags() & ~Qt::ItemIsSelectable);
+                    }
+                }
+
+                const QString lettaErr = letta->lastError();
+                if (!lettaErr.isEmpty()) {
+                    auto *errItem = new QTreeWidgetItem(item);
+                    errItem->setText(0, i18n("\u26A0 %1", lettaErr));
+                    errItem->setForeground(0, QBrush(QColor(180, 80, 80)));
+                    errItem->setFlags(errItem->flags() & ~Qt::ItemIsSelectable);
+                }
             }
 
             // Brief
@@ -438,6 +495,22 @@ void AgentManagerPanel::showContextMenu(const QPoint &pos)
     menu.addAction(QIcon::fromTheme(QStringLiteral("media-playback-start")), i18n("Trigger Run..."), this, [this, prov, agentId]() {
         actionTriggerRun(prov, agentId);
     });
+
+    // Letta-specific: open the rich Send Message dialog (shows reply inline).
+    if (auto *letta = qobject_cast<LettaAgentProvider *>(prov)) {
+        QString agentName;
+        for (const AgentInfo &info : prov->agents()) {
+            if (info.id == agentId) {
+                agentName = info.name;
+                break;
+            }
+        }
+        menu.addAction(QIcon::fromTheme(QStringLiteral("mail-send")), i18n("Send Message..."), this, [this, letta, agentId, agentName]() {
+            auto *dlg = new LettaSendMessageDialog(letta->apiClient(), agentId, agentName, this);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            dlg->show();
+        });
+    }
 
     menu.addSeparator();
 

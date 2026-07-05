@@ -155,6 +155,17 @@ void ClaudeMenu::createActions()
 
     addSeparator();
 
+    // Reorganize Session Tree with AI
+    QAction *reorganizeAction = addAction(i18n("R&eorganize Tree with AI…"));
+    reorganizeAction->setObjectName(QStringLiteral("reorganizeTreeAction"));
+    reorganizeAction->setIcon(QIcon::fromTheme(QStringLiteral("view-list-tree")));
+    reorganizeAction->setToolTip(i18n("Ask Claude to propose changes to your session tree organization"));
+    connect(reorganizeAction, &QAction::triggered, this, [this]() {
+        Q_EMIT reorganizeTreeRequested();
+    });
+
+    addSeparator();
+
     // Clear All Stale Hooks
     m_clearStaleHooksAction = addAction(i18n("Clear All Stale &Hooks"));
     m_clearStaleHooksAction->setIcon(QIcon::fromTheme(QStringLiteral("edit-clear-all")));

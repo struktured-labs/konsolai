@@ -64,6 +64,11 @@ ecm_add_tests(
     NotificationManagerTest.cpp
     ProfileClaudeTest.cpp
     TokenUsageTest.cpp
+    LettaApiClientTest.cpp
+    LettaAgentProviderTest.cpp
+    MergePolicyTest.cpp
+    BroadcastPolicyTest.cpp
+    ClaudeAssistantPromptBuilderTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )
 
@@ -71,9 +76,14 @@ ecm_add_tests(
     ClaudeTabIndicatorTest.cpp
     ClaudeStatusWidgetTest.cpp
     SessionManagerPanelTest.cpp
+    SessionTreeWidgetTest.cpp
     KeyboardResponsivenessTest.cpp
     AgentManagerPanelTest.cpp
     AgentSessionLinkerTest.cpp
+    TreeToolbarTest.cpp
+    MergeSessionsDialogTest.cpp
+    BroadcastDialogTest.cpp
+    ReorganizeTreeDialogTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS} Qt::Widgets
 )
 

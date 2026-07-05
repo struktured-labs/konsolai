@@ -161,6 +161,7 @@ private:
     QLineEdit *m_worktreeNameEdit = nullptr;
     QComboBox *m_modelCombo = nullptr;
     QCheckBox *m_autoApproveReadCheck = nullptr;
+    QLineEdit *m_extraArgsEdit = nullptr;
     QLabel *m_previewLabel = nullptr;
 
     // Resume session widgets

@@ -8,6 +8,7 @@
 
 #include "konsoleprivate_export.h"
 
+#include "ClaudeAssistantPromptBuilder.h"
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
 
@@ -15,6 +16,9 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QHBoxLayout>
+#include <QHash>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -26,6 +30,7 @@
 #include <QSet>
 #include <QSettings>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -34,6 +39,7 @@ namespace Konsolai
 {
 
 class ClaudeSessionRegistry;
+struct MergeFieldChoices;
 
 /**
  * Session metadata stored persistently
@@ -78,8 +84,22 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     // Human-readable description (first prompt or user-set label)
     QString description;
 
+    // Merge linkage: non-empty if this session was merged into another.
+    // Holds the sessionId of the primary session this one was collapsed into.
+    QString mergedInto;
+
     // Agent linkage: non-empty if this session was created from agent attach
     QString agentId;
+
+    // Subagent linkage: true if this session was spawned as a subagent of
+    // another Claude session (e.g. from a Task tool call or an agent-fleet
+    // dispatched worker).  Hidden from the main tree by default; toggled on
+    // via the "Subagents" chip in the filter overflow menu.
+    //
+    // Set by future subagent-spawn plumbing (not wired to any producer today).
+    // The heuristic isSubagentSession() covers the runtime detection cases
+    // via sessionName pattern + jsonl-path check even when this flag is false.
+    bool isSubagent = false;
 
     // Persisted subagent/subprocess snapshots (survive restart)
     QVector<SubagentInfo> subagents;
@@ -233,6 +253,128 @@ public Q_SLOTS:
     void purgeDismissed();
 
     /**
+     * Merge a set of same-project sessions into a single primary.
+     * The primary's metadata is updated with the unioned values per the
+     * provided choices. Each non-primary session is marked isDismissed=true
+     * and gets mergedInto=<primaryId>. Reversible via unmergeSession().
+     *
+     * Returns false if validation fails (different workdirs, primary not in
+     * selection, fewer than 2 sessions, unknown ids, etc.).
+     */
+    bool mergeSessions(const QStringList &sessionIds, const QString &primarySessionId, const MergeFieldChoices &choices);
+
+    /**
+     * Reverse a prior merge — restore the dismissed session and clear its
+     * mergedInto field. Does NOT roll back metadata changes the primary
+     * already inherited. Returns false if the session is unknown or wasn't
+     * in a merged state.
+     */
+    bool unmergeSession(const QString &dismissedSessionId);
+
+    /**
+     * Predicate used by the context menu to decide whether to surface the
+     * "Merge Selected (N)..." action: requires ≥2 non-dismissed known
+     * sessions all sharing the same workingDirectory. Returned for tests so
+     * the gating logic can be exercised without driving the menu modally.
+     */
+    bool canOfferMergeForSelection(const QStringList &sessionIds) const;
+
+    /**
+     * Predicate used by the context menu to decide whether to surface the
+     * "Unmerge..." action for a dismissed session.
+     */
+    bool canOfferUnmergeForSession(const QString &sessionId) const;
+
+    /**
+     * Send a templated message to N active sessions. For each, substitutes the
+     * template per-recipient and calls ClaudeSession::sendText() followed by a
+     * newline keypress when pressEnterAfterEach is true. Skips any sessionId
+     * not currently in m_activeSessions (defensive — caller already filtered).
+     *
+     * Returns the count of sessions the message was sent to.
+     */
+    int broadcastMessage(const QStringList &sessionIds, const QString &templateText, bool pressEnterAfterEach);
+
+    /**
+     * Predicate used by the context menu to decide whether to surface the
+     * "Broadcast Message..." action: requires at least one of the provided
+     * session ids to be currently active (in m_activeSessions). Used by tests
+     * so the gating logic can be exercised without driving the menu modally.
+     */
+    bool canOfferBroadcastForSelection(const QStringList &sessionIds) const;
+
+    /**
+     * Predicate used by the context menu to decide whether to surface the
+     * "Consolidate Duplicates..." action on a project-group node: requires the
+     * given workingDirectory to have ≥2 known sessions in m_metadata
+     * (regardless of state). Public for testing without driving the menu.
+     */
+    bool canOfferConsolidateForProject(const QString &workingDirectory) const;
+
+    /**
+     * Dissolve a category so its children become top-level:
+     *  - If a CategoryAliases entry points AT this category → remove the alias(es)
+     *  - Else if a WorkdirCategoryOverrides entry points at this category → remove the override(s)
+     *  - Else (LCP-created) → add to SuppressCategories.
+     *
+     * categoryKey is the raw category name (no "category:" prefix).
+     */
+    void ungroupCategory(const QString &categoryKey);
+
+    /**
+     * Handle a drop event from the tree: one-or-more source composite keys
+     * ("group:..." or "category:...") dropped onto a target composite key
+     * ("category:...").  Prompts the user once for confirmation and persists
+     * an alias/override for each source in a single batch.
+     */
+    void handleDropRequest(const QStringList &sourceKeys, const QString &targetCategoryKey);
+
+    /**
+     * Create a brand-new empty user category (persisted in
+     * KonsolaiSettings::userCategories()) and refresh the tree so it appears
+     * at top level immediately.  Prompts the user for the name.
+     */
+    void createUserCategory();
+
+    /**
+     * Rename an existing category.  Under the hood this is stored as a
+     * CategoryAliases entry pointing oldKey → newName, which reroutes the
+     * bucket everywhere the LCP grouper or a user-created category refers
+     * to oldKey.
+     */
+    void renameCategory(const QString &oldKey);
+
+    /**
+     * Open the LLM-assisted reorganize dialog. Constructs the current
+     * TreeInventory from m_metadata + m_categoryMap + settings, blocks in
+     * exec(), applies the returned proposal atomically on Accept.
+     */
+    void openReorganizeTreeDialog();
+
+    /**
+     * Ask Claude to suggest a name for the given selection (workdirs).
+     * Called from context menu / hotkey. Presents the suggestion via a
+     * confirmation QInputDialog pre-filled with the suggested value.
+     *
+     * If accepted, applies it as a category alias (renaming the category the
+     * workdirs are grouped under) or, if the projects have no shared category,
+     * as workdir overrides — routing each into the new category.
+     */
+    void suggestCategoryName(const QStringList &workdirs);
+
+    /**
+     * Snapshot the current tree state as a TreeInventory. Public for tests
+     * and reused by openReorganizeTreeDialog().
+     */
+    TreeInventory buildTreeInventory() const;
+
+    /**
+     * Apply a ReorganizeProposal to KonsolaiSettings in one batch. Public so
+     * tests can drive the atomic-apply without a live dialog.
+     */
+    void applyReorganizeProposal(const ReorganizeProposal &proposal);
+
+    /**
      * Set the agentId on a session's metadata (for agent-originated sessions)
      */
     void setSessionAgentId(const QString &sessionId, const QString &agentId);
@@ -320,10 +462,39 @@ Q_SIGNALS:
      */
     void usageAggregateChanged();
 
+public Q_SLOTS:
+    /**
+     * Dispatch a vim-hotkey action (from SessionTreeWidget) against the
+     * current tree item.  Actions: "attach", "archive", "pin", "close",
+     * "dismiss", "rename", "new-category".  No-op for actions that don't
+     * make sense on the current item's type (e.g. "archive" on a category).
+     *
+     * Public so tests can drive it directly; production wiring goes through
+     * SessionTreeWidget::actionRequested.
+     */
+    void handleTreeAction(const QString &action);
+
 private Q_SLOTS:
     void onItemDoubleClicked(QTreeWidgetItem *item, int column);
     void onContextMenu(const QPoint &pos);
     void onNewSessionClicked();
+
+public:
+    /**
+     * Detect whether a session is a "subagent" — spawned as a worker of
+     * another Claude session (Task tool, agent-fleet dispatch, etc.).
+     *
+     * Priority-ordered detection:
+     *   1. meta.isSubagent (persisted flag — future producer)
+     *   2. sessionName matches konsolai's own agent-fleet pattern
+     *      (agent-<16-hex>)
+     *   3. Newest jsonl for this session's project contains "/subagents/"
+     *      in its path.
+     *
+     * Test hook: public so SessionManagerPanelTest can exercise the
+     * classifier without driving the full tree pipeline.
+     */
+    bool isSubagentSession(const SessionMetadata &meta) const;
 
 private:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -346,6 +517,8 @@ private:
     void showSubprocessOutput(const SubprocessInfo &info);
     void editSessionDescription(const QString &sessionId);
     void editSessionBudget(ClaudeSession *session, const QString &sessionId);
+    void openBroadcastDialog(const QStringList &activeIds);
+    void openConsolidateDialog(const QString &projectKey);
     void cleanupStaleSockets();
     void ensureHooksConfigured(ClaudeSession *session);
     SessionMetadata *findMetadata(const QString &sessionId);
@@ -362,18 +535,54 @@ private:
     void pruneStaleKeys();
     bool isTreeInteractionActive() const;
 
+    // Project-group helpers (replaces state categories).
+    QTreeWidgetItem *ensureProjectGroup(const QString &workingDirectory);
+    QString projectGroupKey(const QString &workingDirectory) const;
+
+    // Category-grouping (longest common prefix among project basenames).
+    // Builds m_categoryMap (workdir → categoryKey) from a snapshot of workdirs.
+    // O(N^2) on project count; fine for hundreds of projects.
+public:
+    static QStringList projectTokens(const QString &workingDirectory);
+    static QHash<QString, QString> buildCategoryMap(const QList<QString> &workingDirectories);
+
+private:
+    // Live count: number of distinct projects sharing this category key (m_categoryMap).
+    int categoryProjectCount(const QString &categoryKey) const;
+    QString stateTokenFor(const SessionMetadata &meta, bool isLive) const;
+    QIcon stateIcon(const QString &token) const;
+    QString stateLabel(const QString &token) const;
+    int sessionCountByState(const QString &token) const;
+
+    // Filter chip toolbar.
+    void buildFilterChips(QHBoxLayout *into);
+    void onFilterChipToggled(const QString &token, bool on);
+    void persistVisibleStates();
+
     QTreeWidget *m_treeWidget = nullptr;
     QLabel *m_emptyStateLabel = nullptr;
     QLineEdit *m_filterEdit = nullptr;
     QPushButton *m_newSessionButton = nullptr;
     QPushButton *m_collapseButton = nullptr;
-    QTreeWidgetItem *m_pinnedCategory = nullptr;
-    QTreeWidgetItem *m_activeCategory = nullptr;
-    QTreeWidgetItem *m_detachedCategory = nullptr;
-    QTreeWidgetItem *m_closedCategory = nullptr;
-    QTreeWidgetItem *m_archivedCategory = nullptr;
-    QTreeWidgetItem *m_dismissedCategory = nullptr;
-    QTreeWidgetItem *m_discoveredCategory = nullptr;
+
+    // Project-group items, keyed by workingDirectory. Replaces the state-category items.
+    QHash<QString, QTreeWidgetItem *> m_projectGroups;
+
+    // Category map: workingDirectory → category key (longest common token prefix).
+    // Rebuilt at the start of each updateTreeWidgetWithLiveSessions().
+    QHash<QString, QString> m_categoryMap;
+
+    // Top-level category items, keyed by category key (e.g. "cowir", "penta-dragon").
+    // Only created when at least 2 projects share the category key.
+    QHash<QString, QTreeWidgetItem *> m_categoryGroups;
+
+    // Visible state tokens — controls which sessions are rendered.
+    // Tokens: active/detached/pinned/closed/archived/dismissed/discovered
+    QSet<QString> m_visibleStates;
+
+    // Filter chip row above the tree.
+    QWidget *m_filterChipsRow = nullptr;
+    QHash<QString, QToolButton *> m_filterChips;
 
     QProgressBar *m_loadingBar = nullptr;
     bool m_initialized = false;
@@ -399,6 +608,11 @@ private:
 
     // Cached live session names from last async tmux query
     QSet<QString> m_cachedLiveNames;
+
+    // Memoized isSubagentSession() results keyed by sessionId.  The heuristic's
+    // jsonl-path check hits disk, so we cache — invalidated whenever metadata
+    // for that session changes.  Mutable so it's writable from const method.
+    mutable QHash<QString, bool> m_subagentClassificationCache;
 
     // Cached remote live session names (queried via SSH, refreshed less frequently)
     QSet<QString> m_cachedRemoteLiveNames;

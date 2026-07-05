@@ -203,7 +203,7 @@ bool ClaudeSessionWizard::autoApproveRead() const
 
 QString ClaudeSessionWizard::claudeArgs() const
 {
-    return QString();
+    return m_extraArgsEdit ? m_extraArgsEdit->text().trimmed() : QString();
 }
 
 QString ClaudeSessionWizard::taskPrompt() const
@@ -558,6 +558,7 @@ void ClaudeSessionWizard::setupUi()
     m_modelCombo->addItem(QStringLiteral("claude-sonnet-4"));
     m_modelCombo->addItem(QStringLiteral("claude-opus-4"));
     m_modelCombo->addItem(QStringLiteral("claude-haiku"));
+    m_modelCombo->addItem(QStringLiteral("claude-fable-5"));
     optionsRow->addWidget(m_modelCombo);
     optionsRow->addSpacing(16);
     m_autoApproveReadCheck = new QCheckBox(i18n("Auto-approve Read"), this);
@@ -565,6 +566,23 @@ void ClaudeSessionWizard::setupUi()
     optionsRow->addWidget(m_autoApproveReadCheck);
     optionsRow->addStretch();
     mainLayout->addLayout(optionsRow);
+
+    // --- Extra Claude args row ---
+    auto *argsRow = new QHBoxLayout();
+    argsRow->addWidget(new QLabel(i18n("Extra args:"), this));
+    m_extraArgsEdit = new QLineEdit(this);
+    m_extraArgsEdit->setObjectName(QStringLiteral("wizardExtraArgsEdit"));
+    {
+        QString globalDefault;
+        if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
+            globalDefault = settings->extraClaudeArgs();
+        }
+        m_extraArgsEdit->setPlaceholderText(globalDefault.isEmpty() ? i18n("Extra claude CLI arguments (e.g. --debug)") : globalDefault);
+        m_extraArgsEdit->setToolTip(
+            i18n("Override the default extra arguments passed to the claude CLI. Leave blank to use the global default shown as placeholder."));
+    }
+    argsRow->addWidget(m_extraArgsEdit, 1);
+    mainLayout->addLayout(argsRow);
 
     mainLayout->addSpacing(4);
 

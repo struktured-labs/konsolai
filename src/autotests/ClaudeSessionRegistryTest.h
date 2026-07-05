@@ -33,6 +33,15 @@ private Q_SLOTS:
     void testReadClaudeConversationsEmpty();
     void testReadClaudeConversationsParsing();
 
+    // hashedProjectPath — must match Claude Code's on-disk normalization
+    // exactly (/ AND _ AND . all collapse to -). Any regression here silently
+    // breaks resume detection, token tracking, and conversation discovery.
+    void testHashedProjectPath_HyphenatesSlashes();
+    void testHashedProjectPath_HyphenatesUnderscores();
+    void testHashedProjectPath_HyphenatesDots();
+    void testHashedProjectPath_MatchesClaudeCodeDrMarioRlCase();
+    void testHashedProjectPath_HandlesWorktreePath();
+
     // Async operations
     void testRefreshOrphanedSessionsAsyncCompletes();
 };

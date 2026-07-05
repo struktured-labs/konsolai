@@ -26,6 +26,8 @@ private Q_SLOTS:
     void testDefaultGitRemoteRoot();
     void testDefaultGithubApiToken();
     void testDefaultModel();
+    void testDefaultExtraClaudeArgs();
+    void testExtraClaudeArgsRoundTrip();
     void testDefaultGitMode();
     void testDefaultWorktreeSourceRepo();
     void testDefaultYoloMode();
@@ -62,6 +64,25 @@ private Q_SLOTS:
 
     // Signal test
     void testSettingsChangedSignal();
+
+    // Session-tree alias / override / suppression persistence
+    void testDefaultCategoryAliasesEmpty();
+    void testCategoryAliasesRoundTrip();
+    void testDefaultWorkdirCategoryOverridesEmpty();
+    void testWorkdirCategoryOverridesRoundTrip();
+    void testDefaultSuppressedCategoriesEmpty();
+    void testSuppressedCategoriesRoundTrip();
+    void testAddRemoveCategoryAlias();
+    void testAddRemoveWorkdirOverride();
+    void testAddRemoveSuppressedCategory();
+
+    // User-defined empty categories
+    void testDefaultUserCategoriesEmpty();
+    void testUserCategoriesRoundTrip();
+    void testAddRemoveUserCategory();
+
+    // Session-tree default visibility
+    void testDefaultVisibleStatesDoesNotIncludeSubagent();
 };
 
 }
