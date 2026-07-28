@@ -44,3 +44,8 @@ doxydoc/
 logs/
 tmp/
 doc/manual/*.html
+
+# Konsolai — local-only artifacts and machine-specific setup
+Testing/Temporary/
+setup-sudoers.sh
+.claude/settings.local.json

@@ -6,6 +6,8 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 
 **Claude Integration**
 - 1 Tab = 1 Claude Session with tmux-backed persistence
+- Defaults to Claude Opus 5 with the 1M-token context window (`[1m]` beta) and max effort; per-session model override in the wizard
+- Model-aware context-usage indicator in the status bar (`Ctx:NN%`) that scores against the session's real window (1M for Opus/Sonnet gen 4+, 200K otherwise)
 - Claude hooks integration for real-time state tracking (idle/working/waiting)
 - Session wizard for project setup, git worktrees, and task configuration
 
@@ -15,7 +17,13 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 - Level 3: Auto-continue with configurable prompt when idle
 
 **Session Management**
-- Sidebar panel with pinned, active, detached, closed, archived, and discovered categories
+- Sidebar tree organized by project **category** (nature-based grouping via longest-common-prefix, with user aliases, per-workdir overrides, and suppression rules) — session state (active/detached/pinned/closed) is shown via color and icon rather than as top-level buckets
+- Filter chips (Active / Detached / Pinned) with an overflow menu for Closed / Archived / Dismissed / Discovered / Subagents
+- **Fleet launcher** — one action resumes the latest session for every project in a category (focuses the tab if already running, otherwise resumes the newest conversation)
+- **Drag-and-drop** node reorganization with persistence (auto-expand on hover, children promoted on ungroup), plus a mouse-free "Move to Category" submenu
+- **Vim-style navigation** (`j`/`k`/`h`/`l`, `gg`/`G`, `/`, `Enter`, `a`/`p`/`c`/`x`/`dd`/`r`/`n`)
+- Clean session names — a renamed session's description IS the tab and tree label; project identity stays in the tooltip
+- Subagent-created sessions hidden by default, revealed via the Subagents filter
 - Automatic detection and reattachment of orphaned tmux sessions
 - Remote SSH sessions with full yolo mode support, including "Browse Live Sessions..." in the wizard to attach to a running remote tmux (safe attach: exact-name match, has-session pre-check, never silently creates a new session)
 - Persisted SSH info in the session registry so remote sessions survive across Konsolai restarts
@@ -153,12 +161,12 @@ bash Testing/run-all-gui-tests.sh
 │  │  ┌──────────────────┐ ┌──────────────────┐              │    │
 │  │  │ SessionManager   │ │ AgentManager     │              │    │
 │  │  │ Panel            │ │ Panel            │              │    │
-│  │  │  - Pinned        │ │  - AgentProvider │              │    │
-│  │  │  - Active        │ │    (abstract)    │              │    │
-│  │  │  - Detached      │ │  - AgentFleet    │              │    │
-│  │  │  - Closed        │ │    Provider      │              │    │
-│  │  │  - Archived      │ │  - Letta         │              │    │
-│  │  │  - Discovered    │ │    Provider      │              │    │
+│  │  │  - Categories    │ │  - AgentProvider │              │    │
+│  │  │  - State: color  │ │    (abstract)    │              │    │
+│  │  │  - Fleet launch  │ │  - AgentFleet    │              │    │
+│  │  │  - Drag & drop   │ │    Provider      │              │    │
+│  │  │  - Vim keys      │ │  - Letta         │              │    │
+│  │  │  - Subagents     │ │    Provider      │              │    │
 │  │  └──────────────────┘ └──────────────────┘              │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
