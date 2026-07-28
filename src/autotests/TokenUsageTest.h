@@ -25,12 +25,15 @@ private Q_SLOTS:
     void testFormatCompactThousands();
     void testFormatCompactMillions();
     void testContextWindowSizeOpus();
+    void testContextWindowSizeOpus5();
     void testContextWindowSizeSonnet();
+    void testContextWindowSizeSonnet5();
     void testContextWindowSizeHaiku();
     void testContextWindowSizeDefault();
     void testContextPercentBasic();
     void testContextPercentNoData();
     void testContextPercentHigh();
+    void testContextPercentOpus5NeverExceeds100();
 };
 
 }

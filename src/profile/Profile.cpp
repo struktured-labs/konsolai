@@ -181,7 +181,7 @@ const std::vector<Profile::PropertyInfo> Profile::DefaultProperties = {
     // Claude Integration
     {ClaudeEnabled, "ClaudeEnabled", CLAUDE_GROUP, false},
     {ClaudeTmuxPersistence, "ClaudeTmuxPersistence", CLAUDE_GROUP, true},
-    {ClaudeModel, "ClaudeModel", CLAUDE_GROUP, QLatin1String("claude-sonnet-4")},
+    {ClaudeModel, "ClaudeModel", CLAUDE_GROUP, QLatin1String("claude-opus-5[1m]")},
     {ClaudeArgs, "ClaudeArgs", CLAUDE_GROUP, QString()},
     {ClaudeNotificationChannels, "ClaudeNotificationChannels", CLAUDE_GROUP, 15}, // All channels enabled by default
     {ClaudeAutoApproveRead, "ClaudeAutoApproveRead", CLAUDE_GROUP, false},

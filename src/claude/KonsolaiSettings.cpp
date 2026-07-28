@@ -104,7 +104,9 @@ void KonsolaiSettings::setGithubApiToken(const QString &token)
 QString KonsolaiSettings::defaultModel() const
 {
     KConfigGroup group(m_config, QStringLiteral("Claude"));
-    return group.readEntry("DefaultModel", QStringLiteral("claude-sonnet-4"));
+    // The [1m] suffix opts into the 1M-token context beta. Bare "claude-opus-5"
+    // would be the 200K window; the default deliberately requests 1M.
+    return group.readEntry("DefaultModel", QStringLiteral("claude-opus-5[1m]"));
 }
 
 void KonsolaiSettings::setDefaultModel(const QString &model)

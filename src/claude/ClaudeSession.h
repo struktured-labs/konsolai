@@ -62,12 +62,32 @@ struct KONSOLEPRIVATE_EXPORT TokenUsage {
 
     /**
      * Get the context window size for the detected model (in tokens).
-     * Opus 4.6 and Sonnet 4.6 support 1M beta; others default to 200K.
+     *
+     * Konsolai launches Opus and Sonnet with the 1M-token context beta
+     * (e.g. "claude-opus-5[1m]"), but the JSONL records the bare model name
+     * ("claude-opus-5"), so this keys off the family and generation digit.
+     * Generation 4 and up — opus-4/5/…, sonnet-4/5/… — are 1M; the legacy
+     * 3-series (named "3-opus"/"3-5-sonnet") and Haiku stay at 200K.
+     *
+     * Matching the generation digit rather than a fixed "opus-4"/"sonnet-4"
+     * literal keeps this correct as new models ship (opus-6, sonnet-7, …).
+     * The previous hard-coded check silently defaulted opus-5 to 200K, so a
+     * session near a 588K-token 1M window reported ~294% context usage.
      */
     quint64 contextWindowSize() const
     {
-        if (detectedModel.contains(QStringLiteral("opus-4")) || detectedModel.contains(QStringLiteral("sonnet-4"))) {
-            return 1000000;
+        for (const QString &family : {QStringLiteral("opus-"), QStringLiteral("sonnet-")}) {
+            const int idx = detectedModel.indexOf(family);
+            if (idx < 0) {
+                continue;
+            }
+            const int digitPos = idx + family.size();
+            if (digitPos < detectedModel.size()) {
+                const QChar gen = detectedModel.at(digitPos);
+                if (gen >= QLatin1Char('4') && gen <= QLatin1Char('9')) {
+                    return 1000000;
+                }
+            }
         }
         return 200000;
     }

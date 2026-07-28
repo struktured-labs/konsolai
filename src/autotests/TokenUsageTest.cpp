@@ -101,10 +101,28 @@ void TokenUsageTest::testContextWindowSizeOpus()
     QCOMPARE(usage.contextWindowSize(), quint64(1000000));
 }
 
+void TokenUsageTest::testContextWindowSizeOpus5()
+{
+    // Regression: the 5-series (and any future opus-N) must map to the 1M
+    // window konsolai launches Opus with ("claude-opus-5[1m]").  The JSONL
+    // records the bare "claude-opus-5" — a heuristic keyed on "opus-4" alone
+    // silently defaulted it to 200K, so a 588K-token session read as ~294%.
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-opus-5");
+    QCOMPARE(usage.contextWindowSize(), quint64(1000000));
+}
+
 void TokenUsageTest::testContextWindowSizeSonnet()
 {
     TokenUsage usage;
     usage.detectedModel = QStringLiteral("claude-sonnet-4-6");
+    QCOMPARE(usage.contextWindowSize(), quint64(1000000));
+}
+
+void TokenUsageTest::testContextWindowSizeSonnet5()
+{
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-sonnet-5");
     QCOMPARE(usage.contextWindowSize(), quint64(1000000));
 }
 
@@ -143,6 +161,20 @@ void TokenUsageTest::testContextPercentHigh()
     usage.detectedModel = QStringLiteral("claude-haiku-4-5-20251001");
     usage.lastContextTokens = 180000; // 90% of 200K
     QVERIFY(qAbs(usage.contextPercent() - 90.0) < 0.01);
+}
+
+void TokenUsageTest::testContextPercentOpus5NeverExceeds100()
+{
+    // Exact reproduction of the reported bug: cowir-adhoc's last assistant
+    // message was claude-opus-5 with 587,552 context tokens.  With the stale
+    // 200K default that read as 293.8%; against opus-5's real 1M window it is
+    // 58.8%.  Guard both the specific value and the invariant that a healthy
+    // in-window session never displays over 100%.
+    TokenUsage usage;
+    usage.detectedModel = QStringLiteral("claude-opus-5");
+    usage.lastContextTokens = 587552;
+    QVERIFY(qAbs(usage.contextPercent() - 58.7552) < 0.01);
+    QVERIFY(usage.contextPercent() <= 100.0);
 }
 
 QTEST_GUILESS_MAIN(TokenUsageTest)

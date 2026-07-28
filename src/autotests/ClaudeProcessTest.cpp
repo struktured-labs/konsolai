@@ -68,14 +68,17 @@ void ClaudeProcessTest::testIsRunning()
 void ClaudeProcessTest::testModelName()
 {
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Default), QString());
-    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-4-7[1m]"));
+    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-5[1m]"));
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Sonnet), QStringLiteral("claude-sonnet-4-6[1m]"));
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Haiku), QStringLiteral("claude-haiku-4-5-20251001"));
 }
 
 void ClaudeProcessTest::testParseModel()
 {
-    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-4-7")), ClaudeProcess::Model::Opus);
+    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-5")), ClaudeProcess::Model::Opus);
+    // The 1M-context beta suffix must still parse as Opus (the default label
+    // and wizard combo now carry it) so it maps to modelName() → opus-5[1m].
+    QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-opus-5[1m]")), ClaudeProcess::Model::Opus);
     QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-sonnet-4-6")), ClaudeProcess::Model::Sonnet);
     QCOMPARE(ClaudeProcess::parseModel(QStringLiteral("claude-haiku-4-5-20251001")), ClaudeProcess::Model::Haiku);
 

@@ -194,7 +194,7 @@ QString ClaudeSessionWizard::claudeModel() const
     if (m_modelCombo) {
         return m_modelCombo->currentText();
     }
-    return QStringLiteral("claude-sonnet-4");
+    return QStringLiteral("claude-opus-5[1m]");
 }
 
 bool ClaudeSessionWizard::autoApproveRead() const
@@ -569,6 +569,7 @@ void ClaudeSessionWizard::setupUi()
     auto *optionsRow = new QHBoxLayout();
     optionsRow->addWidget(new QLabel(i18n("Model:"), this));
     m_modelCombo = new QComboBox(this);
+    m_modelCombo->addItem(QStringLiteral("claude-opus-5[1m]"));
     m_modelCombo->addItem(QStringLiteral("claude-sonnet-4"));
     m_modelCombo->addItem(QStringLiteral("claude-opus-4"));
     m_modelCombo->addItem(QStringLiteral("claude-haiku"));
