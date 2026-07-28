@@ -10,6 +10,7 @@
 #include "../claude/ClaudeSession.h"
 #include "../claude/ClaudeSessionWizard.h"
 #include "../claude/CodexProcess.h"
+#include "../claude/KonsolaiSettings.h"
 
 namespace Konsolai
 {
@@ -24,7 +25,8 @@ private Q_SLOTS:
     void testSelectingCodexChangesAgentKind();
     void testCodexEntryDisabledWhenBinaryMissing();
     void testModelComboSwapsWithAgent();
-    void testGitComboHasSingleNothingEntryAndDefaultsToIt();
+    void testGitUiIsGone();
+    void testCodexModelDoesNotOverwriteClaudeDefault();
 };
 
 void ClaudeSessionWizardAgentTest::testAgentComboExists()
@@ -91,23 +93,34 @@ void ClaudeSessionWizardAgentTest::testModelComboSwapsWithAgent()
     QVERIFY(model->currentText().startsWith(QStringLiteral("claude-")));
 }
 
-void ClaudeSessionWizardAgentTest::testGitComboHasSingleNothingEntryAndDefaultsToIt()
+void ClaudeSessionWizardAgentTest::testGitUiIsGone()
 {
     ClaudeSessionWizard wizard;
-    auto *git = wizard.findChild<QComboBox *>(QStringLiteral("wizardGitModeCombo"));
-    QVERIFY2(git, "git mode combo must be findable");
+    // The git panel was removed entirely: konsolai does not init repos or
+    // create worktrees. Its absence must not break the accessors, which the
+    // create path still calls.
+    QVERIFY2(!wizard.findChild<QComboBox *>(QStringLiteral("wizardGitModeCombo")), "git mode combo must be gone");
+    QVERIFY(!wizard.shouldInitGit());
+    QVERIFY(wizard.worktreeBranch().isEmpty());
+}
 
-    // Exactly one do-nothing option — two was confusing — and it is the
-    // default, so the wizard never pre-creates a repo or worktree.
-    int nothingCount = 0;
-    for (int i = 0; i < git->count(); ++i) {
-        if (git->itemText(i).startsWith(QStringLiteral("Nothing"))) {
-            ++nothingCount;
-        }
-    }
-    QCOMPARE(nothingCount, 1);
-    QCOMPARE(git->count(), 3);
-    QVERIFY(git->currentText().startsWith(QStringLiteral("Nothing")));
+void ClaudeSessionWizardAgentTest::testCodexModelDoesNotOverwriteClaudeDefault()
+{
+    KonsolaiSettings settings;
+    const QString claudeBefore = settings.defaultModel();
+    QVERIFY(claudeBefore.startsWith(QStringLiteral("claude-")));
+
+    ClaudeSessionWizard wizard;
+    auto *agent = wizard.findChild<QComboBox *>(QStringLiteral("wizardAgentCombo"));
+    QVERIFY(agent);
+    agent->setCurrentIndex(1); // Codex
+
+    wizard.saveSelectedModel(&settings);
+
+    // The Codex slug must land in the Codex key. Writing it to DefaultModel
+    // would also break `claude -p` one-shots, which read the same setting.
+    QCOMPARE(settings.defaultModel(), claudeBefore);
+    QVERIFY(settings.codexModel().startsWith(QStringLiteral("gpt-")));
 }
 }
 

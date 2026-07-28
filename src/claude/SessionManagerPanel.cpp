@@ -1057,8 +1057,12 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
         meta.sshHost = session->sshHost();
         meta.sshUsername = session->sshUsername();
         meta.sshPort = session->sshPort();
+        meta.isCodex = session->agentKind() == ClaudeSession::AgentKind::Codex;
         m_metadata[sessionId] = meta;
     } else {
+        // Refresh the agent kind — a reopened session may have been relaunched
+        // under the other CLI.
+        m_metadata[sessionId].isCodex = session->agentKind() == ClaudeSession::AgentKind::Codex;
         // Session was archived/expired/closed, now reopened - clear stale flags
         m_metadata[sessionId].isArchived = false;
         m_metadata[sessionId].isExpired = false;
@@ -3358,13 +3362,8 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             });
         }
 
-        // Create worktree session from this session's project
-        if (!meta.workingDirectory.isEmpty()) {
-            QAction *worktreeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("New Worktree Session..."));
-            connect(worktreeAction, &QAction::triggered, this, [this, meta]() {
-                Q_EMIT worktreeSessionRequested(meta.workingDirectory);
-            });
-        }
+        // Worktree sessions removed: konsolai no longer manages git layout.
+        // Sessions run in the directory you point them at.
 
         // Show Agent — navigate to agent panel for agent-originated sessions
         if (!meta.agentId.isEmpty()) {
@@ -4769,6 +4768,17 @@ QTreeWidgetItem *SessionManagerPanel::addSessionToTree(const SessionMetadata &me
         }
     }
 
+    // Agent badge — a glyph in the indicator column next to the bolts, so you
+    // can tell at a glance which CLI a session is running. Prepended rather
+    // than replacing, since the bolts carry yolo-approval counts.
+    {
+        const QString agentGlyph = meta.isCodex ? QStringLiteral("◆") : QStringLiteral("✳");
+        const QString existing = item->text(1);
+        item->setText(1, existing.isEmpty() ? agentGlyph : agentGlyph + QLatin1Char(' ') + existing);
+        item->setForeground(1, QBrush(meta.isCodex ? QColor(0x10, 0xa3, 0x7f) : QColor(0xd9, 0x77, 0x57)));
+        item->setToolTip(1, meta.isCodex ? i18n("Codex session") : i18n("Claude session"));
+    }
+
     // Set icon based on state (remote sessions use network icons)
     if (meta.isArchived && meta.isExpired) {
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-warning")));
@@ -4860,6 +4870,7 @@ void SessionManagerPanel::loadMetadata()
         meta.isDismissed = obj[QStringLiteral("isDismissed")].toBool();
         // Optional flag — false by default; writer only emits it when true.
         meta.isSubagent = obj[QStringLiteral("isSubagent")].toBool(false);
+        meta.isCodex = obj[QStringLiteral("isCodex")].toBool(false);
         meta.lastAccessed = QDateTime::fromString(obj[QStringLiteral("lastAccessed")].toString(), Qt::ISODate);
         meta.createdAt = QDateTime::fromString(obj[QStringLiteral("createdAt")].toString(), Qt::ISODate);
 
@@ -4985,6 +4996,9 @@ void SessionManagerPanel::saveMetadata(bool sync)
         // emit when true so the JSON stays clean for the common case.
         if (meta.isSubagent) {
             obj[QStringLiteral("isSubagent")] = true;
+        }
+        if (meta.isCodex) {
+            obj[QStringLiteral("isCodex")] = true;
         }
 
         // Approval counts (only save if non-zero)

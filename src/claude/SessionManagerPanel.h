@@ -101,6 +101,10 @@ struct KONSOLEPRIVATE_EXPORT SessionMetadata {
     // via sessionName pattern + jsonl-path check even when this flag is false.
     bool isSubagent = false;
 
+    // Which agent CLI backs this session. Persisted so the tree can show the
+    // right badge for detached/closed sessions, whose ClaudeSession is gone.
+    bool isCodex = false;
+
     // Persisted subagent/subprocess snapshots (survive restart)
     QVector<SubagentInfo> subagents;
     QVector<SubprocessInfo> subprocesses;

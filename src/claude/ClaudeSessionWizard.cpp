@@ -57,24 +57,28 @@ ClaudeSessionWizard::ClaudeSessionWizard(QWidget *parent)
     // Load defaults from settings
     if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
         m_projectRootEdit->setText(settings->projectRoot());
-        m_gitRemoteEdit->setText(settings->gitRemoteRoot());
 
-        int gitMode = settings->gitMode();
-        if (gitMode >= 0 && gitMode <= GitNone) {
-            m_gitModeCombo->setCurrentIndex(gitMode);
+        // The git panel was removed, so these widgets are null now. They stay
+        // guarded rather than deleted so a future build can reinstate the panel
+        // without re-auditing every consumer.
+        if (m_gitRemoteEdit) {
+            m_gitRemoteEdit->setText(settings->gitRemoteRoot());
         }
-        updateGitSubFields();
+        if (m_gitModeCombo) {
+            int gitMode = settings->gitMode();
+            if (gitMode >= 0 && gitMode <= GitNone) {
+                m_gitModeCombo->setCurrentIndex(gitMode);
+            }
+            updateGitSubFields();
+        }
+        if (m_sourceRepoEdit) {
+            const QString sourceRepo = settings->worktreeSourceRepo();
+            if (!sourceRepo.isEmpty()) {
+                m_sourceRepoEdit->setText(sourceRepo);
+            }
+        }
 
-        QString sourceRepo = settings->worktreeSourceRepo();
-        if (!sourceRepo.isEmpty()) {
-            m_sourceRepoEdit->setText(sourceRepo);
-        }
-
-        QString model = settings->defaultModel();
-        int idx = m_modelCombo->findText(model);
-        if (idx >= 0) {
-            m_modelCombo->setCurrentIndex(idx);
-        }
+        // populateModelCombo() already preselects from settings per agent.
 
         // Load budget defaults
         m_timeLimitSpin->setValue(settings->defaultTimeLimitMinutes());
@@ -234,6 +238,25 @@ void ClaudeSessionWizard::populateModelCombo()
         if (idx >= 0) {
             m_modelCombo->setCurrentIndex(idx);
         }
+    }
+}
+
+void ClaudeSessionWizard::saveSelectedModel(KonsolaiSettings *settings) const
+{
+    if (!settings || !m_modelCombo) {
+        return;
+    }
+    const QString model = m_modelCombo->currentText();
+    if (model.isEmpty()) {
+        return;
+    }
+    // Route to the key for the agent that was actually selected. Writing a
+    // Codex slug into DefaultModel would also be picked up by `claude -p`
+    // one-shots, which would then fail on an unknown model.
+    if (agentKind() == ClaudeSession::AgentKind::Codex) {
+        settings->setCodexModel(model);
+    } else {
+        settings->setDefaultModel(model);
     }
 }
 
@@ -560,61 +583,10 @@ void ClaudeSessionWizard::setupUi()
 
     mainLayout->addSpacing(4);
 
-    // --- Git (Optional) panel ---
-    m_gitGroup = new QGroupBox(i18n("Git (Optional)"), this);
-    auto *gitLayout = new QGridLayout(m_gitGroup);
-
-    // Git mode combo
-    gitLayout->addWidget(new QLabel(i18n("Git mode:"), this), 0, 0);
-    m_gitModeCombo = new QComboBox(this);
-    m_gitModeCombo->setObjectName(QStringLiteral("wizardGitModeCombo"));
-    m_gitModeCombo->addItem(i18n("Initialize new repository"));
-    m_gitModeCombo->addItem(i18n("Create as worktree"));
-    m_gitModeCombo->addItem(i18n("Nothing — use the directory as-is"));
-    // Default to doing nothing even before settings load, so the wizard never
-    // silently pre-creates a repo or worktree.
-    m_gitModeCombo->setCurrentIndex(GitCurrentBranch);
-    connect(m_gitModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
-        updateGitSubFields();
-        updatePreview();
-    });
-    gitLayout->addWidget(m_gitModeCombo, 0, 1);
-
-    // Remote prefix
-    m_remotePrefixLabel = new QLabel(i18n("Remote prefix:"), this);
-    gitLayout->addWidget(m_remotePrefixLabel, 1, 0);
-    m_gitRemoteEdit = new QLineEdit(this);
-    m_gitRemoteEdit->setPlaceholderText(i18n("git@github.com:username/"));
-    gitLayout->addWidget(m_gitRemoteEdit, 1, 1);
-
-    // Source repo
-    m_sourceRepoLabel = new QLabel(i18n("Source repo:"), this);
-    gitLayout->addWidget(m_sourceRepoLabel, 2, 0);
-    auto *repoRow = new QHBoxLayout();
-    m_sourceRepoEdit = new QLineEdit(this);
-    m_sourceRepoEdit->setPlaceholderText(i18n("(defaults to workspace root)"));
-    connect(m_sourceRepoEdit, &QLineEdit::textChanged, this, [this]() {
-        updatePreview();
-    });
-    repoRow->addWidget(m_sourceRepoEdit);
-    m_browseRepoButton = new QPushButton(i18n("Browse..."), this);
-    connect(m_browseRepoButton, &QPushButton::clicked, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(this, i18n("Select Source Repository"), m_sourceRepoEdit->text());
-        if (!dir.isEmpty()) {
-            m_sourceRepoEdit->setText(dir);
-        }
-    });
-    repoRow->addWidget(m_browseRepoButton);
-    gitLayout->addLayout(repoRow, 2, 1);
-
-    // Branch name
-    m_branchNameLabel = new QLabel(i18n("Branch name:"), this);
-    gitLayout->addWidget(m_branchNameLabel, 3, 0);
-    m_worktreeNameEdit = new QLineEdit(this);
-    m_worktreeNameEdit->setPlaceholderText(i18n("feature/project-name"));
-    gitLayout->addWidget(m_worktreeNameEdit, 3, 1);
-
-    mainLayout->addWidget(m_gitGroup);
+    // Git panel removed: the wizard no longer initializes repos or creates
+    // worktrees. Sessions always use the chosen directory as-is and leave git
+    // to the agent. The widgets stay declared (and null) so the git accessors,
+    // which all null-guard, keep returning "do nothing".
 
     // --- Model + options row ---
     auto *optionsRow = new QHBoxLayout();
@@ -843,7 +815,7 @@ void ClaudeSessionWizard::onCreatePressed()
 
         // Save settings (model + SSH fields for next time)
         if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
-            settings->setDefaultModel(m_modelCombo->currentText());
+            saveSelectedModel(settings);
             settings->setLastSshHost(sshHost());
             settings->setLastSshUsername(sshUsername());
             settings->setLastSshPort(sshPort());
@@ -890,8 +862,9 @@ void ClaudeSessionWizard::onCreatePressed()
         }
     }
 
-    // Validate worktree fields
-    int gitMode = m_gitModeCombo->currentIndex();
+    // Validate worktree fields (git UI removed — combo is null, so this is a
+    // no-op unless a future build reinstates it)
+    int gitMode = m_gitModeCombo ? m_gitModeCombo->currentIndex() : int(GitCurrentBranch);
     if (gitMode == GitWorktree) {
         if (m_worktreeNameEdit->text().isEmpty()) {
             QMessageBox::warning(this, i18n("Missing Branch Name"), i18n("Enter a branch name for the worktree."));
@@ -933,13 +906,11 @@ void ClaudeSessionWizard::onCreatePressed()
         }
     }
 
-    // Save settings
+    // Save settings. The git widgets are gone, so only persist what still has
+    // a control behind it.
     if (KonsolaiSettings *settings = KonsolaiSettings::instance()) {
         settings->setProjectRoot(m_projectRootEdit->text());
-        settings->setGitRemoteRoot(m_gitRemoteEdit->text());
-        settings->setGitMode(gitMode);
-        settings->setWorktreeSourceRepo(m_sourceRepoEdit->text());
-        settings->setDefaultModel(m_modelCombo->currentText());
+        saveSelectedModel(settings);
         settings->save();
     }
 
@@ -1102,6 +1073,9 @@ QStringList ClaudeSessionWizard::getWorktrees(const QString &repoRoot)
 
 void ClaudeSessionWizard::updateGitSubFields()
 {
+    if (!m_gitModeCombo) {
+        return;
+    }
     int mode = m_gitModeCombo->currentIndex();
 
     bool remoteOn = (mode == GitInit);
@@ -1142,7 +1116,7 @@ void ClaudeSessionWizard::updatePreview()
     }
 
     // Local session preview
-    switch (m_gitModeCombo->currentIndex()) {
+    switch (m_gitModeCombo ? m_gitModeCombo->currentIndex() : int(GitCurrentBranch)) {
     case GitInit:
         preview = i18n("Will create: %1 (git init)", dir);
         break;

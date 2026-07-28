@@ -20,6 +20,10 @@
 class QLineEdit;
 class QPushButton;
 class QComboBox;
+namespace Konsolai
+{
+class KonsolaiSettings;
+}
 class QTimer;
 class QCheckBox;
 class QLabel;
@@ -72,6 +76,15 @@ public:
 
     /** Which agent CLI the user picked. Defaults to Claude. */
     ClaudeSession::AgentKind agentKind() const;
+
+    /**
+     * Persist the picked model under the key for the selected agent.
+     *
+     * Writing a Codex slug into the Claude key would also corrupt `claude -p`
+     * one-shots (the tree assistant), which read the same setting. Public so
+     * the routing can be tested without driving the whole create flow.
+     */
+    void saveSelectedModel(KonsolaiSettings *settings) const;
     bool autoApproveRead() const;
     QString claudeArgs() const;
     QString taskPrompt() const;
