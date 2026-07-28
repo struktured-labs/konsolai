@@ -2030,6 +2030,23 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                 claudeSession->setAgentKind(wizard.agentKind());
                 claudeSession->setModelOverride(wizard.claudeModel());
 
+                // Apply the budget the user set in the wizard. Without this the
+                // Budget Controls group is decorative: a cost ceiling entered at
+                // creation was silently dropped, so the session ran uncapped
+                // while the user believed a limit was in force.
+                if (auto *bc = claudeSession->budgetController()) {
+                    Konsolai::SessionBudget budget = bc->budget();
+                    budget.timeLimitMinutes = wizard.budgetTimeLimitMinutes();
+                    budget.costCeilingUSD = wizard.budgetCostCeilingUSD();
+                    budget.tokenCeiling = wizard.budgetTokenCeiling();
+                    const auto policy = wizard.budgetPolicy() == 1 ? Konsolai::SessionBudget::Hard : Konsolai::SessionBudget::Soft;
+                    budget.timePolicy = policy;
+                    budget.costPolicy = policy;
+                    budget.tokenPolicy = policy;
+                    budget.startedAt = QDateTime::currentDateTime();
+                    bc->setBudget(budget);
+                }
+
                 // Set resume session ID if user picked a previous conversation
                 QString resumeId = wizard.resumeSessionId();
                 if (!resumeId.isEmpty()) {

@@ -5,6 +5,8 @@
 */
 
 #include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QGroupBox>
 #include <QTest>
 
 #include "../claude/ClaudeSession.h"
@@ -27,6 +29,7 @@ private Q_SLOTS:
     void testModelComboSwapsWithAgent();
     void testGitUiIsGone();
     void testCodexModelDoesNotOverwriteClaudeDefault();
+    void testWizardBudgetValuesAreReadable();
 };
 
 void ClaudeSessionWizardAgentTest::testAgentComboExists()
@@ -121,6 +124,23 @@ void ClaudeSessionWizardAgentTest::testCodexModelDoesNotOverwriteClaudeDefault()
     // would also break `claude -p` one-shots, which read the same setting.
     QCOMPARE(settings.defaultModel(), claudeBefore);
     QVERIFY(settings.codexModel().startsWith(QStringLiteral("gpt-")));
+}
+void ClaudeSessionWizardAgentTest::testWizardBudgetValuesAreReadable()
+{
+    ClaudeSessionWizard wizard;
+    auto *group = wizard.findChild<QGroupBox *>(QStringLiteral("wizardBudgetGroup"));
+    auto *cost = wizard.findChild<QDoubleSpinBox *>(QStringLiteral("wizardCostCeilingSpin"));
+    QVERIFY2(group, "budget group must be findable");
+    QVERIFY2(cost, "cost ceiling spin must be findable");
+
+    // Budgets are opt-in: the accessors report 0 until the group is checked.
+    QVERIFY(group->isCheckable());
+    group->setChecked(true);
+    cost->setValue(5.0);
+    // The accessor must reflect the widget: MainWindow now reads these at
+    // session creation, so a value that doesn't round-trip means a budget the
+    // user set is silently dropped.
+    QCOMPARE(wizard.budgetCostCeilingUSD(), 5.0);
 }
 }
 

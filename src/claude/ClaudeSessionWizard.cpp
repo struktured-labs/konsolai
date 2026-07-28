@@ -646,6 +646,7 @@ void ClaudeSessionWizard::setupUi()
 
     // --- Budget Controls (collapsible) ---
     m_budgetGroup = new QGroupBox(i18n("Budget Controls"), this);
+    m_budgetGroup->setObjectName(QStringLiteral("wizardBudgetGroup"));
     m_budgetGroup->setCheckable(true);
     m_budgetGroup->setChecked(false); // Collapsed by default
     auto *budgetLayout = new QGridLayout(m_budgetGroup);
@@ -659,6 +660,7 @@ void ClaudeSessionWizard::setupUi()
 
     budgetLayout->addWidget(new QLabel(i18n("Cost ceiling ($):"), this), 1, 0);
     m_costCeilingSpin = new QDoubleSpinBox(this);
+    m_costCeilingSpin->setObjectName(QStringLiteral("wizardCostCeilingSpin"));
     m_costCeilingSpin->setRange(0.0, 1000.0);
     m_costCeilingSpin->setDecimals(2);
     m_costCeilingSpin->setSingleStep(0.50);
