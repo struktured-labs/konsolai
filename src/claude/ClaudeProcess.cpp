@@ -5,6 +5,7 @@
 
 #include "ClaudeProcess.h"
 #include "KonsolaiLogging.h"
+#include "KonsolaiSettings.h"
 
 #include <QDir>
 #include <QFile>
@@ -31,10 +32,11 @@ QString ClaudeProcess::buildCommand(Model model,
     QStringList args;
     args << QStringLiteral("claude");
 
-    // Default: opus 5 with 1M context and max effort. Explicit model overrides this.
+    // Default: opus 5 with 1M context at xhigh effort — deep reasoning without
+    // the latency of max. Explicit model overrides this.
     if (model == Model::Default) {
         args << QStringLiteral("--model") << QStringLiteral("claude-opus-5[1m]");
-        args << QStringLiteral("--effort") << QStringLiteral("max");
+        args << QStringLiteral("--effort") << QStringLiteral("xhigh");
     } else {
         args << QStringLiteral("--model") << modelName(model);
     }
@@ -47,6 +49,15 @@ QString ClaudeProcess::buildCommand(Model model,
     // "server <name> not in --channels list for this session". No-op for
     // sessions that don't have the plugin installed.
     args << QStringLiteral("--dangerously-load-development-channels") << QStringLiteral("plugin:session-intercom@struktured-labs");
+
+    // Let the CLI apply its own approval policy rather than relying on yolo
+    // mode driving the TUI. Empty means "say nothing and take the CLI default".
+    if (auto *settings = KonsolaiSettings::instance()) {
+        const QString permissionMode = settings->claudePermissionMode();
+        if (!permissionMode.isEmpty()) {
+            args << QStringLiteral("--permission-mode") << permissionMode;
+        }
+    }
 
     // Add any additional arguments
     args << additionalArgs;

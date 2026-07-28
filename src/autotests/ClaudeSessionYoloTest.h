@@ -98,6 +98,12 @@ private Q_SLOTS:
     void testTaskComplete_SuppressedWithDoubleYolo();
     void testTaskComplete_SuppressedWithTripleYolo();
     void testTaskComplete_NotEmittedOnNonIdleState();
+
+    // Agent-kind launch paths
+    void testShellCommandDefaultsToClaude();
+    void testShellCommandCodexUsesResumeSubcommand();
+    void testShellCommandCodexOmitsClaudeOnlyArgs();
+    void testShellCommandCodexCarriesModelAndApproval();
 };
 
 }

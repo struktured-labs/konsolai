@@ -64,6 +64,7 @@ ecm_add_tests(
     NotificationManagerTest.cpp
     ProfileClaudeTest.cpp
     TokenUsageTest.cpp
+    CodexProcessTest.cpp
     LettaApiClientTest.cpp
     LettaAgentProviderTest.cpp
     MergePolicyTest.cpp

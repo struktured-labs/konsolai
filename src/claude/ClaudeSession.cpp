@@ -999,21 +999,45 @@ QString ClaudeSession::shellCommand() const
         return m_tmuxManager->buildAttachCommand(m_sessionName);
     }
 
-    // Create new session or attach if exists
-    QStringList extraArgs;
-    if (!m_resumeSessionId.isEmpty()) {
-        extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
+    // Codex takes a different shape: resume is a subcommand rather than a
+    // flag, and none of the Claude-specific extra args (channels, hooks) apply
+    // to it — passing them would make codex reject the command line.
+    QString agentCmd;
+    if (m_agentKind == AgentKind::Codex) {
+        QString codexModel;
+        QStringList codexArgs;
+        if (auto *settings = KonsolaiSettings::instance()) {
+            codexModel = settings->codexModel();
+            const QString effort = settings->codexEffort();
+            if (!effort.isEmpty()) {
+                // Codex has no dedicated effort flag; it is a config override.
+                codexArgs << QStringLiteral("-c") << QStringLiteral("model_reasoning_effort=\"%1\"").arg(effort);
+            }
+            const QString approval = settings->codexApprovalPolicy();
+            if (!approval.isEmpty()) {
+                codexArgs << QStringLiteral("-a") << approval;
+            }
+            const QString sandbox = settings->codexSandbox();
+            if (!sandbox.isEmpty()) {
+                codexArgs << QStringLiteral("-s") << sandbox;
+            }
+        }
+        agentCmd = CodexProcess::buildCommand(m_workingDir, m_resumeSessionId, codexModel, codexArgs);
+    } else {
+        // Create new session or attach if exists
+        QStringList extraArgs;
+        if (!m_resumeSessionId.isEmpty()) {
+            extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
+        }
+        extraArgs << effectiveExtraClaudeArgs();
+
+        agentCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
     }
-    extraArgs << effectiveExtraClaudeArgs();
 
-    QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
-
-    return m_tmuxManager->buildNewSessionCommand(
-        m_sessionName,
-        claudeCmd,
-        true,  // attachExisting
-        m_workingDir
-    );
+    return m_tmuxManager->buildNewSessionCommand(m_sessionName,
+                                                 agentCmd,
+                                                 true, // attachExisting
+                                                 m_workingDir);
 }
 
 QStringList ClaudeSession::buildRemoteSshArgs() const

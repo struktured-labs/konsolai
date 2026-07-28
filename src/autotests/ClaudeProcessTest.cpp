@@ -109,6 +109,9 @@ void ClaudeProcessTest::testBuildCommand()
     QString cmd = ClaudeProcess::buildCommand();
 
     QVERIFY(cmd.contains(QStringLiteral("claude")));
+    // The default launch pins the 1M-context model at xhigh effort.
+    QVERIFY(cmd.contains(QStringLiteral("claude-opus-5[1m]")));
+    QVERIFY(cmd.contains(QStringLiteral("--effort xhigh")));
 }
 
 void ClaudeProcessTest::testBuildCommandWithModel()

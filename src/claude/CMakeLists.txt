@@ -17,6 +17,7 @@ endif()
 set(claude_SRCS
     TmuxManager.cpp
     ClaudeProcess.cpp
+    CodexProcess.cpp
     ClaudeSession.cpp
     ClaudeHookHandler.cpp
     NotificationManager.cpp

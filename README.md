@@ -6,7 +6,9 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 
 **Claude Integration**
 - 1 Tab = 1 Claude Session with tmux-backed persistence
-- Defaults to Claude Opus 5 with the 1M-token context window (`[1m]` beta) and max effort; per-session model override in the wizard
+- Defaults to Claude Opus 5 with the 1M-token context window (`[1m]` beta) at `xhigh` effort; per-session model override in the wizard
+- Wizard defaults to leaving git alone ("Nothing (use current branch)") rather than pre-creating repos or worktrees, and to CLI-native approvals rather than yolo mode
+- **Codex support (in progress)** — sessions carry an agent kind (Claude or Codex), so a Codex session reuses the same tmux persistence, tabs, and budgets; `CodexProcess` discovers existing `~/.codex/sessions` transcripts (deduplicated per conversation) and builds `codex resume <id>` commands. Wizard/tree entry points are still being wired.
 - Model-aware context-usage indicator in the status bar (`Ctx:NN%`) that scores against the session's real window (1M for Opus/Sonnet gen 4+, 200K otherwise)
 - Claude hooks integration for real-time state tracking (idle/working/waiting)
 - Session wizard for project setup, git worktrees, and task configuration

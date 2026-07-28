@@ -85,7 +85,9 @@ void KonsolaiSettingsTest::testExtraClaudeArgsRoundTrip()
 void KonsolaiSettingsTest::testDefaultGitMode()
 {
     KonsolaiSettings settings;
-    QCOMPARE(settings.gitMode(), 0);
+    // 2 == ClaudeSessionWizard::GitCurrentBranch — "Nothing (use current
+    // branch)".  The wizard must not pre-create repos/worktrees by default.
+    QCOMPARE(settings.gitMode(), 2);
 }
 
 void KonsolaiSettingsTest::testDefaultWorktreeSourceRepo()

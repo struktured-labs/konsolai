@@ -11,6 +11,7 @@
 #include "BudgetController.h"
 #include "ClaudeHookHandler.h"
 #include "ClaudeProcess.h"
+#include "CodexProcess.h"
 #include "SessionObserver.h"
 #include "TmuxManager.h"
 
@@ -503,6 +504,27 @@ public:
      * default from KonsolaiSettings. Split on whitespace.
      */
     QStringList effectiveExtraClaudeArgs() const;
+
+    /**
+     * Which agent CLI backs this session.
+     *
+     * Everything above the CLI — tmux persistence, tabs, the session tree,
+     * budgets — is agent-agnostic; only command construction differs. Codex
+     * sessions therefore reuse the whole Claude session machinery and only
+     * swap what shellCommand() builds.
+     */
+    enum class AgentKind {
+        Claude = 0,
+        Codex = 1,
+    };
+    AgentKind agentKind() const
+    {
+        return m_agentKind;
+    }
+    void setAgentKind(AgentKind kind)
+    {
+        m_agentKind = kind;
+    }
 
     /**
      * Get the current Claude state
@@ -1013,6 +1035,7 @@ private:
     QString m_workingDir;
     QString m_taskDescription;
     ClaudeProcess::Model m_claudeModel = ClaudeProcess::Model::Default;
+    AgentKind m_agentKind = AgentKind::Claude;
     QString m_resumeSessionId;
     QString m_extraClaudeArgs;
     bool m_isReattach = false;

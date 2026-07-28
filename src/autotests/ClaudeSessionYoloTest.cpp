@@ -19,6 +19,7 @@
 // Konsolai
 #include "../claude/ClaudeProcess.h"
 #include "../claude/ClaudeSession.h"
+#include "../claude/KonsolaiSettings.h"
 
 using namespace Konsolai;
 
@@ -952,6 +953,65 @@ void ClaudeSessionYoloTest::testTaskComplete_NotEmittedOnNonIdleState()
     process->handleHookEvent(QStringLiteral("PermissionRequest"), QString::fromUtf8(QJsonDocument(permData).toJson(QJsonDocument::Compact)));
     QCOMPARE(process->state(), ClaudeProcess::State::WaitingInput);
     QCOMPARE(taskCompleteSpy.count(), 0);
+}
+
+void ClaudeSessionYoloTest::testShellCommandDefaultsToClaude()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    QCOMPARE(session.agentKind(), ClaudeSession::AgentKind::Claude);
+
+    const QString cmd = session.shellCommand();
+    QVERIFY(cmd.contains(QStringLiteral("claude")));
+    QVERIFY(!cmd.contains(QStringLiteral("codex")));
+}
+
+void ClaudeSessionYoloTest::testShellCommandCodexUsesResumeSubcommand()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    session.setAgentKind(ClaudeSession::AgentKind::Codex);
+    session.setResumeSessionId(QStringLiteral("019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3"));
+
+    const QString cmd = session.shellCommand();
+    // Codex resumes via a subcommand; emitting Claude's --resume flag would
+    // make codex treat the id as a prompt and silently start a new session.
+    QVERIFY(cmd.contains(QStringLiteral("codex resume 019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3")));
+    QVERIFY(!cmd.contains(QStringLiteral("--resume")));
+}
+
+void ClaudeSessionYoloTest::testShellCommandCodexOmitsClaudeOnlyArgs()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    session.setAgentKind(ClaudeSession::AgentKind::Codex);
+    session.setExtraClaudeArgs(QStringLiteral("--dangerously-load-development-channels plugin:session-intercom@struktured-labs"));
+
+    const QString cmd = session.shellCommand();
+    // Claude-only flags must not leak into the codex command line — codex
+    // rejects unknown flags outright, so the session would fail to start.
+    QVERIFY(cmd.contains(QStringLiteral("codex")));
+    QVERIFY(!cmd.contains(QStringLiteral("--dangerously-load-development-channels")));
+    QVERIFY(!cmd.contains(QStringLiteral("--model")));
+}
+
+void ClaudeSessionYoloTest::testShellCommandCodexCarriesModelAndApproval()
+{
+    // shellCommand() reads the settings singleton, which is whichever
+    // KonsolaiSettings was constructed first — construct one so the launch
+    // path sees real values rather than degrading to a bare command.
+    KonsolaiSettings settingsOwner;
+    auto *settings = KonsolaiSettings::instance();
+    QVERIFY(settings);
+
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    session.setAgentKind(ClaudeSession::AgentKind::Codex);
+    const QString cmd = session.shellCommand();
+
+    // Model, effort, approval policy and sandbox all come from settings so a
+    // Codex tab launches with the same profile the user configured, rather
+    // than whatever ~/.codex/config.toml happens to hold.
+    QVERIFY(cmd.contains(QStringLiteral("-m ") + settings->codexModel()));
+    QVERIFY(cmd.contains(QStringLiteral("model_reasoning_effort=\"%1\"").arg(settings->codexEffort())));
+    QVERIFY(cmd.contains(QStringLiteral("-a ") + settings->codexApprovalPolicy()));
+    QVERIFY(cmd.contains(QStringLiteral("-s ") + settings->codexSandbox()));
 }
 
 QTEST_GUILESS_MAIN(ClaudeSessionYoloTest)

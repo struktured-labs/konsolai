@@ -62,6 +62,41 @@ public:
     void setDefaultModel(const QString &model);
 
     /**
+     * Permission mode passed to `claude --permission-mode`.
+     *
+     * Konsolai's yolo mode drives the TUI to click through prompts; letting the
+     * CLI apply its own policy is both cheaper and less fragile, so this is the
+     * preferred auto-approval path. One of: acceptEdits, auto, bypassPermissions,
+     * manual, dontAsk, plan. Empty means "pass nothing, use the CLI default".
+     */
+    QString claudePermissionMode() const;
+    void setClaudePermissionMode(const QString &mode);
+
+    /** Model slug for Codex sessions (`codex -m`). */
+    QString codexModel() const;
+    void setCodexModel(const QString &model);
+
+    /** Reasoning effort for Codex (`-c model_reasoning_effort=...`). */
+    QString codexEffort() const;
+    void setCodexEffort(const QString &effort);
+
+    /**
+     * Codex approval policy (`codex -a`): untrusted, on-request, or never.
+     * "never" is Codex's auto-approving mode — it does not prompt, and command
+     * failures are returned to the model instead of to the user.
+     */
+    QString codexApprovalPolicy() const;
+    void setCodexApprovalPolicy(const QString &policy);
+
+    /**
+     * Codex sandbox (`codex -s`): read-only, workspace-write, or
+     * danger-full-access. Pairs with the approval policy — auto-approving
+     * without a sandbox means unrestricted command execution.
+     */
+    QString codexSandbox() const;
+    void setCodexSandbox(const QString &sandbox);
+
+    /**
      * Extra command-line arguments passed to every Claude session by default.
      * Free-form whitespace-separated string. Per-session overrides are stored
      * on ClaudeSession itself and take precedence when non-empty.

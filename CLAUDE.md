@@ -12,7 +12,7 @@
   2. **GUI tests** (`Testing/gui-smoke-test.py` or `Testing/gui-interaction-test.py`) — AT-SPI widget presence, tree node rendering, context menu items, panel visibility
 - A feature is NOT complete until both test types exist and pass. The isolated test runner (`Testing/run-isolated-gui-tests.sh`) must remain green.
 - If a bug was found without a test, add a test that reproduces it BEFORE fixing it.
-- **Light suite** (run frequently): `ctest --test-dir build/ --output-on-failure -R "Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget"` — 27 tests, ~18s
+- **Light suite** (run frequently): `ctest --test-dir build/ --output-on-failure -R "Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget|Letta|TreeToolbar|Konsolai|Merge|Broadcast|SessionTreeWidget|Assistant|Reorganize|Codex"` — 40 tests, ~22s
 - **Full suite** (run before releases): `ctest --test-dir build/ --output-on-failure` — includes upstream Konsole tests
 - **GUI smoke tests** (run against live instance): `bash Testing/run-all-gui-tests.sh` — AT-SPI headless validation via MCP backend
 - **GUI introspection via MCP**: Use the `konsolai-gui` MCP tools (`widget_tree`, `find_widget`, `click`, `read_text`, `widget_state`, `screenshot`, etc.) to validate UI changes against a live Konsolai instance. These tools use AT-SPI (not Squish) and are the primary way to verify widget presence, tree structure, and interactive behavior. Always prefer MCP tools over manual verification.

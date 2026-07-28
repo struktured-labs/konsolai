@@ -109,6 +109,78 @@ QString KonsolaiSettings::defaultModel() const
     return group.readEntry("DefaultModel", QStringLiteral("claude-opus-5[1m]"));
 }
 
+QString KonsolaiSettings::claudePermissionMode() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Claude"));
+    // acceptEdits auto-approves file edits while still escalating riskier tool
+    // use, which is the CLI-native stand-in for yolo mode without handing over
+    // blanket command execution.
+    return group.readEntry("PermissionMode", QStringLiteral("acceptEdits"));
+}
+
+void KonsolaiSettings::setClaudePermissionMode(const QString &mode)
+{
+    KConfigGroup group(m_config, QStringLiteral("Claude"));
+    group.writeEntry("PermissionMode", mode);
+    m_config->sync();
+}
+
+QString KonsolaiSettings::codexModel() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    return group.readEntry("Model", QStringLiteral("gpt-5.6-sol"));
+}
+
+void KonsolaiSettings::setCodexModel(const QString &model)
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    group.writeEntry("Model", model);
+    m_config->sync();
+}
+
+QString KonsolaiSettings::codexEffort() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    return group.readEntry("Effort", QStringLiteral("xhigh"));
+}
+
+void KonsolaiSettings::setCodexEffort(const QString &effort)
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    group.writeEntry("Effort", effort);
+    m_config->sync();
+}
+
+QString KonsolaiSettings::codexApprovalPolicy() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    // "never" is Codex's auto-approving policy; it is only sane paired with a
+    // sandbox, which codexSandbox() supplies.
+    return group.readEntry("ApprovalPolicy", QStringLiteral("never"));
+}
+
+void KonsolaiSettings::setCodexApprovalPolicy(const QString &policy)
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    group.writeEntry("ApprovalPolicy", policy);
+    m_config->sync();
+}
+
+QString KonsolaiSettings::codexSandbox() const
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    // workspace-write lets the agent edit the project without prompting while
+    // still refusing writes outside it.
+    return group.readEntry("Sandbox", QStringLiteral("workspace-write"));
+}
+
+void KonsolaiSettings::setCodexSandbox(const QString &sandbox)
+{
+    KConfigGroup group(m_config, QStringLiteral("Codex"));
+    group.writeEntry("Sandbox", sandbox);
+    m_config->sync();
+}
+
 void KonsolaiSettings::setDefaultModel(const QString &model)
 {
     KConfigGroup group(m_config, QStringLiteral("Claude"));
@@ -136,7 +208,10 @@ void KonsolaiSettings::setExtraClaudeArgs(const QString &args)
 int KonsolaiSettings::gitMode() const
 {
     KConfigGroup group(m_config, QStringLiteral("Git"));
-    return group.readEntry("GitMode", 0);
+    // Default to "Nothing (use current branch)" — GitCurrentBranch. Creating
+    // repos or worktrees up front pre-commits to a layout; leaving git alone
+    // lets Claude decide what (if anything) to do once the session is running.
+    return group.readEntry("GitMode", 2);
 }
 
 void KonsolaiSettings::setGitMode(int mode)

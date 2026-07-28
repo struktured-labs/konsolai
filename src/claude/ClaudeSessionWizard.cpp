@@ -521,8 +521,8 @@ void ClaudeSessionWizard::setupUi()
     m_gitModeCombo = new QComboBox(this);
     m_gitModeCombo->addItem(i18n("Initialize new repository"));
     m_gitModeCombo->addItem(i18n("Create as worktree"));
-    m_gitModeCombo->addItem(i18n("Use current branch"));
-    m_gitModeCombo->addItem(i18n("None"));
+    m_gitModeCombo->addItem(i18n("Nothing (use current branch)"));
+    m_gitModeCombo->addItem(i18n("Nothing (just create the directory)"));
     connect(m_gitModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         updateGitSubFields();
         updatePreview();
