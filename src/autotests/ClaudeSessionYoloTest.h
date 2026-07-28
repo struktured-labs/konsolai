@@ -104,6 +104,7 @@ private Q_SLOTS:
     void testShellCommandCodexUsesResumeSubcommand();
     void testShellCommandCodexOmitsClaudeOnlyArgs();
     void testShellCommandCodexCarriesModelAndApproval();
+    void testShellCommandCodexHonoursExplicitApproval();
 };
 
 }

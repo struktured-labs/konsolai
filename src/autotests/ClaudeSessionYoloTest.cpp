@@ -1005,13 +1005,48 @@ void ClaudeSessionYoloTest::testShellCommandCodexCarriesModelAndApproval()
     session.setAgentKind(ClaudeSession::AgentKind::Codex);
     const QString cmd = session.shellCommand();
 
-    // Model, effort, approval policy and sandbox all come from settings so a
-    // Codex tab launches with the same profile the user configured, rather
-    // than whatever ~/.codex/config.toml happens to hold.
+    // Model and effort always come from settings.
     QVERIFY(cmd.contains(QStringLiteral("-m ") + settings->codexModel()));
     QVERIFY(cmd.contains(QStringLiteral("model_reasoning_effort=\"%1\"").arg(settings->codexEffort())));
-    QVERIFY(cmd.contains(QStringLiteral("-a ") + settings->codexApprovalPolicy()));
-    QVERIFY(cmd.contains(QStringLiteral("-s ") + settings->codexSandbox()));
+
+    // Approval policy and sandbox are opt-in. By default they are empty and
+    // must NOT appear: verified against codex 0.145, passing `-a never -s
+    // workspace-write` selects the stricter "Ask for approval" profile, which
+    // prompts for internet access and edits outside the workspace. Omitting
+    // both leaves Codex on its own "Approve for me" default.
+    QVERIFY(settings->codexApprovalPolicy().isEmpty());
+    QVERIFY(settings->codexSandbox().isEmpty());
+
+    // Inspect only the codex portion — tmux's own "new-session -s <name>" flag
+    // would otherwise match a naive search for " -s ".
+    const int sep = cmd.indexOf(QStringLiteral(" -- "));
+    QVERIFY(sep > 0);
+    const QString codexPart = cmd.mid(sep);
+    QVERIFY2(!codexPart.contains(QStringLiteral(" -a ")), qPrintable(codexPart));
+    QVERIFY2(!codexPart.contains(QStringLiteral(" -s ")), qPrintable(codexPart));
+}
+
+void ClaudeSessionYoloTest::testShellCommandCodexHonoursExplicitApproval()
+{
+    KonsolaiSettings settingsOwner;
+    auto *settings = KonsolaiSettings::instance();
+    QVERIFY(settings);
+    const QString savedPolicy = settings->codexApprovalPolicy();
+    const QString savedSandbox = settings->codexSandbox();
+
+    settings->setCodexApprovalPolicy(QStringLiteral("never"));
+    settings->setCodexSandbox(QStringLiteral("danger-full-access"));
+
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    session.setAgentKind(ClaudeSession::AgentKind::Codex);
+    const QString cmd = session.shellCommand();
+
+    // Opting in still works — the default is empty, not ignored.
+    QVERIFY(cmd.contains(QStringLiteral("-a never")));
+    QVERIFY(cmd.contains(QStringLiteral("-s danger-full-access")));
+
+    settings->setCodexApprovalPolicy(savedPolicy);
+    settings->setCodexSandbox(savedSandbox);
 }
 
 QTEST_GUILESS_MAIN(ClaudeSessionYoloTest)

@@ -154,9 +154,16 @@ void KonsolaiSettings::setCodexEffort(const QString &effort)
 QString KonsolaiSettings::codexApprovalPolicy() const
 {
     KConfigGroup group(m_config, QStringLiteral("Codex"));
-    // "never" is Codex's auto-approving policy; it is only sane paired with a
-    // sandbox, which codexSandbox() supplies.
-    return group.readEntry("ApprovalPolicy", QStringLiteral("never"));
+    // Empty by default: pass no -a flag and let Codex apply its own default,
+    // which is the "Approve for me" profile (only prompts for actions detected
+    // as potentially unsafe).
+    //
+    // Do NOT set this to "never" expecting more autonomy — verified against
+    // codex 0.145, passing `-a never -s workspace-write` selects the *stricter*
+    // "Ask for approval" profile, which prompts for internet access and any
+    // edit outside the workspace. The profiles are not a function of these two
+    // flags alone.
+    return group.readEntry("ApprovalPolicy", QString());
 }
 
 void KonsolaiSettings::setCodexApprovalPolicy(const QString &policy)
@@ -169,9 +176,9 @@ void KonsolaiSettings::setCodexApprovalPolicy(const QString &policy)
 QString KonsolaiSettings::codexSandbox() const
 {
     KConfigGroup group(m_config, QStringLiteral("Codex"));
-    // workspace-write lets the agent edit the project without prompting while
-    // still refusing writes outside it.
-    return group.readEntry("Sandbox", QStringLiteral("workspace-write"));
+    // Empty by default — see codexApprovalPolicy(). Passing -s alongside -a
+    // pins the stricter "Ask for approval" profile rather than widening it.
+    return group.readEntry("Sandbox", QString());
 }
 
 void KonsolaiSettings::setCodexSandbox(const QString &sandbox)
