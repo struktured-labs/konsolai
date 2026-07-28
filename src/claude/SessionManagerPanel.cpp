@@ -570,6 +570,42 @@ void SessionManagerPanel::persistVisibleStates()
     settings->setVisibleSessionStates(list);
 }
 
+void SessionManagerPanel::syncChipUiToVisibleStates()
+{
+    // Primary chips: iterate m_filterChips, setChecked with QSignalBlocker
+    // so the toggle handler doesn't refire.
+    for (auto it = m_filterChips.constBegin(); it != m_filterChips.constEnd(); ++it) {
+        QToolButton *btn = it.value();
+        if (!btn) {
+            continue;
+        }
+        const bool shouldBeChecked = m_visibleStates.contains(it.key());
+        if (btn->isChecked() != shouldBeChecked) {
+            const QSignalBlocker blocker(btn);
+            btn->setChecked(shouldBeChecked);
+        }
+    }
+
+    // Overflow menu QActions: locate the "filterChipsOverflow" button and
+    // iterate its menu's actions, matching each by objectName token.
+    auto *overflowBtn = findChild<QToolButton *>(QStringLiteral("filterChipsOverflow"));
+    if (overflowBtn && overflowBtn->menu()) {
+        const QString prefix = QStringLiteral("filterChipOverflow_");
+        for (QAction *action : overflowBtn->menu()->actions()) {
+            const QString objName = action->objectName();
+            if (!objName.startsWith(prefix)) {
+                continue;
+            }
+            const QString token = objName.mid(prefix.size());
+            const bool shouldBeChecked = m_visibleStates.contains(token);
+            if (action->isChecked() != shouldBeChecked) {
+                const QSignalBlocker blocker(action);
+                action->setChecked(shouldBeChecked);
+            }
+        }
+    }
+}
+
 QString SessionManagerPanel::stateTokenFor(const SessionMetadata &meta, bool isLive) const
 {
     // Subagent classification wins over dismissed/archived/live/pinned — a
@@ -755,6 +791,58 @@ int SessionManagerPanel::categoryProjectCount(const QString &categoryKey) const
     return n;
 }
 
+// Static. Project sub-label inside a multi-project category: basename with
+// the category prefix stripped ("cowir-battle" in "cowir" → "battle").
+// Single-token projects whose basename IS the category keep the full
+// basename so the user can spot them.
+QString SessionManagerPanel::projectSubLabel(const QString &workingDirectory, const QString &catKey)
+{
+    const QString base = QDir(workingDirectory).dirName();
+    QString lower = base.toLower();
+    lower.replace(QLatin1Char('_'), QLatin1Char('-'));
+    QString label = base;
+    if (lower.startsWith(catKey + QLatin1Char('-'))) {
+        label = base.mid(catKey.size() + 1);
+    }
+    if (label.isEmpty()) {
+        label = base;
+    }
+    return label;
+}
+
+QTreeWidgetItem *SessionManagerPanel::ensureCategoryItemFor(const QString &workingDirectory)
+{
+    // Determine whether this workdir belongs in a multi-project category bucket.
+    // m_categoryMap is rebuilt at the start of updateTreeWidgetWithLiveSessions
+    // from the full set of m_metadata workdirs (skipping empty ones).
+    // A user-created empty category also counts as a valid bucket target even
+    // if only one project routes here — the LCP >=2 rule would otherwise
+    // standalone it, defeating the "drop into my-stuff" flow.
+    const QString catKey = m_categoryMap.value(workingDirectory);
+    const bool userCreatedBucket = !catKey.isEmpty() && m_categoryGroups.contains(catKey);
+    const bool isMulti = !workingDirectory.isEmpty() && !catKey.isEmpty() && (userCreatedBucket || categoryProjectCount(catKey) >= 2);
+    if (!isMulti) {
+        return nullptr;
+    }
+
+    auto cit = m_categoryGroups.find(catKey);
+    if (cit == m_categoryGroups.end()) {
+        auto *cat = new QTreeWidgetItem(m_treeWidget);
+        cat->setText(0, catKey);
+        cat->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-symbolic"), QIcon::fromTheme(QStringLiteral("folder"))));
+        cat->setToolTip(0, i18n("Category: %1", catKey));
+        // Drag source AND drop target. ItemIsSelectable is load-bearing:
+        // Qt only starts drags from SELECTED indexes (selectedDraggableIndexes
+        // filters by ItemIsSelectable + ItemIsDragEnabled), so without it no
+        // drag ever begins regardless of the custom MIME logic.
+        cat->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+        cat->setExpanded(true);
+        cat->setData(0, Qt::UserRole + 6, QString(QStringLiteral("category:") + catKey));
+        cit = m_categoryGroups.insert(catKey, cat);
+    }
+    return cit.value();
+}
+
 QTreeWidgetItem *SessionManagerPanel::ensureProjectGroup(const QString &workingDirectory)
 {
     const QString key = projectGroupKey(workingDirectory);
@@ -763,54 +851,14 @@ QTreeWidgetItem *SessionManagerPanel::ensureProjectGroup(const QString &workingD
         return it.value();
     }
 
-    // Determine whether this workdir belongs in a multi-project category bucket.
-    // m_categoryMap is rebuilt at the start of updateTreeWidgetWithLiveSessions
-    // from the full set of m_metadata workdirs (skipping empty ones).
-    // A user-created empty category also counts as a valid bucket target even
-    // if only one project routes here — the LCP >=2 rule would otherwise
-    // standalone it, defeating the "drop into my-stuff" flow.
-    QString catKey = m_categoryMap.value(workingDirectory);
-    const bool userCreatedBucket = !catKey.isEmpty() && m_categoryGroups.contains(catKey);
-    const bool isMulti = !workingDirectory.isEmpty() && !catKey.isEmpty() && (userCreatedBucket || categoryProjectCount(catKey) >= 2);
-
-    QTreeWidgetItem *parentItem = nullptr;
+    QTreeWidgetItem *parentItem = ensureCategoryItemFor(workingDirectory);
     QString label;
 
-    if (isMulti) {
-        // Ensure a top-level category bucket exists.
-        auto cit = m_categoryGroups.find(catKey);
-        if (cit == m_categoryGroups.end()) {
-            auto *cat = new QTreeWidgetItem(m_treeWidget);
-            cat->setText(0, catKey);
-            cat->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-symbolic"), QIcon::fromTheme(QStringLiteral("folder"))));
-            cat->setToolTip(0, i18n("Category: %1", catKey));
-            cat->setFlags(Qt::ItemIsEnabled);
-            cat->setExpanded(true);
-            cat->setData(0, Qt::UserRole + 6, QString(QStringLiteral("category:") + catKey));
-            cit = m_categoryGroups.insert(catKey, cat);
-        }
-        parentItem = cit.value();
-
+    if (parentItem) {
         // Project sub-label: basename with the category prefix stripped.
-        const QString base = QDir(workingDirectory).dirName();
-        QString lower = base.toLower();
-        lower.replace(QLatin1Char('_'), QLatin1Char('-'));
-        if (lower.startsWith(catKey + QLatin1Char('-'))) {
-            label = base.mid(catKey.size() + 1);
-        } else if (lower == catKey) {
-            // Single-token project (e.g. "konsolai") sitting in a multi-project
-            // category alongside "konsolai-handbook", "konsolai-keybind", etc.
-            // Show its full basename so the user can spot it.
-            label = base;
-        } else {
-            label = base;
-        }
-        if (label.isEmpty()) {
-            label = base;
-        }
+        label = projectSubLabel(workingDirectory, m_categoryMap.value(workingDirectory));
     } else {
         // Standalone project: rendered at top level (no category wrapper).
-        parentItem = nullptr;
         label = workingDirectory.isEmpty() ? i18n("(no project)") : QDir(workingDirectory).dirName();
         if (label.isEmpty()) {
             label = workingDirectory;
@@ -821,7 +869,10 @@ QTreeWidgetItem *SessionManagerPanel::ensureProjectGroup(const QString &workingD
     group->setText(0, label);
     group->setIcon(0, QIcon::fromTheme(QStringLiteral("folder")));
     group->setToolTip(0, workingDirectory);
-    group->setFlags(Qt::ItemIsEnabled);
+    // Drag source (drops onto groups are rejected in canAcceptDropStatic, the
+    // drop flag is harmless). ItemIsSelectable is required for drags to start —
+    // Qt only drags SELECTED indexes.
+    group->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
     group->setExpanded(true);
     // Mark this as a project-group so context menu + tests can detect it.
     group->setData(0, Qt::UserRole + 6, QString(QStringLiteral("group:") + key));
@@ -2039,19 +2090,24 @@ void SessionManagerPanel::onItemDoubleClicked(QTreeWidgetItem *item, int column)
         return;
     }
 
-    // Project-group items — toggle expand, not clickable as sessions.
+    // Project-group / category / "+N older…" tuck items — toggle expand,
+    // not clickable as sessions.
     QString compositeKey = item->data(0, Qt::UserRole + 6).toString();
-    if (compositeKey.startsWith(QStringLiteral("group:")) || compositeKey.startsWith(QStringLiteral("category:"))) {
+    if (compositeKey.startsWith(QStringLiteral("group:")) || compositeKey.startsWith(QStringLiteral("category:"))
+        || compositeKey.startsWith(QStringLiteral("older:"))) {
         item->setExpanded(!item->isExpanded());
         return;
     }
 
     // Subagent/subprocess child items live under session items (parent is a session item).
-    // Sessions live directly under project groups, so the parent of a "deep" item
-    // is a session item — its parent in turn is the project group.
+    // Sessions live directly under project groups — or, when flattened,
+    // directly under a category or at top level — so a "deep" item is one
+    // whose parent is a session item and that is not itself a session.
     QTreeWidgetItem *parentItem = item->parent();
-    bool parentIsGroup = !parentItem || parentItem->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"));
-    if (parentItem && !parentIsGroup) {
+    const bool isSessionLeaf = compositeKey.startsWith(QStringLiteral("s:"));
+    bool parentIsGroup = !parentItem || parentItem->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("group:"))
+        || parentItem->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("category:"));
+    if (parentItem && !parentIsGroup && !isSessionLeaf) {
         // Check if this is a prompt group item (toggle expand/collapse)
         QVariant promptGroupVar = item->data(0, Qt::UserRole + 3);
         if (promptGroupVar.isValid() && !promptGroupVar.isNull()) {
@@ -2250,6 +2306,38 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             }
         }
 
+        // Fleet launcher — launch/focus the latest session for every project
+        // in this category. Confirms first (spawning N tabs unprompted is rude).
+        {
+            const QString catKeyForLaunch = compositeKey.mid(QStringLiteral("category:").size());
+            const int projectCount = categoryProjectCount(catKeyForLaunch);
+            if (projectCount > 0) {
+                menu.addSeparator();
+                QAction *launchFleet =
+                    menu.addAction(QIcon::fromTheme(QStringLiteral("media-playback-start")), i18n("Launch Latest Session in Each Project (%1)", projectCount));
+                launchFleet->setObjectName(QStringLiteral("launchFleetAction"));
+                const QString categoryLabel = item->text(0);
+                connect(launchFleet, &QAction::triggered, this, [this, catKeyForLaunch, projectCount, categoryLabel]() {
+                    const int ret = QMessageBox::question(this,
+                                                          i18n("Launch Latest Sessions"),
+                                                          i18n("Launch/focus the latest session for %1 projects in \"%2\"?", projectCount, categoryLabel),
+                                                          QMessageBox::Yes | QMessageBox::No,
+                                                          QMessageBox::No);
+                    if (ret != QMessageBox::Yes) {
+                        return;
+                    }
+                    launchLatestInCategory(catKeyForLaunch);
+                });
+            }
+        }
+
+        // Move ALL projects of this category into another one (persists a
+        // CategoryAlias — same as dragging the category onto the target).
+        {
+            const QString catKeyForMove = compositeKey.mid(QStringLiteral("category:").size());
+            addMoveToCategorySubmenu(menu, compositeKey, catKeyForMove, i18n("Move All Projects to Category"));
+        }
+
         // Ungroup category — dissolve alias/override or add to suppress list.
         {
             const QString catKey = compositeKey.mid(QStringLiteral("category:").size());
@@ -2307,29 +2395,60 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             item->setExpanded(false);
         });
 
+        // Launch Latest Session — focus the active session for this project,
+        // or resume its newest conversation. No confirmation: it's a single
+        // tab, same weight as a double-click resume.
+        {
+            const QString projectKeyForLaunch = compositeKey.mid(QStringLiteral("group:").size());
+            menu.addSeparator();
+            QAction *launchLatest = menu.addAction(QIcon::fromTheme(QStringLiteral("media-playback-start")), i18n("Launch Latest Session"));
+            launchLatest->setObjectName(QStringLiteral("launchLatestAction"));
+            connect(launchLatest, &QAction::triggered, this, [this, projectKeyForLaunch]() {
+                launchLatestForWorkdir(projectKeyForLaunch);
+            });
+        }
+
+        // Move to Category — mouse-free alternative to dragging the group
+        // onto a category node.
+        {
+            QTreeWidgetItem *parentCat = item->parent();
+            const QString parentKey = parentCat ? parentCat->data(0, Qt::UserRole + 6).toString() : QString();
+            const QString currentCat = parentKey.startsWith(QStringLiteral("category:")) ? parentKey.mid(QStringLiteral("category:").size()) : QString();
+            addMoveToCategorySubmenu(menu, compositeKey, currentCat, i18n("Move to Category"));
+        }
+
         // Collect child session IDs bucketed by state token.
-        // Group children are direct sessions in the new architecture.
+        // Group children are direct sessions — plus, possibly, a "+N older…"
+        // tuck pseudo-item whose children are sessions too; descend into it
+        // so bulk actions still cover tucked sessions.
         auto childIdsByState = [this](QTreeWidgetItem *group) -> QHash<QString, QStringList> {
             QHash<QString, QStringList> bucket;
-            for (int i = 0; i < group->childCount(); ++i) {
-                auto *child = group->child(i);
-                const QString id = child->data(0, Qt::UserRole).toString();
-                if (id.isEmpty()) {
-                    continue;
-                }
-                const SessionMetadata *meta = sessionMetadata(id);
-                if (!meta) {
-                    // Discovered session item (no SessionMetadata) — tag from UserRole+5.
-                    const QString tag = child->data(0, Qt::UserRole + 5).toString();
-                    if (!tag.isEmpty()) {
-                        bucket[tag].append(id);
+            std::function<void(QTreeWidgetItem *)> collect = [&](QTreeWidgetItem *node) {
+                for (int i = 0; i < node->childCount(); ++i) {
+                    auto *child = node->child(i);
+                    if (child->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("older:"))) {
+                        collect(child);
+                        continue;
                     }
-                    continue;
+                    const QString id = child->data(0, Qt::UserRole).toString();
+                    if (id.isEmpty()) {
+                        continue;
+                    }
+                    const SessionMetadata *meta = sessionMetadata(id);
+                    if (!meta) {
+                        // Discovered session item (no SessionMetadata) — tag from UserRole+5.
+                        const QString tag = child->data(0, Qt::UserRole + 5).toString();
+                        if (!tag.isEmpty()) {
+                            bucket[tag].append(id);
+                        }
+                        continue;
+                    }
+                    const bool isLive = m_activeSessions.contains(meta->sessionId) || m_cachedLiveNames.contains(meta->sessionName)
+                        || (meta->isRemote && m_cachedRemoteLiveNames.contains(meta->sessionName));
+                    bucket[stateTokenFor(*meta, isLive)].append(id);
                 }
-                const bool isLive = m_activeSessions.contains(meta->sessionId) || m_cachedLiveNames.contains(meta->sessionName)
-                    || (meta->isRemote && m_cachedRemoteLiveNames.contains(meta->sessionName));
-                bucket[stateTokenFor(*meta, isLive)].append(id);
-            }
+            };
+            collect(group);
             return bucket;
         };
 
@@ -3038,6 +3157,19 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             editSessionDescription(sessionId);
         });
 
+        // Move to Category — flattened leaves only (UserRole+1 carries the
+        // project workdir there; such a leaf represents its whole project).
+        // Wrapped sessions get this on their project-group node instead.
+        {
+            const QString flattenedWorkdir = item->data(0, Qt::UserRole + 1).toString();
+            if (compositeKeyForItem.startsWith(QStringLiteral("s:")) && !flattenedWorkdir.isEmpty()) {
+                QTreeWidgetItem *parentCat = item->parent();
+                const QString parentKey = parentCat ? parentCat->data(0, Qt::UserRole + 6).toString() : QString();
+                const QString currentCat = parentKey.startsWith(QStringLiteral("category:")) ? parentKey.mid(QStringLiteral("category:").size()) : QString();
+                addMoveToCategorySubmenu(menu, QStringLiteral("group:") + flattenedWorkdir, currentCat, i18n("Move to Category"));
+            }
+        }
+
         // View Session Activity — show parsed conversation transcript
         // Defer the expensive .jsonl lookup to when user actually clicks the action
         if (!meta.workingDirectory.isEmpty()) {
@@ -3710,6 +3842,17 @@ void SessionManagerPanel::refreshCachesAsync()
 
 void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames)
 {
+    // Reload m_visibleStates from settings on every rebuild.  Otherwise the
+    // in-memory cache set in buildFilterChips() at construction goes stale
+    // whenever settings change externally (config-file edit, another codepath,
+    // tests) — defensive but cheap, and eliminates the staleness class.
+    // The chip UI is later resynced via syncChipUiToVisibleStates() at the
+    // end of this rebuild.
+    if (auto *settings = KonsolaiSettings::instance()) {
+        const QStringList visible = settings->visibleSessionStates();
+        m_visibleStates = QSet<QString>(visible.cbegin(), visible.cend());
+    }
+
     // Purge stale null QPointer entries — sessions destroyed via deleteLater()
     // leave null entries in the map that would otherwise be treated as "active".
     for (auto it = m_activeSessions.begin(); it != m_activeSessions.end();) {
@@ -3824,7 +3967,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             cat->setText(0, name + QLatin1Char(' ') + i18n("(empty)"));
             cat->setIcon(0, QIcon::fromTheme(QStringLiteral("folder-symbolic"), QIcon::fromTheme(QStringLiteral("folder"))));
             cat->setToolTip(0, i18n("User category: %1", name));
-            cat->setFlags(Qt::ItemIsEnabled);
+            // Same flag set as LCP-created categories — drag source + drop
+            // target + selectable (drags only start from selected indexes).
+            cat->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             cat->setExpanded(false);
             cat->setData(0, Qt::UserRole + 6, QString(QStringLiteral("category:") + name));
             m_categoryGroups.insert(name, cat);
@@ -3888,15 +4033,52 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         dirCount[e.meta.workingDirectory]++;
     }
 
+    // Visible sessions per project key — a project with exactly ONE visible
+    // session is flattened: the session leaf attaches directly to the
+    // category item (or top level) instead of getting a wrapper group.
+    QHash<QString, int> projVisibleCount;
+    for (const auto &e : entries) {
+        projVisibleCount[e.projectKey]++;
+    }
+    // Discovered/subagent items render via ensureProjectGroup below —
+    // conservatively count them so their projects keep the wrapper (the
+    // over-count can only prevent flattening, never break the tree).
+    if (m_registry && (m_visibleStates.contains(QStringLiteral("discovered")) || m_visibleStates.contains(QStringLiteral("subagent")))) {
+        for (const auto &state : std::as_const(m_cachedDiscoveredSessions)) {
+            projVisibleCount[resolveProjectKey(state.workingDirectory)]++;
+        }
+    }
+
     // Track per-project: max lastAccessed (for group sort) and session count (for label).
     QHash<QString, QDateTime> groupMaxAccess;
     QHash<QString, int> groupSessionCount;
 
-    // Add each session under its project group (created on demand).
+    // Add each session under its project group (created on demand) — or, for
+    // single-visible-session projects, directly under the category / top level.
     for (const auto &e : entries) {
-        QTreeWidgetItem *group = ensureProjectGroup(e.projectKey);
+        const bool flatten = projVisibleCount.value(e.projectKey, 0) == 1;
         bool hasSiblings = dirCount.value(e.meta.workingDirectory, 0) > 1;
-        addSessionToTree(e.meta, group, hasSiblings);
+
+        if (flatten) {
+            QTreeWidgetItem *catParent = ensureCategoryItemFor(e.projectKey);
+            QTreeWidgetItem *leaf = addSessionToTree(e.meta, catParent /* may be nullptr → top level */, hasSiblings);
+            // Tag the leaf with its project key so context-menu code can
+            // treat it as a project representative (Move to Category, etc.).
+            leaf->setData(0, Qt::UserRole + 1, e.meta.workingDirectory);
+            // Label rule: description wins (Piece 2); otherwise the PROJECT
+            // basename — prefix-stripped inside a category — replaces the
+            // generic session label so the tree reads "cowir → [battle]".
+            if (e.meta.description.trimmed().isEmpty()) {
+                if (catParent) {
+                    leaf->setText(0, projectSubLabel(e.projectKey, m_categoryMap.value(e.projectKey)));
+                }
+                // Standalone: addSessionToTree already labels with the
+                // workdir basename, which IS the project basename.
+            }
+        } else {
+            QTreeWidgetItem *group = ensureProjectGroup(e.projectKey);
+            addSessionToTree(e.meta, group, hasSiblings);
+        }
 
         const QString gKey = projectGroupKey(e.projectKey);
         if (e.meta.lastAccessed.isValid()) {
@@ -4015,8 +4197,56 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             }
             return a->text(0) < b->text(0);
         });
+
+        // Duplicate-tuck: keep visible every pinned session plus the newest
+        // non-pinned one (children are sorted pinned-first, then lastAccessed
+        // desc); the rest go behind a collapsed "+N older…" pseudo-item.
+        // Non-session children (discovered items) are never tucked. The
+        // pseudo-item only appears when it would actually hide ≥1 session,
+        // and N reflects only chip-visible sessions (hidden ones never made
+        // it into `children`).
+        QList<QTreeWidgetItem *> visibleChildren;
+        QList<QTreeWidgetItem *> tuckedChildren;
+        bool newestNonPinnedTaken = false;
         for (QTreeWidgetItem *c : std::as_const(children)) {
+            const QString cKey = c->data(0, Qt::UserRole + 6).toString();
+            if (!cKey.startsWith(QStringLiteral("s:"))) {
+                visibleChildren.append(c); // discovered / non-session items
+                continue;
+            }
+            const SessionMetadata *cMeta = sessionMetadata(childSessionId(c));
+            if (cMeta && cMeta->isPinned) {
+                visibleChildren.append(c); // pinned are NEVER tucked
+                continue;
+            }
+            if (!newestNonPinnedTaken) {
+                visibleChildren.append(c); // the most-recent non-pinned stays visible
+                newestNonPinnedTaken = true;
+                continue;
+            }
+            tuckedChildren.append(c);
+        }
+
+        for (QTreeWidgetItem *c : std::as_const(visibleChildren)) {
             group->addChild(c);
+        }
+        if (!tuckedChildren.isEmpty()) {
+            auto *older = new QTreeWidgetItem();
+            older->setText(0, i18n("+%1 older…", tuckedChildren.size()));
+            older->setIcon(0, QIcon::fromTheme(QStringLiteral("view-more-symbolic"), QIcon::fromTheme(QStringLiteral("go-down"))));
+            older->setToolTip(0, i18np("1 older session in this project", "%1 older sessions in this project", tuckedChildren.size()));
+            // Expandable only — no sessionId, not a drag source/target, not
+            // selectable for actions.
+            older->setFlags(Qt::ItemIsEnabled);
+            const QString olderKey = QStringLiteral("older:") + git.key();
+            older->setData(0, Qt::UserRole + 6, olderKey);
+            for (QTreeWidgetItem *c : std::as_const(tuckedChildren)) {
+                older->addChild(c);
+            }
+            group->addChild(older);
+            // Collapsed by default; expansion state preserved across rebuilds
+            // via the stable composite key (must be set AFTER insertion).
+            older->setExpanded(m_expansionState.value(olderKey, false));
         }
         // Append (count) to the existing label set by ensureProjectGroup.
         // (For multi-project categories, the label is the prefix-stripped sub-label
@@ -4033,7 +4263,20 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     }
 
     // Sort projects inside each multi-project category by max-lastAccessed of any descendant.
+    // Children can be project-group wrappers ("group:") OR flattened session
+    // leaves ("s:") — single-visible-session projects hang directly here.
     // Also annotate category labels with total session count across all sub-projects.
+    auto categoryChildAccess = [&](QTreeWidgetItem *child) -> QDateTime {
+        const QString key = child->data(0, Qt::UserRole + 6).toString();
+        if (key.startsWith(QStringLiteral("group:"))) {
+            return groupMaxAccess.value(key.mid(6));
+        }
+        if (key.startsWith(QStringLiteral("s:"))) {
+            const SessionMetadata *m = sessionMetadata(child->data(0, Qt::UserRole).toString());
+            return m ? m->lastAccessed : QDateTime();
+        }
+        return {};
+    };
     for (auto cit = m_categoryGroups.constBegin(); cit != m_categoryGroups.constEnd(); ++cit) {
         QTreeWidgetItem *cat = cit.value();
         QList<QTreeWidgetItem *> subProjects;
@@ -4041,16 +4284,8 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
             subProjects.append(cat->takeChild(0));
         }
         std::sort(subProjects.begin(), subProjects.end(), [&](QTreeWidgetItem *a, QTreeWidgetItem *b) {
-            QString aKey = a->data(0, Qt::UserRole + 6).toString();
-            QString bKey = b->data(0, Qt::UserRole + 6).toString();
-            if (aKey.startsWith(QStringLiteral("group:"))) {
-                aKey = aKey.mid(6);
-            }
-            if (bKey.startsWith(QStringLiteral("group:"))) {
-                bKey = bKey.mid(6);
-            }
-            const QDateTime aWhen = groupMaxAccess.value(aKey);
-            const QDateTime bWhen = groupMaxAccess.value(bKey);
+            const QDateTime aWhen = categoryChildAccess(a);
+            const QDateTime bWhen = categoryChildAccess(b);
             if (aWhen != bWhen) {
                 return aWhen > bWhen;
             }
@@ -4060,6 +4295,12 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         for (QTreeWidgetItem *sp : std::as_const(subProjects)) {
             cat->addChild(sp);
             QString sKey = sp->data(0, Qt::UserRole + 6).toString();
+            if (sKey.startsWith(QStringLiteral("s:"))) {
+                // Flattened session leaf — counts as one session; leaves have
+                // no expansion state to restore.
+                ++catTotalSessions;
+                continue;
+            }
             if (sKey.startsWith(QStringLiteral("group:"))) {
                 sKey = sKey.mid(6);
             }
@@ -4073,8 +4314,9 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         cat->setExpanded(m_expansionState.value(QStringLiteral("category:") + cit.key(), true));
     }
 
-    // Sort top-level items (standalone projects + multi-project category buckets)
-    // by max-lastAccessed of any descendant session, desc.
+    // Sort top-level items (standalone projects + flattened standalone session
+    // leaves + multi-project category buckets) by max-lastAccessed of any
+    // descendant session, desc.
     auto topLevelMaxAccess = [&](QTreeWidgetItem *t) -> QDateTime {
         const QString eKey = t->data(0, Qt::UserRole + 6).toString();
         if (eKey.startsWith(QStringLiteral("category:"))) {
@@ -4094,6 +4336,11 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         }
         if (eKey.startsWith(QStringLiteral("group:"))) {
             return groupMaxAccess.value(eKey.mid(6));
+        }
+        if (eKey.startsWith(QStringLiteral("s:"))) {
+            // Flattened standalone session leaf.
+            const SessionMetadata *m = sessionMetadata(t->data(0, Qt::UserRole).toString());
+            return m ? m->lastAccessed : QDateTime();
         }
         return {};
     };
@@ -4137,8 +4384,10 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
         }
     }
 
-    // Show empty state when no project groups exist (nothing to render)
-    m_emptyStateLabel->setVisible(m_projectGroups.isEmpty());
+    // Show empty state when nothing rendered at all. (m_projectGroups alone
+    // is no longer authoritative — flattened single-session projects render
+    // without a wrapper group.)
+    m_emptyStateLabel->setVisible(m_treeWidget->topLevelItemCount() == 0);
 
     // Re-apply active filter after tree rebuild
     if (!m_filterEdit->text().isEmpty()) {
@@ -4150,6 +4399,12 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
 
     // Restore scroll position and selection
     restoreTreeState();
+
+    // Belt-and-suspenders: force chip UI to reflect m_visibleStates after
+    // rebuild.  Eliminates drift regardless of how the state got there
+    // (config edit, programmatic change, tests, cross-primary/overflow
+    // toggles).
+    syncChipUiToVisibleStates();
 }
 
 void SessionManagerPanel::applyFilter(const QString &text)
@@ -4197,13 +4452,18 @@ void SessionManagerPanel::applyFilter(const QString &text)
     }
 }
 
-void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent, bool hasSiblings)
+QTreeWidgetItem *SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent, bool hasSiblings)
 {
-    auto *item = new QTreeWidgetItem(parent);
+    // nullptr parent → top-level attach (flattened standalone project leaf).
+    auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_treeWidget);
 
     // Display name: prefer user-set/auto-derived description as the PRIMARY label
     // (replacing the workdir basename). Falls back to dirname, then session name.
     // Branch/time/state suffixes get appended below regardless of source.
+    // Piece 2 rule: when the user has named the session (meta.description
+    // non-empty), that name IS the label — verbatim, nothing appended. All
+    // branch/time/sibling/badge suffixes below are gated on
+    // !descriptionIsPrimary; the full detail lives in the tooltip instead.
     QString displayName;
     if (!meta.description.trimmed().isEmpty()) {
         displayName = meta.description.trimmed();
@@ -4288,7 +4548,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     }
 
     // Apply description or fall back to session ID
-    if (!description.isEmpty()) {
+    if (!description.isEmpty() && !descriptionIsPrimary) {
         // Collapse newlines and trim for single-line display
         description = description.simplified();
         if (description.length() > 35) {
@@ -4300,7 +4560,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
 
     // When multiple sessions share the same directory in the same category,
     // append creation date to disambiguate visually-identical entries.
-    if (hasSiblings && meta.createdAt.isValid()) {
+    if (!descriptionIsPrimary && hasSiblings && meta.createdAt.isValid()) {
         // Use "MMM d" for older sessions, "h:mm AP" for today's sessions
         if (meta.createdAt.date() == QDate::currentDate()) {
             displayName += QStringLiteral(" — %1").arg(meta.createdAt.toString(QStringLiteral("h:mm AP")));
@@ -4310,7 +4570,7 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
     }
 
     // Add team badge when subagents exist (active or completed/persisted)
-    if (isActive) {
+    if (isActive && !descriptionIsPrimary) {
         ClaudeSession *activeSession = m_activeSessions[meta.sessionId];
         if (activeSession && !activeSession->subagents().isEmpty()) {
             int activeCount = 0;
@@ -4330,23 +4590,25 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
                 displayName += QStringLiteral(" [%1: %2]").arg(badgeLabel).arg(activeCount);
             }
         }
-    } else if (!meta.subagents.isEmpty()) {
+    } else if (!isActive && !descriptionIsPrimary && !meta.subagents.isEmpty()) {
         // Persisted team badge
         displayName += QStringLiteral(" [team: done]");
     }
 
     // Agent linkage badge
-    if (!meta.agentId.isEmpty()) {
+    if (!descriptionIsPrimary && !meta.agentId.isEmpty()) {
         displayName += QStringLiteral(" [\U0001F916 %1]").arg(meta.agentId);
     }
 
-    // Add GSD badge when .planning/ or ROADMAP.md exists in working directory (cached)
+    // Add GSD badge when .planning/ or ROADMAP.md exists in working directory
+    // (cache population runs unconditionally — the tooltip and later rebuilds
+    // rely on it — only the label append is suppressed for named sessions)
     if (!meta.workingDirectory.isEmpty()) {
         if (!m_gsdBadgeCache.contains(meta.workingDirectory)) {
             QDir workDir(meta.workingDirectory);
             m_gsdBadgeCache.insert(meta.workingDirectory, workDir.exists(QStringLiteral(".planning")) || workDir.exists(QStringLiteral("ROADMAP.md")));
         }
-        if (m_gsdBadgeCache.value(meta.workingDirectory)) {
+        if (!descriptionIsPrimary && m_gsdBadgeCache.value(meta.workingDirectory)) {
             displayName += QStringLiteral(" [GSD]");
         }
     }
@@ -4378,30 +4640,30 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             git->start(QStringLiteral("git"), {QStringLiteral("branch"), QStringLiteral("--show-current")});
         }
         const QString &branch = m_gitBranchCache[meta.workingDirectory];
-        if (!branch.isEmpty() && branch != QStringLiteral("main") && branch != QStringLiteral("master")) {
+        if (!descriptionIsPrimary && !branch.isEmpty() && branch != QStringLiteral("main") && branch != QStringLiteral("master")) {
             displayName += QStringLiteral(" [%1]").arg(branch);
         }
     }
 
     // Disambiguate when multiple sessions share the same directory in the same category
-    if (hasSiblings && description.isEmpty() && meta.createdAt.isValid()) {
+    if (!descriptionIsPrimary && hasSiblings && description.isEmpty() && meta.createdAt.isValid()) {
         displayName += QStringLiteral(" — %1").arg(meta.createdAt.toString(QStringLiteral("MMM d h:mmap")));
     }
 
     // Add @host suffix for remote sessions
-    if (meta.isRemote && !meta.sshHost.isEmpty()) {
+    if (!descriptionIsPrimary && meta.isRemote && !meta.sshHost.isEmpty()) {
         displayName += QStringLiteral(" @%1").arg(meta.sshHost);
     }
 
     // Muted indicator
-    if (m_mutedSessions.contains(meta.sessionId)) {
+    if (!descriptionIsPrimary && m_mutedSessions.contains(meta.sessionId)) {
         displayName += QStringLiteral(" [muted]");
     }
 
     // Merged-away indicator: this session was collapsed into another via
-    // mergeSessions(). Adds a small suffix and is annotated in the tooltip
-    // (appended below).
-    if (!meta.mergedInto.isEmpty()) {
+    // mergeSessions(). Kept ONLY when the session has no user-set name — for
+    // named sessions the merged state lives in the tooltip + state icon.
+    if (!descriptionIsPrimary && !meta.mergedInto.isEmpty()) {
         displayName += QStringLiteral(" \xE2\x86\x92 merged");
     }
 
@@ -4557,6 +4819,8 @@ void SessionManagerPanel::addSessionToTree(const SessionMetadata &meta, QTreeWid
             }
         }
     }
+
+    return item;
 }
 
 void SessionManagerPanel::loadMetadata()
@@ -4903,14 +5167,23 @@ SessionMetadata *SessionManagerPanel::findMetadata(const QString &sessionId)
 
 QTreeWidgetItem *SessionManagerPanel::findTreeItem(const QString &sessionId)
 {
-    // Tree layout: top-level = project group, children = session items.
-    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *group = m_treeWidget->topLevelItem(i);
-        for (int j = 0; j < group->childCount(); ++j) {
-            QTreeWidgetItem *item = group->child(j);
-            if (item->data(0, Qt::UserRole).toString() == sessionId) {
-                return item;
+    // Tree shapes vary: category → group → session, group → session,
+    // category → flattened session leaf, top-level flattened leaf, and
+    // sessions tucked behind a "+N older…" pseudo-item. Walk recursively.
+    std::function<QTreeWidgetItem *(QTreeWidgetItem *)> find = [&](QTreeWidgetItem *node) -> QTreeWidgetItem * {
+        if (node->data(0, Qt::UserRole).toString() == sessionId && node->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("s:"))) {
+            return node;
+        }
+        for (int i = 0; i < node->childCount(); ++i) {
+            if (auto *hit = find(node->child(i))) {
+                return hit;
             }
+        }
+        return nullptr;
+    };
+    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
+        if (auto *hit = find(m_treeWidget->topLevelItem(i))) {
+            return hit;
         }
     }
     return nullptr;
@@ -6175,26 +6448,11 @@ QString labelForSourceKey(const QString &sourceKey)
     return sourceKey;
 }
 
-} // namespace
-
-void SessionManagerPanel::handleDropRequest(const QStringList &sourceKeys, const QString &targetCategoryKey)
+// Pre-filter drop/move sources — drop keys that would collide with the
+// target itself (a category renaming itself into its own bucket is a no-op)
+// and unknown source-type strings so a corrupt payload can't crash us.
+QStringList filterValidDropSources(const QStringList &sourceKeys, const QString &targetCategoryKey, const QString &targetCat)
 {
-    if (sourceKeys.isEmpty() || !targetCategoryKey.startsWith(QStringLiteral("category:"))) {
-        return;
-    }
-    auto *settings = KonsolaiSettings::instance();
-    if (!settings) {
-        return;
-    }
-
-    const QString targetCat = targetCategoryKey.mid(QStringLiteral("category:").size());
-    if (targetCat.isEmpty()) {
-        return;
-    }
-
-    // Pre-filter — drop keys that would collide with the target itself (a
-    // category renaming itself into its own bucket is a no-op). Also drop
-    // unknown source-type strings so a corrupt payload can't crash us.
     QStringList validSources;
     validSources.reserve(sourceKeys.size());
     for (const QString &k : sourceKeys) {
@@ -6210,6 +6468,60 @@ void SessionManagerPanel::handleDropRequest(const QStringList &sourceKeys, const
         }
         validSources << k;
     }
+    return validSources;
+}
+
+} // namespace
+
+int SessionManagerPanel::applyDropRoutings(const QStringList &sourceKeys, const QString &targetCategoryKey)
+{
+    if (sourceKeys.isEmpty() || !targetCategoryKey.startsWith(QStringLiteral("category:"))) {
+        return 0;
+    }
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
+        return 0;
+    }
+    const QString targetCat = targetCategoryKey.mid(QStringLiteral("category:").size());
+    if (targetCat.isEmpty()) {
+        return 0;
+    }
+    const QStringList validSources = filterValidDropSources(sourceKeys, targetCategoryKey, targetCat);
+    if (validSources.isEmpty()) {
+        return 0;
+    }
+
+    // Block settingsChanged storms during the batch — KonsolaiSettings emits
+    // settingsChanged() from each mutator, and downstream slots trigger a
+    // tree rebuild each time. We want a single rebuild at the end.
+    settings->blockSignals(true);
+    for (const QString &k : validSources) {
+        if (k.startsWith(QStringLiteral("category:"))) {
+            const QString sourceCat = k.mid(QStringLiteral("category:").size());
+            settings->addCategoryAlias(sourceCat, targetCat);
+        } else if (k.startsWith(QStringLiteral("group:"))) {
+            const QString workdir = k.mid(QStringLiteral("group:").size());
+            settings->addWorkdirCategoryOverride(workdir, targetCat);
+        }
+    }
+    // Clear any pre-existing suppression that would fight the new rule.
+    settings->removeSuppressedCategory(targetCat);
+    settings->blockSignals(false);
+
+    scheduleTreeUpdate();
+    return validSources.size();
+}
+
+void SessionManagerPanel::handleDropRequest(const QStringList &sourceKeys, const QString &targetCategoryKey)
+{
+    if (sourceKeys.isEmpty() || !targetCategoryKey.startsWith(QStringLiteral("category:"))) {
+        return;
+    }
+    const QString targetCat = targetCategoryKey.mid(QStringLiteral("category:").size());
+    if (targetCat.isEmpty()) {
+        return;
+    }
+    const QStringList validSources = filterValidDropSources(sourceKeys, targetCategoryKey, targetCat);
     if (validSources.isEmpty()) {
         return;
     }
@@ -6228,24 +6540,50 @@ void SessionManagerPanel::handleDropRequest(const QStringList &sourceKeys, const
         return;
     }
 
-    // Block signalsChanged storms during the batch — KonsolaiSettings emits
-    // settingsChanged() from each mutator, and downstream slots trigger a
-    // tree rebuild each time. We want a single rebuild at the end.
-    settings->blockSignals(true);
-    for (const QString &k : validSources) {
-        if (k.startsWith(QStringLiteral("category:"))) {
-            const QString sourceCat = k.mid(QStringLiteral("category:").size());
-            settings->addCategoryAlias(sourceCat, targetCat);
-        } else if (k.startsWith(QStringLiteral("group:"))) {
-            const QString workdir = k.mid(QStringLiteral("group:").size());
-            settings->addWorkdirCategoryOverride(workdir, targetCat);
-        }
-    }
-    // Clear any pre-existing suppression that would fight the new rule.
-    settings->removeSuppressedCategory(targetCat);
-    settings->blockSignals(false);
+    applyDropRoutings(validSources, targetCategoryKey);
+}
 
-    scheduleTreeUpdate();
+QStringList SessionManagerPanel::moveTargetCategories(const QString &excludeKey) const
+{
+    QStringList keys = m_categoryGroups.keys();
+    keys.removeAll(excludeKey);
+    std::sort(keys.begin(), keys.end(), [](const QString &a, const QString &b) {
+        return a.localeAwareCompare(b) < 0;
+    });
+    return keys;
+}
+
+void SessionManagerPanel::addMoveToCategorySubmenu(QMenu &menu, const QString &sourceKey, const QString &currentCategoryKey, const QString &title)
+{
+    QMenu *moveMenu = menu.addMenu(QIcon::fromTheme(QStringLiteral("edit-move"), QIcon::fromTheme(QStringLiteral("folder"))), title);
+    moveMenu->setObjectName(QStringLiteral("moveToCategoryMenu"));
+
+    const QStringList targets = moveTargetCategories(currentCategoryKey);
+    for (const QString &cat : targets) {
+        QAction *a = moveMenu->addAction(cat);
+        // Menu selection IS the confirmation — no dialog on this path.
+        connect(a, &QAction::triggered, this, [this, sourceKey, cat]() {
+            applyDropRoutings({sourceKey}, QStringLiteral("category:") + cat);
+        });
+    }
+    if (!targets.isEmpty()) {
+        moveMenu->addSeparator();
+    }
+    QAction *newCat = moveMenu->addAction(QIcon::fromTheme(QStringLiteral("folder-new")), i18n("New Category…"));
+    newCat->setObjectName(QStringLiteral("moveToNewCategoryAction"));
+    connect(newCat, &QAction::triggered, this, [this, sourceKey]() {
+        const QString name = promptNewCategoryName();
+        if (name.isEmpty()) {
+            return;
+        }
+        auto *settings = KonsolaiSettings::instance();
+        if (!settings) {
+            return;
+        }
+        // Create the category and apply the move in one step.
+        settings->addUserCategory(name);
+        applyDropRoutings({sourceKey}, QStringLiteral("category:") + name);
+    });
 }
 
 // ============================================================
@@ -6382,17 +6720,12 @@ bool SessionManagerPanel::isSubagentSession(const SessionMetadata &meta) const
 // Feature — Create a new user-defined empty category
 // ============================================================
 
-void SessionManagerPanel::createUserCategory()
+QString SessionManagerPanel::promptNewCategoryName()
 {
     bool ok = false;
     const QString name = QInputDialog::getText(this, i18n("New Category"), i18n("Category name:"), QLineEdit::Normal, QString(), &ok).trimmed();
     if (!ok || name.isEmpty()) {
-        return;
-    }
-
-    auto *settings = KonsolaiSettings::instance();
-    if (!settings) {
-        return;
+        return {};
     }
 
     // Reject if the name collides with an existing category bucket in the
@@ -6400,10 +6733,104 @@ void SessionManagerPanel::createUserCategory()
     // silently merged into an existing one.
     if (m_categoryGroups.contains(name)) {
         QMessageBox::information(this, i18n("Category exists"), i18n("A category named \"%1\" already exists.", name));
+        return {};
+    }
+    return name;
+}
+
+void SessionManagerPanel::createUserCategory()
+{
+    const QString name = promptNewCategoryName();
+    if (name.isEmpty()) {
+        return;
+    }
+
+    auto *settings = KonsolaiSettings::instance();
+    if (!settings) {
         return;
     }
     settings->addUserCategory(name);
     scheduleTreeUpdate();
+}
+
+// ============================================================
+// Feature — Fleet launcher: launch/focus latest session per project
+// ============================================================
+
+int SessionManagerPanel::launchLatestForWorkdir(const QString &workdir)
+{
+    if (workdir.isEmpty()) {
+        return 0;
+    }
+
+    // Worktree paths collapse to the parent project for matching, mirroring
+    // resolveProjectKey in updateTreeWidgetWithLiveSessions.
+    auto resolveKey = [](const QString &wd) -> QString {
+        const int idx = wd.indexOf(QStringLiteral("/.claude/worktrees/"));
+        return idx > 0 ? wd.left(idx) : wd;
+    };
+
+    // 1. Already-active session for this workdir → focus its tab, don't spawn.
+    for (auto it = m_activeSessions.cbegin(); it != m_activeSessions.cend(); ++it) {
+        ClaudeSession *session = it.value();
+        if (!session) {
+            continue;
+        }
+        const SessionMetadata *meta = sessionMetadata(it.key());
+        const QString sessionWd = meta ? meta->workingDirectory : session->workingDirectory();
+        if (resolveKey(sessionWd) == workdir) {
+            Q_EMIT focusSessionRequested(session);
+            return 1;
+        }
+    }
+
+    // 2. Newest top-level .jsonl in ~/.claude/projects/<hashed>/ → resume it.
+    //    (Top-level only — subagent transcripts live in subdirectories and
+    //    must not be resumed as main conversations.)
+    const QString hashed = ClaudeSessionRegistry::hashedProjectPath(workdir);
+    QDir projectDir(QDir::homePath() + QStringLiteral("/.claude/projects/") + hashed);
+    if (!projectDir.exists()) {
+        return 0;
+    }
+    const QFileInfoList jsonls = projectDir.entryInfoList({QStringLiteral("*.jsonl")}, QDir::Files, QDir::Time);
+    if (jsonls.isEmpty()) {
+        return 0;
+    }
+    // QDir::Time sorts most-recently-modified first; the basename (sans
+    // .jsonl) is the conversation UUID the resume flow expects.
+    Q_EMIT resumeConversationRequested(workdir, jsonls.first().completeBaseName(), QString(), QString(), 22);
+    return 1;
+}
+
+int SessionManagerPanel::launchLatestInCategory(const QString &categoryKey)
+{
+    if (categoryKey.isEmpty()) {
+        return 0;
+    }
+
+    // Unique workdirs routed into this category by the current map.
+    QStringList workdirs;
+    for (auto it = m_categoryMap.cbegin(); it != m_categoryMap.cend(); ++it) {
+        if (it.value() == categoryKey) {
+            workdirs.append(it.key());
+        }
+    }
+    std::sort(workdirs.begin(), workdirs.end());
+
+    int launched = 0;
+    int skipped = 0;
+    for (const QString &wd : std::as_const(workdirs)) {
+        if (launchLatestForWorkdir(wd) > 0) {
+            ++launched;
+        } else {
+            ++skipped;
+        }
+    }
+    if (skipped > 0) {
+        qInfo() << "SessionManagerPanel::launchLatestInCategory:" << categoryKey << "- launched/focused" << launched << "project(s), skipped" << skipped
+                << "with no conversations";
+    }
+    return launched;
 }
 
 // ============================================================

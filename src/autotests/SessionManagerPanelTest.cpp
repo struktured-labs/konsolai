@@ -1304,6 +1304,31 @@ static void forceTreeRebuild(SessionManagerPanel &panel)
     panel.rebuildTreeSync();
 }
 
+// Helper: find the tree item for a sessionId anywhere in the tree (recursive).
+// The tree shape varies: category → group → session, group → session,
+// flattened leaves at category/top level, and sessions tucked behind the
+// "+N older…" pseudo-item.
+static QTreeWidgetItem *findSessionItemAnywhere(QTreeWidget *tree, const QString &sessionId)
+{
+    std::function<QTreeWidgetItem *(QTreeWidgetItem *)> find = [&](QTreeWidgetItem *node) -> QTreeWidgetItem * {
+        if (node->data(0, Qt::UserRole).toString() == sessionId) {
+            return node;
+        }
+        for (int i = 0; i < node->childCount(); ++i) {
+            if (auto *hit = find(node->child(i))) {
+                return hit;
+            }
+        }
+        return nullptr;
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (auto *hit = find(tree->topLevelItem(i))) {
+            return hit;
+        }
+    }
+    return nullptr;
+}
+
 // Helper: recursively collect all tree items matching a predicate
 static void collectItems(QTreeWidgetItem *root, std::function<bool(QTreeWidgetItem *)> pred, QList<QTreeWidgetItem *> &out)
 {
@@ -1410,27 +1435,16 @@ void SessionManagerPanelTest::testPinSession_ImmediateTreeUpdate()
     QVERIFY(tree);
     forceTreeRebuild(panel);
 
-    // Locate the session item inside its project group.
-    auto findSessionItem = [tree](const QString &sessionId) -> QTreeWidgetItem * {
-        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-            QTreeWidgetItem *group = tree->topLevelItem(i);
-            for (int j = 0; j < group->childCount(); ++j) {
-                if (group->child(j)->data(0, Qt::UserRole).toString() == sessionId) {
-                    return group->child(j);
-                }
-            }
-        }
-        return nullptr;
-    };
-
-    QTreeWidgetItem *item = findSessionItem(QStringLiteral("imm11111"));
+    // Single-session projects flatten: the session leaf may hang directly at
+    // top level (no wrapper group) — search recursively.
+    QTreeWidgetItem *item = findSessionItemAnywhere(tree, QStringLiteral("imm11111"));
     // Default visible states are active/detached/pinned; an unpinned closed
     // session is filtered out. Pin it first to make it visible, then verify
     // the state token flips. To bootstrap, register the session via pin then
     // check the marker.
     panel.pinSession(QStringLiteral("imm11111"));
 
-    item = findSessionItem(QStringLiteral("imm11111"));
+    item = findSessionItemAnywhere(tree, QStringLiteral("imm11111"));
     QVERIFY(item);
     // State token is stamped at UserRole+5 by addSessionToTree.
     const QString state = item->data(0, Qt::UserRole + 5).toString();
@@ -2101,10 +2115,14 @@ void SessionManagerPanelTest::testSuppressedCategoryUngroupsToStandalone()
     forceTreeRebuild(panel);
 
     QVERIFY2(!topLevelCategoryItem(tree, QStringLiteral("cowir")), "Expected no cowir category after suppression");
-    // Both workdirs stand alone at top level as "group:" items.
+    // Both projects stand alone at top level. Each has exactly one visible
+    // session, so the single-session flatten applies: the session LEAF hangs
+    // at top level directly (no "group:" wrapper).
     const QStringList keys = topLevelCategoryKeys(tree);
-    QVERIFY(keys.contains(QStringLiteral("group:/home/u/cowir-alpha")));
-    QVERIFY(keys.contains(QStringLiteral("group:/home/u/cowir-beta")));
+    QVERIFY(keys.contains(QStringLiteral("s:aa")));
+    QVERIFY(keys.contains(QStringLiteral("s:bb")));
+    QVERIFY(!keys.contains(QStringLiteral("group:/home/u/cowir-alpha")));
+    QVERIFY(!keys.contains(QStringLiteral("group:/home/u/cowir-beta")));
 
     resetSessionTreeSettings(&settings);
 }
@@ -2314,6 +2332,659 @@ void SessionManagerPanelTest::testMultiDrop_AppliesAllSourceRoutingsInOneCall()
     QCOMPARE(settings.workdirCategoryOverrides().value(QStringLiteral("/home/u/bbb")), QStringLiteral("cowir"));
     QCOMPARE(settings.categoryAliases().value(QStringLiteral("ccc")), QStringLiteral("cowir"));
 
+    resetSessionTreeSettings(&settings);
+}
+
+// ============================================================
+// Drag-and-drop item flags (Piece 1 regression)
+// ============================================================
+
+void SessionManagerPanelTest::testCategoryItemsAreDragAndDropEnabled()
+{
+    // Regression: category and project-group items were created with
+    // setFlags(Qt::ItemIsEnabled), which REPLACES the flag set and strips
+    // Qt::ItemIsDragEnabled / Qt::ItemIsDropEnabled / Qt::ItemIsSelectable.
+    // Qt's view machinery checks flags() before ever calling mimeData() —
+    // and a drag can only start from a SELECTED index (Qt filters the
+    // selection by ItemIsSelectable + ItemIsDragEnabled) — so drags never
+    // started, regardless of the custom MIME logic in SessionTreeWidget.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    // Two projects sharing a prefix (creates category "dndcat") with two
+    // sessions each (so the project keeps its wrapper group), plus a
+    // standalone project with two sessions.
+    QJsonArray sessions;
+    for (int i = 0; i < 2; ++i) {
+        QJsonObject a = makeSession(QStringLiteral("dnda%1").arg(i), QStringLiteral("konsolai-dnda%1").arg(i));
+        a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/dndcat-alpha");
+        sessions.append(a);
+        QJsonObject b = makeSession(QStringLiteral("dndb%1").arg(i), QStringLiteral("konsolai-dndb%1").arg(i));
+        b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/dndcat-beta");
+        sessions.append(b);
+        QJsonObject s = makeSession(QStringLiteral("dnds%1").arg(i), QStringLiteral("konsolai-dnds%1").arg(i));
+        s[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/lonesome-standalone");
+        sessions.append(s);
+    }
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    int categoriesChecked = 0;
+    int groupsChecked = 0;
+    std::function<void(QTreeWidgetItem *)> walk = [&](QTreeWidgetItem *item) {
+        const QString key = item->data(0, Qt::UserRole + 6).toString();
+        if (key.startsWith(QStringLiteral("category:"))) {
+            ++categoriesChecked;
+            QVERIFY2(item->flags() & Qt::ItemIsDragEnabled, qPrintable(QStringLiteral("category item '%1' must be drag-enabled").arg(key)));
+            QVERIFY2(item->flags() & Qt::ItemIsDropEnabled, qPrintable(QStringLiteral("category item '%1' must be drop-enabled").arg(key)));
+            QVERIFY2(item->flags() & Qt::ItemIsSelectable, qPrintable(QStringLiteral("category item '%1' must be selectable (drag needs selection)").arg(key)));
+        } else if (key.startsWith(QStringLiteral("group:"))) {
+            ++groupsChecked;
+            QVERIFY2(item->flags() & Qt::ItemIsDragEnabled, qPrintable(QStringLiteral("group item '%1' must be drag-enabled").arg(key)));
+            QVERIFY2(item->flags() & Qt::ItemIsSelectable, qPrintable(QStringLiteral("group item '%1' must be selectable (drag needs selection)").arg(key)));
+        }
+        for (int i = 0; i < item->childCount(); ++i) {
+            walk(item->child(i));
+        }
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        walk(tree->topLevelItem(i));
+    }
+
+    QVERIFY2(categoriesChecked >= 1, "Fixture must produce at least one category item");
+    QVERIFY2(groupsChecked >= 1, "Fixture must produce at least one project-group item");
+
+    resetSessionTreeSettings(&settings);
+}
+
+// ============================================================
+// Clean rename: description IS the label (Piece 2)
+// ============================================================
+
+void SessionManagerPanelTest::testDescriptionOnlyLabel_NoSuffixes()
+{
+    // A named session must render EXACTLY its description — no sibling
+    // timestamp, no @host, no merged arrow, no badges. The detail moves to
+    // the tooltip.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    // Named session: remote (@host suffix in old code), has a sibling
+    // (timestamp suffix in old code), and createdAt is valid.
+    QJsonObject named = makeSession(QStringLiteral("named111"), QStringLiteral("konsolai-named111"));
+    named[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/canon-project");
+    named[QStringLiteral("description")] = QStringLiteral("canon battle agent");
+    named[QStringLiteral("isRemote")] = true;
+    named[QStringLiteral("sshHost")] = QStringLiteral("blackmage");
+    named[QStringLiteral("lastAccessed")] = QStringLiteral("2025-06-02T12:00:00");
+    sessions.append(named);
+    // Sibling in the same workdir (forces hasSiblings=true).
+    QJsonObject sibling = makeSession(QStringLiteral("sib22222"), QStringLiteral("konsolai-sib22222"));
+    sibling[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/canon-project");
+    sessions.append(sibling);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QTreeWidgetItem *item = findSessionItemAnywhere(tree, QStringLiteral("named111"));
+    QVERIFY2(item, "Named session must render in the tree");
+    QCOMPARE(item->text(0), QStringLiteral("canon battle agent"));
+
+    // Detail is preserved in the tooltip, not lost.
+    const QString tip = item->toolTip(0);
+    QVERIFY2(tip.contains(QStringLiteral("/home/u/canon-project")), "Tooltip must keep the working directory");
+    QVERIFY2(tip.contains(QStringLiteral("konsolai-named111")), "Tooltip must keep the session name");
+    QVERIFY2(tip.contains(QStringLiteral("blackmage")), "Tooltip must keep the remote host");
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testEmptyDescription_KeepsAutoLabel()
+{
+    // Without a description the auto-derived label (workdir basename +
+    // existing suffixes) stays as-is.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    QJsonObject s = makeSession(QStringLiteral("auto1111"), QStringLiteral("konsolai-auto1111"));
+    s[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/plainest-project");
+    sessions.append(s);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QTreeWidgetItem *item = findSessionItemAnywhere(tree, QStringLiteral("auto1111"));
+    QVERIFY2(item, "Session must render in the tree");
+    QVERIFY2(item->text(0).contains(QStringLiteral("plainest-project")), "Auto label must contain the workdir basename");
+
+    resetSessionTreeSettings(&settings);
+}
+
+// ============================================================
+// Flatten single-session project wrappers (Piece 3)
+// ============================================================
+
+void SessionManagerPanelTest::testSingleSessionProject_FlattensIntoCategory()
+{
+    // Category "flatcat" with two projects: alpha has 1 visible session
+    // (flattens to a leaf directly under the category), beta has 3 (keeps
+    // its wrapper group).
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    QJsonObject a = makeSession(QStringLiteral("fa111111"), QStringLiteral("konsolai-fa111111"));
+    a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/flatcat-alpha");
+    sessions.append(a);
+    for (int i = 0; i < 3; ++i) {
+        QJsonObject b = makeSession(QStringLiteral("fb%1").arg(i), QStringLiteral("konsolai-fb%1").arg(i));
+        b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/flatcat-beta");
+        // Distinct lastAccessed so ordering is deterministic.
+        b[QStringLiteral("lastAccessed")] = QStringLiteral("2025-06-0%1T12:00:00").arg(i + 1);
+        sessions.append(b);
+    }
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QTreeWidgetItem *cat = topLevelCategoryItem(tree, QStringLiteral("flatcat"));
+    QVERIFY2(cat, "Expected flatcat category from LCP of flatcat-alpha + flatcat-beta");
+
+    // Category children: one flattened "s:" leaf (alpha) + one "group:" wrapper (beta).
+    QTreeWidgetItem *alphaLeaf = nullptr;
+    QTreeWidgetItem *betaGroup = nullptr;
+    for (int i = 0; i < cat->childCount(); ++i) {
+        const QString key = cat->child(i)->data(0, Qt::UserRole + 6).toString();
+        if (key == QStringLiteral("s:fa111111")) {
+            alphaLeaf = cat->child(i);
+        } else if (key == QStringLiteral("group:/home/u/flatcat-beta")) {
+            betaGroup = cat->child(i);
+        }
+    }
+    QVERIFY2(alphaLeaf, "Single-session project must flatten: session leaf directly under the category");
+    QVERIFY2(betaGroup, "Multi-session project must keep its wrapper group");
+    QVERIFY2(betaGroup->childCount() >= 1, "Wrapper group must contain the beta sessions");
+    // No leftover wrapper group for alpha anywhere.
+    QVERIFY(!findItemsByRole(tree, Qt::UserRole + 6, QStringLiteral("group:/home/u/flatcat-alpha")).size());
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testFlattenedLeaf_UsesProjectBasenameWhenNoDescription()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    // In-category flattened leaf: label = prefix-stripped project basename.
+    QJsonObject a = makeSession(QStringLiteral("fl111111"), QStringLiteral("konsolai-fl111111"));
+    a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/flatlbl-battle");
+    sessions.append(a);
+    QJsonObject b = makeSession(QStringLiteral("fl222222"), QStringLiteral("konsolai-fl222222"));
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/flatlbl-main");
+    sessions.append(b);
+    // Named single-session project: description wins over the basename.
+    QJsonObject c = makeSession(QStringLiteral("fl333333"), QStringLiteral("konsolai-fl333333"));
+    c[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/flatlbl-sfx");
+    c[QStringLiteral("description")] = QStringLiteral("sound effects lab");
+    sessions.append(c);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QTreeWidgetItem *battle = findSessionItemAnywhere(tree, QStringLiteral("fl111111"));
+    QVERIFY(battle);
+    QCOMPARE(battle->text(0), QStringLiteral("battle"));
+
+    QTreeWidgetItem *mainLeaf = findSessionItemAnywhere(tree, QStringLiteral("fl222222"));
+    QVERIFY(mainLeaf);
+    QCOMPARE(mainLeaf->text(0), QStringLiteral("main"));
+
+    QTreeWidgetItem *sfx = findSessionItemAnywhere(tree, QStringLiteral("fl333333"));
+    QVERIFY(sfx);
+    QCOMPARE(sfx->text(0), QStringLiteral("sound effects lab"));
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testFlattenedLeaf_ContextActionsStillResolve()
+{
+    // Context-menu actions gather by sessionId (UserRole), which is unchanged
+    // for flattened leaves — exercise the predicates the menu uses.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    SessionManagerPanel_INIT(panel);
+    ClaudeSession live(QStringLiteral("TestProfile"), QStringLiteral("/home/u/flatact-solo"));
+    panel.registerSession(&live);
+    QCoreApplication::processEvents();
+    forceTreeRebuild(panel);
+
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+
+    // The live session is the project's only visible session → flattened leaf.
+    QTreeWidgetItem *leaf = findSessionItemAnywhere(tree, live.sessionId());
+    QVERIFY2(leaf, "Live single session must render as a flattened leaf");
+    QVERIFY(leaf->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("s:")));
+    // Flattened leaves carry their project key at UserRole+1.
+    QCOMPARE(leaf->data(0, Qt::UserRole + 1).toString(), QStringLiteral("/home/u/flatact-solo"));
+
+    // Select it and run the same predicates the context menu / hotkeys use.
+    tree->setCurrentItem(leaf);
+    QVERIFY(panel.canOfferBroadcastForSelection({live.sessionId()}));
+    QVERIFY(!panel.canOfferMergeForSelection({live.sessionId()})); // merge needs ≥2 same-project
+    QVERIFY(panel.isSessionActive(live.sessionId()));
+
+    // Vim "pin" action on the flattened leaf resolves the session normally.
+    panel.handleTreeAction(QStringLiteral("pin"));
+    QCOMPARE(panel.pinnedSessions().size(), 1);
+    QCOMPARE(panel.pinnedSessions().first().sessionId, live.sessionId());
+
+    panel.unregisterSession(&live);
+    resetSessionTreeSettings(&settings);
+}
+
+// ============================================================
+// Duplicate-tuck: newest visible, rest behind "+N older…" (Piece 4)
+// ============================================================
+
+// Helper: find the "+N older…" pseudo-item under a group (or anywhere), by
+// its "older:" composite-key prefix. Returns nullptr when absent.
+static QTreeWidgetItem *findOlderPseudoItem(QTreeWidget *tree)
+{
+    std::function<QTreeWidgetItem *(QTreeWidgetItem *)> find = [&](QTreeWidgetItem *node) -> QTreeWidgetItem * {
+        if (node->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("older:"))) {
+            return node;
+        }
+        for (int i = 0; i < node->childCount(); ++i) {
+            if (auto *hit = find(node->child(i))) {
+                return hit;
+            }
+        }
+        return nullptr;
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (auto *hit = find(tree->topLevelItem(i))) {
+            return hit;
+        }
+    }
+    return nullptr;
+}
+
+void SessionManagerPanelTest::testMultiSessionProject_TucksOlderBehindExpander()
+{
+    // 4 same-project sessions, none pinned → the newest stays visible and a
+    // "+3 older…" pseudo-item holds the other three, collapsed by default.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    for (int i = 0; i < 4; ++i) {
+        QJsonObject s = makeSession(QStringLiteral("tk%1").arg(i), QStringLiteral("konsolai-tk%1").arg(i));
+        s[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/tuckville-project");
+        s[QStringLiteral("lastAccessed")] = QStringLiteral("2025-06-0%1T12:00:00").arg(i + 1); // tk3 is newest
+        sessions.append(s);
+    }
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Locate the project group wrapper (kept — 4 visible sessions).
+    QTreeWidgetItem *group = nullptr;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (tree->topLevelItem(i)->data(0, Qt::UserRole + 6).toString() == QStringLiteral("group:/home/u/tuckville-project")) {
+            group = tree->topLevelItem(i);
+            break;
+        }
+    }
+    QVERIFY2(group, "Multi-session project must keep its wrapper group");
+
+    // Exactly two direct children: newest session + the pseudo-item.
+    QCOMPARE(group->childCount(), 2);
+    QCOMPARE(group->child(0)->data(0, Qt::UserRole).toString(), QStringLiteral("tk3"));
+
+    QTreeWidgetItem *older = group->child(1);
+    QCOMPARE(older->data(0, Qt::UserRole + 6).toString(), QStringLiteral("older:/home/u/tuckville-project"));
+    QVERIFY2(older->text(0).contains(QStringLiteral("+3")), "Pseudo-item label must show the tucked count");
+    QCOMPARE(older->childCount(), 3);
+    QVERIFY2(!older->isExpanded(), "Tuck pseudo-item must start collapsed");
+    // No sessionId — not actionable.
+    QVERIFY(older->data(0, Qt::UserRole).toString().isEmpty());
+    // Not a drag source or drop target.
+    QVERIFY(!(older->flags() & Qt::ItemIsDragEnabled));
+    QVERIFY(!(older->flags() & Qt::ItemIsDropEnabled));
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testPinnedSessionsNeverTucked()
+{
+    // 4 sessions, 2 pinned (older than the rest) → pinned float above the
+    // tuck line alongside the newest non-pinned; only 1 gets tucked.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    for (int i = 0; i < 4; ++i) {
+        const bool pinned = i < 2;
+        QJsonObject s = makeSession(QStringLiteral("pt%1").arg(i), QStringLiteral("konsolai-pt%1").arg(i), pinned);
+        s[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/pintuck-project");
+        s[QStringLiteral("lastAccessed")] = QStringLiteral("2025-06-0%1T12:00:00").arg(i + 1); // pt3 newest, pinned are oldest
+        sessions.append(s);
+    }
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QTreeWidgetItem *older = findOlderPseudoItem(tree);
+    QVERIFY2(older, "One non-pinned older session must be tucked");
+    QCOMPARE(older->childCount(), 1);
+    QCOMPARE(older->child(0)->data(0, Qt::UserRole).toString(), QStringLiteral("pt2"));
+
+    // Pinned sessions and the newest non-pinned are all direct group children
+    // (visible above the tuck line).
+    QTreeWidgetItem *group = older->parent();
+    QVERIFY(group);
+    QStringList directIds;
+    for (int i = 0; i < group->childCount(); ++i) {
+        const QString id = group->child(i)->data(0, Qt::UserRole).toString();
+        if (!id.isEmpty()) {
+            directIds.append(id);
+        }
+    }
+    QVERIFY(directIds.contains(QStringLiteral("pt0")));
+    QVERIFY(directIds.contains(QStringLiteral("pt1")));
+    QVERIFY(directIds.contains(QStringLiteral("pt3")));
+    QVERIFY(!directIds.contains(QStringLiteral("pt2")));
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testTuckExpanderAbsentWhenNothingHidden()
+{
+    // 2 sessions, one pinned → both visible (pinned + newest non-pinned),
+    // nothing to hide → no pseudo-item.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    QJsonObject a = makeSession(QStringLiteral("nt111111"), QStringLiteral("konsolai-nt111111"), /*pinned=*/true);
+    a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/notuck-project");
+    sessions.append(a);
+    QJsonObject b = makeSession(QStringLiteral("nt222222"), QStringLiteral("konsolai-nt222222"));
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/notuck-project");
+    b[QStringLiteral("lastAccessed")] = QStringLiteral("2025-06-03T12:00:00");
+    sessions.append(b);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QVERIFY2(!findOlderPseudoItem(tree), "No pseudo-item when nothing would be hidden");
+    QVERIFY(findSessionItemAnywhere(tree, QStringLiteral("nt111111")));
+    QVERIFY(findSessionItemAnywhere(tree, QStringLiteral("nt222222")));
+
+    resetSessionTreeSettings(&settings);
+}
+
+// ============================================================
+// Fleet launcher (Piece 5)
+// ============================================================
+
+namespace
+{
+
+// Fixture: create ~/.claude/projects/<hashed(workdir)>/ with a jsonl file and
+// stamp its mtime. Same real-home pattern TokenTrackingTest uses (test-mode
+// QStandardPaths does not affect QDir::homePath, and hashedProjectPath is
+// home-anchored). Callers MUST clean up via removeLaunchFixture().
+QString launchFixtureDir(const QString &workdir)
+{
+    return QDir::homePath() + QStringLiteral("/.claude/projects/") + ClaudeSessionRegistry::hashedProjectPath(workdir);
+}
+
+void writeLaunchJsonl(const QString &workdir, const QString &basename, const QDateTime &mtime)
+{
+    const QString dir = launchFixtureDir(workdir);
+    QDir().mkpath(dir);
+    const QString path = dir + QLatin1Char('/') + basename + QStringLiteral(".jsonl");
+    {
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("{\"type\":\"user\"}\n");
+        f.close(); // close FIRST — the flush-on-close would restamp mtime
+    }
+    QFile stamp(path);
+    QVERIFY(stamp.open(QIODevice::ReadWrite));
+    QVERIFY(stamp.setFileTime(mtime, QFileDevice::FileModificationTime));
+    stamp.close(); // no writes → close leaves the stamped mtime intact
+}
+
+void removeLaunchFixture(const QString &workdir)
+{
+    QDir(launchFixtureDir(workdir)).removeRecursively();
+}
+
+} // namespace
+
+void SessionManagerPanelTest::testLaunchLatest_FocusesActiveInsteadOfSpawning()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    // Category "fleetfoc" = active project alpha + metadata-only project beta
+    // (no conversations on disk → skipped).
+    QJsonArray sessions;
+    QJsonObject b = makeSession(QStringLiteral("flb11111"), QStringLiteral("konsolai-flb11111"));
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/fleetfoc-beta");
+    sessions.append(b);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    ClaudeSession live(QStringLiteral("TestProfile"), QStringLiteral("/home/u/fleetfoc-alpha"));
+    panel.registerSession(&live);
+    QCoreApplication::processEvents();
+    forceTreeRebuild(panel); // builds m_categoryMap from alpha + beta
+
+    QSignalSpy focusSpy(&panel, &SessionManagerPanel::focusSessionRequested);
+    QSignalSpy resumeSpy(&panel, &SessionManagerPanel::resumeConversationRequested);
+
+    const int n = panel.launchLatestInCategory(QStringLiteral("fleetfoc"));
+
+    // alpha: active → focused (no spawn); beta: no conversations → skipped.
+    QCOMPARE(n, 1);
+    QCOMPARE(focusSpy.count(), 1);
+    QCOMPARE(qvariant_cast<ClaudeSession *>(focusSpy.at(0).at(0)), &live);
+    QCOMPARE(resumeSpy.count(), 0);
+
+    panel.unregisterSession(&live);
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testLaunchLatest_EmitsResumeForNewestJsonl()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    const QString wdAlpha = QStringLiteral("/home/u/kfleetres-alpha");
+    const QString wdBeta = QStringLiteral("/home/u/kfleetres-beta");
+
+    QJsonArray sessions;
+    QJsonObject a = makeSession(QStringLiteral("fra11111"), QStringLiteral("konsolai-fra11111"));
+    a[QStringLiteral("workingDirectory")] = wdAlpha;
+    sessions.append(a);
+    QJsonObject b = makeSession(QStringLiteral("frb22222"), QStringLiteral("konsolai-frb22222"));
+    b[QStringLiteral("workingDirectory")] = wdBeta;
+    sessions.append(b);
+    writeTestSessions(sessions);
+
+    // Real on-disk fixture: two conversations for alpha with distinct mtimes.
+    const QDateTime now = QDateTime::currentDateTime();
+    writeLaunchJsonl(wdAlpha, QStringLiteral("11111111-aaaa-bbbb-cccc-000000000001"), now.addSecs(-7200));
+    writeLaunchJsonl(wdAlpha, QStringLiteral("22222222-aaaa-bbbb-cccc-000000000002"), now);
+
+    SessionManagerPanel_INIT(panel);
+    forceTreeRebuild(panel);
+
+    QSignalSpy resumeSpy(&panel, &SessionManagerPanel::resumeConversationRequested);
+    QSignalSpy focusSpy(&panel, &SessionManagerPanel::focusSessionRequested);
+
+    const int n = panel.launchLatestInCategory(QStringLiteral("kfleetres"));
+
+    // alpha resumed with the NEWER basename; beta (no fixture) skipped.
+    QCOMPARE(n, 1);
+    QCOMPARE(focusSpy.count(), 0);
+    QCOMPARE(resumeSpy.count(), 1);
+    QCOMPARE(resumeSpy.at(0).at(0).toString(), wdAlpha);
+    QCOMPARE(resumeSpy.at(0).at(1).toString(), QStringLiteral("22222222-aaaa-bbbb-cccc-000000000002"));
+    QCOMPARE(resumeSpy.at(0).at(4).toInt(), 22);
+
+    removeLaunchFixture(wdAlpha);
+    removeLaunchFixture(wdBeta);
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testLaunchLatest_SkipsProjectsWithNoConversations()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    QJsonObject a = makeSession(QStringLiteral("fsk11111"), QStringLiteral("konsolai-fsk11111"));
+    a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/fleetskip-alpha");
+    sessions.append(a);
+    QJsonObject b = makeSession(QStringLiteral("fsk22222"), QStringLiteral("konsolai-fsk22222"));
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/fleetskip-beta");
+    sessions.append(b);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    forceTreeRebuild(panel);
+
+    QSignalSpy resumeSpy(&panel, &SessionManagerPanel::resumeConversationRequested);
+    QSignalSpy focusSpy(&panel, &SessionManagerPanel::focusSessionRequested);
+
+    QCOMPARE(panel.launchLatestInCategory(QStringLiteral("fleetskip")), 0);
+    QCOMPARE(resumeSpy.count(), 0);
+    QCOMPARE(focusSpy.count(), 0);
+
+    // Unknown category: no-op, returns 0.
+    QCOMPARE(panel.launchLatestInCategory(QStringLiteral("no-such-category")), 0);
+    QCOMPARE(panel.launchLatestInCategory(QString()), 0);
+
+    resetSessionTreeSettings(&settings);
+}
+
+// ============================================================
+// "Move to Category" submenu (Piece 6)
+// ============================================================
+
+void SessionManagerPanelTest::testMoveToCategory_AppliesWorkdirOverride()
+{
+    // applyDropRoutings (the dialog-free extraction of handleDropRequest)
+    // must persist a WorkdirCategoryOverride for a group source and reroute
+    // the project into the target category on the next rebuild.
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    QJsonObject a = makeSession(QStringLiteral("mv111111"), QStringLiteral("konsolai-mv111111"));
+    a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-alpha");
+    sessions.append(a);
+    QJsonObject b = makeSession(QStringLiteral("mv222222"), QStringLiteral("konsolai-mv222222"));
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-beta");
+    sessions.append(b);
+    QJsonObject m = makeSession(QStringLiteral("mv333333"), QStringLiteral("konsolai-mv333333"));
+    m[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/moveme");
+    sessions.append(m);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Sanity: cowir category exists with 2 members; moveme is standalone.
+    QTreeWidgetItem *cowirBefore = topLevelCategoryItem(tree, QStringLiteral("cowir"));
+    QVERIFY(cowirBefore);
+    QCOMPARE(cowirBefore->childCount(), 2);
+
+    const int applied = panel.applyDropRoutings({QStringLiteral("group:/home/u/moveme")}, QStringLiteral("category:cowir"));
+    QCOMPARE(applied, 1);
+    QCOMPARE(settings.workdirCategoryOverrides().value(QStringLiteral("/home/u/moveme")), QStringLiteral("cowir"));
+
+    // applyDropRoutings schedules a debounced rebuild; force it and verify
+    // the project actually rerouted into the target bucket.
+    forceTreeRebuild(panel);
+    QTreeWidgetItem *cowirAfter = topLevelCategoryItem(tree, QStringLiteral("cowir"));
+    QVERIFY(cowirAfter);
+    QCOMPARE(cowirAfter->childCount(), 3);
+
+    // Invalid inputs are no-ops.
+    QCOMPARE(panel.applyDropRoutings({}, QStringLiteral("category:cowir")), 0);
+    QCOMPARE(panel.applyDropRoutings({QStringLiteral("group:/home/u/x")}, QStringLiteral("not-a-category")), 0);
+    QCOMPARE(panel.applyDropRoutings({QStringLiteral("category:cowir")}, QStringLiteral("category:cowir")), 0); // self-drop
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testMoveToCategoryMenu_ListsAllCategoriesExceptSelf()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+    settings.setUserCategories({QStringLiteral("misc")});
+
+    QJsonArray sessions;
+    int n = 0;
+    for (const QString &wd :
+         {QStringLiteral("/home/u/movea-x1"), QStringLiteral("/home/u/movea-x2"), QStringLiteral("/home/u/moveb-y1"), QStringLiteral("/home/u/moveb-y2")}) {
+        QJsonObject s = makeSession(QStringLiteral("mc%1").arg(n), QStringLiteral("konsolai-mc%1").arg(n));
+        s[QStringLiteral("workingDirectory")] = wd;
+        sessions.append(s);
+        ++n;
+    }
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    // Candidates for a node currently in "movea": everything except itself, sorted.
+    QCOMPARE(panel.moveTargetCategories(QStringLiteral("movea")), (QStringList{QStringLiteral("misc"), QStringLiteral("moveb")}));
+    // Node in the user category "misc": the two LCP categories remain.
+    QCOMPARE(panel.moveTargetCategories(QStringLiteral("misc")), (QStringList{QStringLiteral("movea"), QStringLiteral("moveb")}));
+    // Node with no current category (standalone project): all buckets listed.
+    QCOMPARE(panel.moveTargetCategories(QString()), (QStringList{QStringLiteral("misc"), QStringLiteral("movea"), QStringLiteral("moveb")}));
+
+    settings.setUserCategories({});
     resetSessionTreeSettings(&settings);
 }
 
@@ -2670,6 +3341,168 @@ void SessionManagerPanelTest::testIsSubagentPersistsToMetadataFile()
     const auto all = panel.allSessions();
     QCOMPARE(all.size(), 1);
     QVERIFY2(all.first().isSubagent, "isSubagent flag must be loaded from metadata JSON");
+}
+
+// ============================================================
+// Visible-state filter for "closed" — regression for filter leak
+// ============================================================
+//
+// User scenario: ~/.config/konsolairc has
+//   [SessionTree] VisibleStates=active,archived,discovered,dismissed
+// deliberately omitting "closed".  Sessions that compute to state token
+// "closed" (not archived, not dismissed, not pinned, tmux not alive, not a
+// subagent) still render.  Regression test asserts the filter DOES gate.
+//
+// Reproduces the STALENESS variant: after panel construction (which reads
+// initial settings once and caches into m_visibleStates), a later change to
+// settings — via config-file edit, another codepath, or another
+// KonsolaiSettings instance — must be picked up on the next rebuild.  The
+// current code caches m_visibleStates once at construction and never re-reads
+// from settings during rebuild.
+void SessionManagerPanelTest::testClosed_HiddenWhenNotInVisibleStates()
+{
+    KonsolaiSettings settings;
+    // Start with default (includes "closed").
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
+
+    QJsonArray sessions;
+    // sessionName does NOT match subagent heuristic (agent-[a-f0-9]{16});
+    // not archived, dismissed, or pinned; no tmux liveness → state = "closed".
+    sessions.append(makeSession(QStringLiteral("cafebabe"), QStringLiteral("konsolai-default-Claude-cafebabe"), false, false));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+
+    // AFTER construction, change visible states to omit "closed" (simulating
+    // an external config-file edit that the panel didn't see).
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("archived"), QStringLiteral("discovered"), QStringLiteral("dismissed")});
+
+    forceTreeRebuild(panel);
+
+    QVERIFY2(!selectSessionInTree(tree, QStringLiteral("cafebabe")), "Closed session must be filtered when 'closed' not in VisibleStates (staleness variant)");
+
+    // Reset for other tests.
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
+}
+
+void SessionManagerPanelTest::testClosed_ShownWhenInVisibleStates()
+{
+    // Positive control: same session, but "closed" IS in VisibleStates → must render.
+    KonsolaiSettings settings;
+    settings.setVisibleSessionStates(
+        {QStringLiteral("active"), QStringLiteral("archived"), QStringLiteral("discovered"), QStringLiteral("dismissed"), QStringLiteral("closed")});
+
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("cafebabe"), QStringLiteral("konsolai-default-Claude-cafebabe"), false, false));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    QTreeWidget *tree = findTree(panel);
+    QVERIFY(tree);
+    forceTreeRebuild(panel);
+
+    QVERIFY2(selectSessionInTree(tree, QStringLiteral("cafebabe")), "Closed session must render when 'closed' IS in VisibleStates");
+
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
+}
+
+// ============================================================
+// Chip UI ↔ m_visibleStates sync after rebuild
+// ============================================================
+
+namespace
+{
+
+// Locate a primary chip QToolButton by state token.
+static QToolButton *findFilterChip(SessionManagerPanel &panel, const QString &token)
+{
+    const QString objectName = QStringLiteral("filterChip_") + token;
+    return panel.findChild<QToolButton *>(objectName);
+}
+
+// Locate an overflow menu QAction by state token.  Overflow actions live on
+// the "filterChipsOverflow" QToolButton's QMenu.
+static QAction *findOverflowAction(SessionManagerPanel &panel, const QString &token)
+{
+    auto *overflowBtn = panel.findChild<QToolButton *>(QStringLiteral("filterChipsOverflow"));
+    if (!overflowBtn || !overflowBtn->menu()) {
+        return nullptr;
+    }
+    const QString objectName = QStringLiteral("filterChipOverflow_") + token;
+    for (QAction *a : overflowBtn->menu()->actions()) {
+        if (a->objectName() == objectName) {
+            return a;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+void SessionManagerPanelTest::testChipSync_PrimaryChipsReflectVisibleStatesAfterRebuild()
+{
+    // After a rebuild, primary chip check-state must reflect m_visibleStates
+    // regardless of how it got there (config-file edit, programmatic change).
+    // Staleness variant: change settings AFTER construction, then rebuild.
+    KonsolaiSettings settings;
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
+
+    SessionManagerPanel_INIT(panel);
+
+    // AFTER construction, change settings to a completely different set.
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("archived"), QStringLiteral("discovered"), QStringLiteral("dismissed")});
+
+    forceTreeRebuild(panel);
+
+    QToolButton *activeChip = findFilterChip(panel, QStringLiteral("active"));
+    QToolButton *closedChip = findFilterChip(panel, QStringLiteral("closed"));
+    QToolButton *pinnedChip = findFilterChip(panel, QStringLiteral("pinned"));
+    QToolButton *detachedChip = findFilterChip(panel, QStringLiteral("detached"));
+    QVERIFY(activeChip);
+    QVERIFY(closedChip);
+    QVERIFY(pinnedChip);
+    QVERIFY(detachedChip);
+
+    QVERIFY2(activeChip->isChecked(), "'active' chip must be checked (in VisibleStates)");
+    QVERIFY2(!closedChip->isChecked(), "'closed' chip must NOT be checked (not in VisibleStates)");
+    QVERIFY2(!pinnedChip->isChecked(), "'pinned' chip must NOT be checked (not in VisibleStates)");
+    QVERIFY2(!detachedChip->isChecked(), "'detached' chip must NOT be checked (not in VisibleStates)");
+
+    // Reset for other tests.
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
+}
+
+void SessionManagerPanelTest::testChipSync_OverflowActionsReflectVisibleStatesAfterRebuild()
+{
+    // After a rebuild, overflow menu actions must reflect m_visibleStates.
+    // Staleness variant: change settings AFTER construction, then rebuild.
+    KonsolaiSettings settings;
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
+
+    SessionManagerPanel_INIT(panel);
+
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("archived"), QStringLiteral("discovered"), QStringLiteral("dismissed")});
+
+    forceTreeRebuild(panel);
+
+    QAction *archivedAction = findOverflowAction(panel, QStringLiteral("archived"));
+    QAction *dismissedAction = findOverflowAction(panel, QStringLiteral("dismissed"));
+    QAction *discoveredAction = findOverflowAction(panel, QStringLiteral("discovered"));
+    QAction *subagentAction = findOverflowAction(panel, QStringLiteral("subagent"));
+    QVERIFY(archivedAction);
+    QVERIFY(dismissedAction);
+    QVERIFY(discoveredAction);
+    QVERIFY(subagentAction);
+
+    QVERIFY2(archivedAction->isChecked(), "'archived' overflow action must be checked (in VisibleStates)");
+    QVERIFY2(dismissedAction->isChecked(), "'dismissed' overflow action must be checked (in VisibleStates)");
+    QVERIFY2(discoveredAction->isChecked(), "'discovered' overflow action must be checked (in VisibleStates)");
+    QVERIFY2(!subagentAction->isChecked(), "'subagent' overflow action must NOT be checked (not in VisibleStates)");
+
+    // Reset for other tests.
+    settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
 }
 
 QTEST_MAIN(SessionManagerPanelTest)

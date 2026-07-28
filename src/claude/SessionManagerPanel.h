@@ -324,10 +324,28 @@ public Q_SLOTS:
     /**
      * Handle a drop event from the tree: one-or-more source composite keys
      * ("group:..." or "category:...") dropped onto a target composite key
-     * ("category:...").  Prompts the user once for confirmation and persists
-     * an alias/override for each source in a single batch.
+     * ("category:...").  Prompts the user once for confirmation and delegates
+     * the persistence to applyDropRoutings().
      */
     void handleDropRequest(const QStringList &sourceKeys, const QString &targetCategoryKey);
+
+    /**
+     * Apply drop/move routings WITHOUT any confirmation dialog: for each
+     * valid source key persist a CategoryAlias ("category:X" sources) or a
+     * WorkdirCategoryOverride ("group:<workdir>" sources) pointing at the
+     * target category, in one signal-blocked batch. Extracted from
+     * handleDropRequest so menu-driven moves — where the menu selection IS
+     * the confirmation — reuse the same persistence path. Returns the number
+     * of routings applied.
+     */
+    int applyDropRoutings(const QStringList &sourceKeys, const QString &targetCategoryKey);
+
+    /**
+     * Candidate targets for the "Move to Category" submenu: every existing
+     * category bucket key (as of the last tree rebuild), sorted, excluding
+     * excludeKey (the node's current category). Public for tests.
+     */
+    QStringList moveTargetCategories(const QString &excludeKey) const;
 
     /**
      * Create a brand-new empty user category (persisted in
@@ -335,6 +353,25 @@ public Q_SLOTS:
      * at top level immediately.  Prompts the user for the name.
      */
     void createUserCategory();
+
+    /**
+     * Fleet launcher: for every unique workdir routed into the given category
+     * (per the current m_categoryMap), focus the already-active session if
+     * one exists, else resume the newest conversation (.jsonl) for that
+     * project. Projects with no conversations are skipped silently (summary
+     * via qInfo). Returns the count of focused + launched sessions.
+     *
+     * The QAction confirms with the user first, then calls this; tests drive
+     * it directly.
+     */
+    int launchLatestInCategory(const QString &categoryKey);
+
+    /**
+     * Single-project variant used by the project-group context menu and by
+     * launchLatestInCategory(). Returns 1 when a session was focused or a
+     * resume was emitted, 0 when the project has no conversations.
+     */
+    int launchLatestForWorkdir(const QString &workdir);
 
     /**
      * Rename an existing category.  Under the hood this is stored as a
@@ -508,7 +545,9 @@ private:
     void scheduleMetadataSave(); // debounced — coalesces rapid-fire saves
     void updateTreeWidget();
     void updateTreeWidgetWithLiveSessions(const QSet<QString> &liveNames);
-    void addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent, bool hasSiblings = false);
+    // parent may be nullptr → the session item is attached at top level.
+    // Returns the created item so callers (flatten path) can tag/relabel it.
+    QTreeWidgetItem *addSessionToTree(const SessionMetadata &meta, QTreeWidgetItem *parent, bool hasSiblings = false);
     void showApprovalLog(ClaudeSession *session);
     void showSessionActivity(const QString &jsonlPath, const QString &workDir);
     void showSessionStructure(const QString &sessionId);
@@ -517,6 +556,18 @@ private:
     void showSubprocessOutput(const SubprocessInfo &info);
     void editSessionDescription(const QString &sessionId);
     void editSessionBudget(ClaudeSession *session, const QString &sessionId);
+
+    // Prompt for a new category name (with collision check). Returns the
+    // trimmed name, or an empty string on cancel/collision. Shared by
+    // createUserCategory() and the "Move to Category → New Category…" flow.
+    QString promptNewCategoryName();
+
+    // Build the "Move to Category ▸" submenu on `menu` for the given source
+    // composite key ("group:<workdir>" or "category:<name>"). Menu-driven
+    // moves skip the drop-confirmation dialog — selecting the entry IS the
+    // confirmation. currentCategoryKey (may be empty) is excluded from the
+    // target list.
+    void addMoveToCategorySubmenu(QMenu &menu, const QString &sourceKey, const QString &currentCategoryKey, const QString &title);
     void openBroadcastDialog(const QStringList &activeIds);
     void openConsolidateDialog(const QString &projectKey);
     void cleanupStaleSockets();
@@ -539,6 +590,16 @@ private:
     QTreeWidgetItem *ensureProjectGroup(const QString &workingDirectory);
     QString projectGroupKey(const QString &workingDirectory) const;
 
+    // Returns the top-level category item this workdir routes into (creating
+    // it on demand), or nullptr when the project is standalone. Extracted
+    // from ensureProjectGroup so the single-session flatten path can attach
+    // session leaves directly to the category without a wrapper group.
+    QTreeWidgetItem *ensureCategoryItemFor(const QString &workingDirectory);
+
+    // Sub-label for a project inside a multi-project category: basename with
+    // the category prefix stripped ("cowir-battle" in "cowir" → "battle").
+    static QString projectSubLabel(const QString &workingDirectory, const QString &catKey);
+
     // Category-grouping (longest common prefix among project basenames).
     // Builds m_categoryMap (workdir → categoryKey) from a snapshot of workdirs.
     // O(N^2) on project count; fine for hundreds of projects.
@@ -558,6 +619,12 @@ private:
     void buildFilterChips(QHBoxLayout *into);
     void onFilterChipToggled(const QString &token, bool on);
     void persistVisibleStates();
+
+    // Sync chip UI (primary QToolButtons + overflow QActions) to reflect the
+    // current m_visibleStates.  Uses QSignalBlocker so setChecked doesn't
+    // refire onFilterChipToggled.  Called at the end of every rebuild so the
+    // chip UI never drifts from m_visibleStates.
+    void syncChipUiToVisibleStates();
 
     QTreeWidget *m_treeWidget = nullptr;
     QLabel *m_emptyStateLabel = nullptr;

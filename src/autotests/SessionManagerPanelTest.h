@@ -159,6 +159,34 @@ private Q_SLOTS:
     // Multi-select drag
     void testMultiDrop_AppliesAllSourceRoutingsInOneCall();
 
+    // Drag-and-drop item flags (regression: setFlags(Qt::ItemIsEnabled)
+    // stripped ItemIsDragEnabled/ItemIsDropEnabled/ItemIsSelectable, so no
+    // drag could ever start from a category/group node)
+    void testCategoryItemsAreDragAndDropEnabled();
+
+    // Clean rename: description IS the label (no suffixes appended)
+    void testDescriptionOnlyLabel_NoSuffixes();
+    void testEmptyDescription_KeepsAutoLabel();
+
+    // Flatten single-session project wrappers
+    void testSingleSessionProject_FlattensIntoCategory();
+    void testFlattenedLeaf_UsesProjectBasenameWhenNoDescription();
+    void testFlattenedLeaf_ContextActionsStillResolve();
+
+    // Duplicate-tuck: newest visible, rest behind "+N older…"
+    void testMultiSessionProject_TucksOlderBehindExpander();
+    void testPinnedSessionsNeverTucked();
+    void testTuckExpanderAbsentWhenNothingHidden();
+
+    // Fleet launcher: launch/focus latest session per project in a category
+    void testLaunchLatest_FocusesActiveInsteadOfSpawning();
+    void testLaunchLatest_EmitsResumeForNewestJsonl();
+    void testLaunchLatest_SkipsProjectsWithNoConversations();
+
+    // "Move to Category" submenu (mouse-free DnD fallback)
+    void testMoveToCategory_AppliesWorkdirOverride();
+    void testMoveToCategoryMenu_ListsAllCategoriesExceptSelf();
+
     // LLM-assisted reorganize
     void testBuildTreeInventory_PopulatesProjectsAndCounts();
     void testBuildTreeInventory_IncludesAliasesAndOverrides();
@@ -178,6 +206,12 @@ private Q_SLOTS:
     void testStateTokenFor_SubagentFlagReturnsSubagentToken();
     void testDefaultVisibleStatesExcludesSubagent();
     void testIsSubagentPersistsToMetadataFile();
+
+    // Visible-state filter for "closed" — regression for filter leak
+    void testClosed_HiddenWhenNotInVisibleStates();
+    void testClosed_ShownWhenInVisibleStates();
+    void testChipSync_PrimaryChipsReflectVisibleStatesAfterRebuild();
+    void testChipSync_OverflowActionsReflectVisibleStatesAfterRebuild();
 };
 
 }

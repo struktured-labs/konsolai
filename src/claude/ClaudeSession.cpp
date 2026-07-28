@@ -34,13 +34,15 @@ static QString buildDisplayName(const QString &projectName, const QString &taskD
 {
     Q_UNUSED(sessionId);
 
+    // When the user has named the session, the name IS the tab title —
+    // no "project (name)" wrapper. The project identity stays discoverable
+    // via the session panel tooltip.
     QString name;
     if (!taskDescription.isEmpty()) {
-        QString desc = taskDescription;
-        if (desc.length() > 30) {
-            desc = desc.left(27) + QStringLiteral("...");
+        name = taskDescription;
+        if (name.length() > 30) {
+            name = name.left(27) + QStringLiteral("...");
         }
-        name = QStringLiteral("%1 (%2)").arg(projectName, desc);
     } else {
         name = projectName;
     }
