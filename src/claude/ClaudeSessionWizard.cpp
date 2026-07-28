@@ -197,6 +197,14 @@ QString ClaudeSessionWizard::claudeModel() const
     return QStringLiteral("claude-opus-5[1m]");
 }
 
+ClaudeSession::AgentKind ClaudeSessionWizard::agentKind() const
+{
+    if (m_agentCombo) {
+        return static_cast<ClaudeSession::AgentKind>(m_agentCombo->currentData().toInt());
+    }
+    return ClaudeSession::AgentKind::Claude;
+}
+
 bool ClaudeSessionWizard::autoApproveRead() const
 {
     return m_autoApproveReadCheck && m_autoApproveReadCheck->isChecked();
@@ -567,6 +575,27 @@ void ClaudeSessionWizard::setupUi()
 
     // --- Model + options row ---
     auto *optionsRow = new QHBoxLayout();
+    optionsRow->addWidget(new QLabel(i18n("Agent:"), this));
+    m_agentCombo = new QComboBox(this);
+    m_agentCombo->setObjectName(QStringLiteral("wizardAgentCombo"));
+    m_agentCombo->addItem(i18n("Claude"), static_cast<int>(ClaudeSession::AgentKind::Claude));
+    m_agentCombo->addItem(i18n("Codex"), static_cast<int>(ClaudeSession::AgentKind::Codex));
+    // Codex is only offered when its binary is actually resolvable, so the
+    // picker can't hand back a kind that would fail to launch.
+    if (!CodexProcess::isAvailable()) {
+        m_agentCombo->setItemData(1, false, Qt::UserRole - 1);
+        m_agentCombo->setToolTip(i18n("Codex CLI not found — install it to enable Codex sessions"));
+    }
+    // Switching agents changes which transcript store the resume affordance
+    // should be reading, so refresh it rather than leaving a stale count.
+    connect(m_agentCombo, &QComboBox::currentIndexChanged, this, [this]() {
+        const QString dir = selectedDirectory();
+        if (!dir.isEmpty()) {
+            checkForConversations(dir);
+        }
+    });
+    optionsRow->addWidget(m_agentCombo);
+    optionsRow->addSpacing(16);
     optionsRow->addWidget(new QLabel(i18n("Model:"), this));
     m_modelCombo = new QComboBox(this);
     m_modelCombo->addItem(QStringLiteral("claude-opus-5[1m]"));
@@ -1270,6 +1299,22 @@ void ClaudeSessionWizard::loadSshConfigHosts()
 void ClaudeSessionWizard::checkForConversations(const QString &projectPath)
 {
     m_resumeSessionId.clear();
+
+    // Codex records its own transcripts in a separate tree, so the resume
+    // affordance has to ask the CLI the user actually picked.
+    if (agentKind() == ClaudeSession::AgentKind::Codex) {
+        const int count = CodexProcess::discoverConversations(projectPath).size();
+        m_resumeButton->setEnabled(count > 0);
+        if (count > 0) {
+            m_resumeButton->setText(i18n("Resume Previous (%1)...", count));
+            m_resumeLabel->setText(i18n("%1 Codex session(s) in this directory", count));
+        } else {
+            m_resumeButton->setText(i18n("Resume Previous..."));
+            m_resumeLabel->setText(i18n("No previous Codex sessions"));
+        }
+        return;
+    }
+
     auto conversations = ClaudeSessionRegistry::readClaudeConversations(projectPath);
     if (conversations.isEmpty()) {
         m_resumeButton->setEnabled(false);
@@ -1285,6 +1330,32 @@ void ClaudeSessionWizard::onResumeClicked()
 {
     QString dir = selectedDirectory();
     if (dir.isEmpty()) {
+        return;
+    }
+
+    // Codex keeps its transcripts elsewhere. Map them onto ClaudeConversation
+    // so the existing picker — and everything downstream of it — works
+    // unchanged; only the source of the list differs.
+    if (agentKind() == ClaudeSession::AgentKind::Codex) {
+        const QList<CodexConversation> codexSessions = CodexProcess::discoverConversations(dir);
+        if (codexSessions.isEmpty()) {
+            m_resumeButton->setEnabled(false);
+            m_resumeLabel->setText(i18n("No previous Codex sessions"));
+            return;
+        }
+        QList<ClaudeConversation> conversations;
+        conversations.reserve(codexSessions.size());
+        for (const CodexConversation &c : codexSessions) {
+            ClaudeConversation conv;
+            conv.sessionId = c.sessionId;
+            conv.summary = c.firstPrompt.isEmpty() ? c.model : c.firstPrompt;
+            conv.firstPrompt = c.firstPrompt;
+            conv.created = c.created;
+            conv.modified = c.modified;
+            conv.projectPath = c.workingDirectory;
+            conversations.append(conv);
+        }
+        showConversationPicker(conversations);
         return;
     }
 

@@ -13,6 +13,8 @@
 #include <QDir>
 #include <QStringList>
 
+#include "ClaudeSession.h"
+#include "CodexProcess.h"
 #include "profile/Profile.h"
 
 class QLineEdit;
@@ -67,6 +69,9 @@ public:
     QString worktreeBranch() const;
     QString repoRoot() const;
     QString claudeModel() const;
+
+    /** Which agent CLI the user picked. Defaults to Claude. */
+    ClaudeSession::AgentKind agentKind() const;
     bool autoApproveRead() const;
     QString claudeArgs() const;
     QString taskPrompt() const;
@@ -163,6 +168,7 @@ private:
     QLabel *m_branchNameLabel = nullptr;
     QLineEdit *m_worktreeNameEdit = nullptr;
     QComboBox *m_modelCombo = nullptr;
+    QComboBox *m_agentCombo = nullptr;
     QCheckBox *m_autoApproveReadCheck = nullptr;
     QLineEdit *m_extraArgsEdit = nullptr;
     QLabel *m_previewLabel = nullptr;

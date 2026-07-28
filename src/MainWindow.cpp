@@ -1037,6 +1037,7 @@ void MainWindow::setupActions()
         if (!extraArgs.isEmpty()) {
             claudeSession->setExtraClaudeArgs(extraArgs);
         }
+        claudeSession->setAgentKind(wizard.agentKind());
 
         Konsole::SessionManager::instance()->setSessionProfile(claudeSession, claudeProfile);
         claudeSession->setInitialWorkingDirectory(workDir);
@@ -2023,6 +2024,10 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                 if (!extraArgs.isEmpty()) {
                     claudeSession->setExtraClaudeArgs(extraArgs);
                 }
+
+                // Which CLI backs this session — must be set before run(), as
+                // shellCommand() branches on it.
+                claudeSession->setAgentKind(wizard.agentKind());
 
                 // Set resume session ID if user picked a previous conversation
                 QString resumeId = wizard.resumeSessionId();

@@ -85,6 +85,7 @@ ecm_add_tests(
     MergeSessionsDialogTest.cpp
     BroadcastDialogTest.cpp
     ReorganizeTreeDialogTest.cpp
+    ClaudeSessionWizardAgentTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS} Qt::Widgets
 )
 
