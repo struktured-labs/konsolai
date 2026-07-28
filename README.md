@@ -1,17 +1,21 @@
-# Konsolai - Claude-Native Terminal Emulator
+# Konsolai - Agent-Native Terminal Emulator
 
-Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designed to provide seamless integration between Claude AI sessions and the terminal experience.
+Konsolai is an agent-native terminal emulator forked from KDE's Konsole, built around running a fleet of coding-agent sessions as first-class citizens of the terminal. Claude Code is the primary target; OpenAI Codex sessions get the same tabs, persistence, tree, and resume.
 
 ## Features
 
-**Claude Integration**
-- 1 Tab = 1 Claude Session with tmux-backed persistence
-- Defaults to Claude Opus 5 with the 1M-token context window (`[1m]` beta) at `xhigh` effort; per-session model override in the wizard
-- Wizard defaults to leaving git alone ("Nothing (use current branch)") rather than pre-creating repos or worktrees, and to CLI-native approvals rather than yolo mode
-- **Codex support (in progress)** — sessions carry an agent kind (Claude or Codex), so a Codex session reuses the same tmux persistence, tabs, and budgets; `CodexProcess` discovers existing `~/.codex/sessions` transcripts (deduplicated per conversation) and builds `codex resume <id>` commands. Wizard/tree entry points are still being wired.
+**Agent Integration — Claude and Codex**
+- 1 Tab = 1 agent session with tmux-backed persistence
+- **Two agent CLIs, same treatment.** Pick Claude or OpenAI Codex in the wizard; both get tabs, tmux persistence, the session tree, budgets, and resume. The Codex option is disabled unless its binary resolves, so the picker can't offer a session that won't start.
+  - Claude defaults to Opus 5 with the 1M-token context window (`[1m]` beta) at `xhigh` effort
+  - Codex defaults to `gpt-5.6-sol` at `xhigh` reasoning, auto-approving (`-a never`) inside a `workspace-write` sandbox
+  - The model picker follows the selected agent, and each agent's choice is stored under its own key
+- **Resume prior conversations** for either agent. Claude reads `~/.claude/projects`; Codex reads `~/.codex/sessions`, deduplicated per conversation (resuming re-records a session under a new file with the same id) and filtered to the chosen directory.
+- **Agent badges in the session tree** — ✳ for Claude, ◆ for Codex, beside the yolo indicators. Persisted, so detached and closed sessions keep the right badge across restarts.
 - Model-aware context-usage indicator in the status bar (`Ctx:NN%`) that scores against the session's real window (1M for Opus/Sonnet gen 4+, 200K otherwise)
+- Approvals are left to each CLI's own policy (`claude --permission-mode`, `codex -a`/`-s`) rather than driving the TUI; all of it is configurable in `konsolairc`
 - Claude hooks integration for real-time state tracking (idle/working/waiting)
-- Session wizard for project setup, git worktrees, and task configuration
+- Session wizard for directory, task prompt, model, and budgets — it does not touch git, so nothing is pre-committed to a layout before the agent has looked at the project
 
 **Yolo Mode (3-Level Auto-Approval)**
 - Level 1: Auto-approve permission prompts (hook-based + polling fallback)
@@ -29,7 +33,6 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 - Automatic detection and reattachment of orphaned tmux sessions
 - Remote SSH sessions with full yolo mode support, including "Browse Live Sessions..." in the wizard to attach to a running remote tmux (safe attach: exact-name match, has-session pre-check, never silently creates a new session)
 - Persisted SSH info in the session registry so remote sessions survive across Konsolai restarts
-- Git worktree integration for feature branch sessions
 - Quick session switcher (`Ctrl+Shift+P`)
 
 **Multi-Session Workflow**
@@ -77,6 +80,7 @@ Konsolai is a Claude-native terminal emulator forked from KDE's Konsole, designe
 
 - **tmux** -- session persistence backend
 - **claude** CLI -- Claude Code by Anthropic (`npm install -g @anthropic-ai/claude-code`)
+- **codex** CLI -- optional, only for Codex sessions (`npm install -g @openai/codex`). Resolved from `PATH` or the nvm node directories, since tmux launches without a login shell.
 
 ### Install Packages
 
@@ -127,7 +131,7 @@ ninja -j4
 
 ### Running Tests
 ```bash
-# Unit tests (63+ tests)
+# Unit tests (65 suites)
 ctest --test-dir build/ --output-on-failure
 
 # GUI tests (requires running Konsolai instance)
@@ -164,7 +168,7 @@ bash Testing/run-all-gui-tests.sh
 │  │  │ SessionManager   │ │ AgentManager     │              │    │
 │  │  │ Panel            │ │ Panel            │              │    │
 │  │  │  - Categories    │ │  - AgentProvider │              │    │
-│  │  │  - State: color  │ │    (abstract)    │              │    │
+│  │  │  - ✳/◆ badges    │ │    (abstract)    │              │    │
 │  │  │  - Fleet launch  │ │  - AgentFleet    │              │    │
 │  │  │  - Drag & drop   │ │    Provider      │              │    │
 │  │  │  - Vim keys      │ │  - Letta         │              │    │
@@ -183,8 +187,8 @@ bash Testing/run-all-gui-tests.sh
 | Directory          | Description                                                   |
 | ------------------ | ------------------------------------------------------------- |
 | `/src`             | Core terminal emulator source code                            |
-| `/src/claude`      | Claude integration (sessions, hooks, yolo, agents, budgets, broadcast, merge, Letta) |
-| `/src/autotests`   | C++ unit tests (QTest framework, 63+ tests)                   |
+| `/src/claude`      | Agent integration (Claude + Codex sessions, hooks, yolo, agents, budgets, broadcast, merge, Letta) |
+| `/src/autotests`   | C++ unit tests (QTest framework, 65 suites)                   |
 | `/Testing`         | GUI tests (AT-SPI smoke tests, interaction tests)             |
 | `/doc/konsolai`    | Konsolai-specific documentation                               |
 | `/desktop`         | Desktop files for launching Konsolai                          |
