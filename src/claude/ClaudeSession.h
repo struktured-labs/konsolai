@@ -521,6 +521,19 @@ public:
     {
         return m_agentKind;
     }
+
+    /**
+     * Per-session model override. Empty means "use the settings default for
+     * this agent kind". Set from the wizard's model picker.
+     */
+    QString modelOverride() const
+    {
+        return m_modelOverride;
+    }
+    void setModelOverride(const QString &model)
+    {
+        m_modelOverride = model;
+    }
     void setAgentKind(AgentKind kind)
     {
         m_agentKind = kind;
@@ -1036,6 +1049,7 @@ private:
     QString m_taskDescription;
     ClaudeProcess::Model m_claudeModel = ClaudeProcess::Model::Default;
     AgentKind m_agentKind = AgentKind::Claude;
+    QString m_modelOverride;
     QString m_resumeSessionId;
     QString m_extraClaudeArgs;
     bool m_isReattach = false;

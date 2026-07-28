@@ -130,6 +130,13 @@ private:
         GitNone = 3
     };
 
+    /**
+     * Refill the model combo with the models the selected agent accepts.
+     * Called on construction and whenever the agent picker changes, so a
+     * Codex session is never offered Claude model names.
+     */
+    void populateModelCombo();
+
     void updateGitSubFields();
 
     // Widgets

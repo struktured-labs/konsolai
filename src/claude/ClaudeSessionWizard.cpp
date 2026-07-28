@@ -197,6 +197,46 @@ QString ClaudeSessionWizard::claudeModel() const
     return QStringLiteral("claude-opus-5[1m]");
 }
 
+void ClaudeSessionWizard::populateModelCombo()
+{
+    if (!m_modelCombo) {
+        return;
+    }
+
+    // Rebuilding fires currentIndexChanged; block it so refilling the list
+    // can't recurse back through the agent-change handler.
+    QSignalBlocker blocker(m_modelCombo);
+    m_modelCombo->clear();
+
+    if (agentKind() == ClaudeSession::AgentKind::Codex) {
+        // Codex slugs, newest first. gpt-5.6-sol is the configured default.
+        m_modelCombo->addItem(QStringLiteral("gpt-5.6-sol"));
+        m_modelCombo->addItem(QStringLiteral("gpt-5.6-terra"));
+        m_modelCombo->addItem(QStringLiteral("gpt-5.6-luna"));
+        m_modelCombo->addItem(QStringLiteral("gpt-5.5"));
+        m_modelCombo->addItem(QStringLiteral("gpt-5.4"));
+        if (auto *settings = KonsolaiSettings::instance()) {
+            const int idx = m_modelCombo->findText(settings->codexModel());
+            if (idx >= 0) {
+                m_modelCombo->setCurrentIndex(idx);
+            }
+        }
+        return;
+    }
+
+    m_modelCombo->addItem(QStringLiteral("claude-opus-5[1m]"));
+    m_modelCombo->addItem(QStringLiteral("claude-sonnet-4"));
+    m_modelCombo->addItem(QStringLiteral("claude-opus-4"));
+    m_modelCombo->addItem(QStringLiteral("claude-haiku"));
+    m_modelCombo->addItem(QStringLiteral("claude-fable-5"));
+    if (auto *settings = KonsolaiSettings::instance()) {
+        const int idx = m_modelCombo->findText(settings->defaultModel());
+        if (idx >= 0) {
+            m_modelCombo->setCurrentIndex(idx);
+        }
+    }
+}
+
 ClaudeSession::AgentKind ClaudeSessionWizard::agentKind() const
 {
     if (m_agentCombo) {
@@ -527,10 +567,13 @@ void ClaudeSessionWizard::setupUi()
     // Git mode combo
     gitLayout->addWidget(new QLabel(i18n("Git mode:"), this), 0, 0);
     m_gitModeCombo = new QComboBox(this);
+    m_gitModeCombo->setObjectName(QStringLiteral("wizardGitModeCombo"));
     m_gitModeCombo->addItem(i18n("Initialize new repository"));
     m_gitModeCombo->addItem(i18n("Create as worktree"));
-    m_gitModeCombo->addItem(i18n("Nothing (use current branch)"));
-    m_gitModeCombo->addItem(i18n("Nothing (just create the directory)"));
+    m_gitModeCombo->addItem(i18n("Nothing — use the directory as-is"));
+    // Default to doing nothing even before settings load, so the wizard never
+    // silently pre-creates a repo or worktree.
+    m_gitModeCombo->setCurrentIndex(GitCurrentBranch);
     connect(m_gitModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         updateGitSubFields();
         updatePreview();
@@ -586,9 +629,11 @@ void ClaudeSessionWizard::setupUi()
         m_agentCombo->setItemData(1, false, Qt::UserRole - 1);
         m_agentCombo->setToolTip(i18n("Codex CLI not found — install it to enable Codex sessions"));
     }
-    // Switching agents changes which transcript store the resume affordance
-    // should be reading, so refresh it rather than leaving a stale count.
+    // Switching agents changes both the model vocabulary and which transcript
+    // store the resume affordance reads, so refresh both rather than leaving
+    // Claude model names (or a stale count) in front of a Codex session.
     connect(m_agentCombo, &QComboBox::currentIndexChanged, this, [this]() {
+        populateModelCombo();
         const QString dir = selectedDirectory();
         if (!dir.isEmpty()) {
             checkForConversations(dir);
@@ -598,11 +643,8 @@ void ClaudeSessionWizard::setupUi()
     optionsRow->addSpacing(16);
     optionsRow->addWidget(new QLabel(i18n("Model:"), this));
     m_modelCombo = new QComboBox(this);
-    m_modelCombo->addItem(QStringLiteral("claude-opus-5[1m]"));
-    m_modelCombo->addItem(QStringLiteral("claude-sonnet-4"));
-    m_modelCombo->addItem(QStringLiteral("claude-opus-4"));
-    m_modelCombo->addItem(QStringLiteral("claude-haiku"));
-    m_modelCombo->addItem(QStringLiteral("claude-fable-5"));
+    m_modelCombo->setObjectName(QStringLiteral("wizardModelCombo"));
+    populateModelCombo();
     optionsRow->addWidget(m_modelCombo);
     optionsRow->addSpacing(16);
     m_autoApproveReadCheck = new QCheckBox(i18n("Auto-approve Read"), this);

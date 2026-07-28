@@ -41,19 +41,34 @@ bool writeRollout(const QString &path, const QString &sessionId, const QString &
 void CodexProcessTest::testBuildCommandFresh()
 {
     const QString cmd = CodexProcess::buildCommand();
-    QCOMPARE(cmd, QStringLiteral("codex"));
+    QCOMPARE(cmd, CodexProcess::launchBinary());
+}
+
+void CodexProcessTest::testBuildCommandUsesResolvedBinaryPath()
+{
+    // tmux execs the command without a login shell, so an npm/nvm-installed
+    // codex is NOT on PATH: a bare "codex" dies instantly with
+    // "command not found". The command must carry the resolved path.
+    const QString binary = CodexProcess::launchBinary();
+    const QString cmd = CodexProcess::buildCommand(QStringLiteral("/tmp/x"));
+    QVERIFY(cmd.startsWith(binary));
+
+    if (CodexProcess::isAvailable()) {
+        QVERIFY2(binary.startsWith(QLatin1Char('/')), "resolvable codex must be launched by absolute path");
+        QCOMPARE(binary, CodexProcess::executablePath());
+    }
 }
 
 void CodexProcessTest::testBuildCommandWithWorkingDir()
 {
     const QString cmd = CodexProcess::buildCommand(QStringLiteral("/home/u/projects/foo"));
-    QCOMPARE(cmd, QStringLiteral("codex -C /home/u/projects/foo"));
+    QCOMPARE(cmd, CodexProcess::launchBinary() + QStringLiteral(" -C /home/u/projects/foo"));
 }
 
 void CodexProcessTest::testBuildCommandResume()
 {
     const QString cmd = CodexProcess::buildCommand(QStringLiteral("/home/u/projects/foo"), QStringLiteral("019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3"));
-    QCOMPARE(cmd, QStringLiteral("codex resume 019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3 -C /home/u/projects/foo"));
+    QCOMPARE(cmd, CodexProcess::launchBinary() + QStringLiteral(" resume 019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3 -C /home/u/projects/foo"));
 }
 
 void CodexProcessTest::testBuildCommandResumeIsSubcommandBeforeOptions()
@@ -62,20 +77,20 @@ void CodexProcessTest::testBuildCommandResumeIsSubcommandBeforeOptions()
     // binary and take the session id as its positional argument. Emitting it
     // after an option would make codex treat it as a prompt.
     const QString cmd = CodexProcess::buildCommand(QStringLiteral("/tmp/x"), QStringLiteral("abc-123"), QStringLiteral("gpt-5"));
-    QVERIFY(cmd.startsWith(QStringLiteral("codex resume abc-123 ")));
+    QVERIFY(cmd.startsWith(CodexProcess::launchBinary() + QStringLiteral(" resume abc-123 ")));
     QVERIFY(cmd.indexOf(QStringLiteral("resume")) < cmd.indexOf(QStringLiteral("-C")));
 }
 
 void CodexProcessTest::testBuildCommandWithModel()
 {
     const QString cmd = CodexProcess::buildCommand(QString(), QString(), QStringLiteral("gpt-5-codex"));
-    QCOMPARE(cmd, QStringLiteral("codex -m gpt-5-codex"));
+    QCOMPARE(cmd, CodexProcess::launchBinary() + QStringLiteral(" -m gpt-5-codex"));
 }
 
 void CodexProcessTest::testBuildCommandWithAdditionalArgs()
 {
     const QString cmd = CodexProcess::buildCommand(QString(), QString(), QString(), {QStringLiteral("--search")});
-    QCOMPARE(cmd, QStringLiteral("codex --search"));
+    QCOMPARE(cmd, CodexProcess::launchBinary() + QStringLiteral(" --search"));
 }
 
 void CodexProcessTest::testSessionsRoot()

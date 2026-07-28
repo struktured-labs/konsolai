@@ -62,6 +62,16 @@ public:
     static QString executablePath();
 
     /**
+     * The binary token to place in a launch command.
+     *
+     * This is executablePath() when codex resolves, and a bare "codex"
+     * otherwise. tmux execs the command without a login shell, so an
+     * npm/nvm-installed codex is not on PATH and a bare name dies instantly
+     * with "command not found" — the resolved absolute path is required.
+     */
+    static QString launchBinary();
+
+    /**
      * Build the codex command line.
      *
      * With an empty resumeSessionId this starts a fresh session; otherwise it

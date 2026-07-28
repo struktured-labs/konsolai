@@ -1004,10 +1004,12 @@ QString ClaudeSession::shellCommand() const
     // to it — passing them would make codex reject the command line.
     QString agentCmd;
     if (m_agentKind == AgentKind::Codex) {
-        QString codexModel;
+        QString codexModel = m_modelOverride;
         QStringList codexArgs;
         if (auto *settings = KonsolaiSettings::instance()) {
-            codexModel = settings->codexModel();
+            if (codexModel.isEmpty()) {
+                codexModel = settings->codexModel();
+            }
             const QString effort = settings->codexEffort();
             if (!effort.isEmpty()) {
                 // Codex has no dedicated effort flag; it is a config override.

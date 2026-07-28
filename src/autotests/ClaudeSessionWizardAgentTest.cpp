@@ -23,6 +23,8 @@ private Q_SLOTS:
     void testDefaultsToClaude();
     void testSelectingCodexChangesAgentKind();
     void testCodexEntryDisabledWhenBinaryMissing();
+    void testModelComboSwapsWithAgent();
+    void testGitComboHasSingleNothingEntryAndDefaultsToIt();
 };
 
 void ClaudeSessionWizardAgentTest::testAgentComboExists()
@@ -65,6 +67,48 @@ void ClaudeSessionWizardAgentTest::testCodexEntryDisabledWhenBinaryMissing()
     QCOMPARE(selectable, CodexProcess::isAvailable());
 }
 
+void ClaudeSessionWizardAgentTest::testModelComboSwapsWithAgent()
+{
+    ClaudeSessionWizard wizard;
+    auto *agent = wizard.findChild<QComboBox *>(QStringLiteral("wizardAgentCombo"));
+    auto *model = wizard.findChild<QComboBox *>(QStringLiteral("wizardModelCombo"));
+    QVERIFY(agent);
+    QVERIFY(model);
+
+    // Claude selected: only Claude slugs on offer.
+    QVERIFY(model->currentText().startsWith(QStringLiteral("claude-")));
+
+    agent->setCurrentIndex(1);
+    // Offering claude-* to Codex would be rejected by the CLI, so the model
+    // vocabulary has to follow the agent.
+    for (int i = 0; i < model->count(); ++i) {
+        QVERIFY2(!model->itemText(i).startsWith(QStringLiteral("claude-")),
+                 qPrintable(QStringLiteral("Claude model offered for Codex: %1").arg(model->itemText(i))));
+    }
+    QVERIFY(model->currentText().startsWith(QStringLiteral("gpt-")));
+
+    agent->setCurrentIndex(0);
+    QVERIFY(model->currentText().startsWith(QStringLiteral("claude-")));
+}
+
+void ClaudeSessionWizardAgentTest::testGitComboHasSingleNothingEntryAndDefaultsToIt()
+{
+    ClaudeSessionWizard wizard;
+    auto *git = wizard.findChild<QComboBox *>(QStringLiteral("wizardGitModeCombo"));
+    QVERIFY2(git, "git mode combo must be findable");
+
+    // Exactly one do-nothing option — two was confusing — and it is the
+    // default, so the wizard never pre-creates a repo or worktree.
+    int nothingCount = 0;
+    for (int i = 0; i < git->count(); ++i) {
+        if (git->itemText(i).startsWith(QStringLiteral("Nothing"))) {
+            ++nothingCount;
+        }
+    }
+    QCOMPARE(nothingCount, 1);
+    QCOMPARE(git->count(), 3);
+    QVERIFY(git->currentText().startsWith(QStringLiteral("Nothing")));
+}
 }
 
 QTEST_MAIN(Konsolai::ClaudeSessionWizardAgentTest)

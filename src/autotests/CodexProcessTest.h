@@ -18,6 +18,7 @@ class CodexProcessTest : public QObject
 
 private Q_SLOTS:
     void testBuildCommandFresh();
+    void testBuildCommandUsesResolvedBinaryPath();
     void testBuildCommandWithWorkingDir();
     void testBuildCommandResume();
     void testBuildCommandResumeIsSubcommandBeforeOptions();

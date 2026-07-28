@@ -2028,6 +2028,7 @@ void MainWindow::newFromProfile(const Profile::Ptr &profile)
                 // Which CLI backs this session — must be set before run(), as
                 // shellCommand() branches on it.
                 claudeSession->setAgentKind(wizard.agentKind());
+                claudeSession->setModelOverride(wizard.claudeModel());
 
                 // Set resume session ID if user picked a previous conversation
                 QString resumeId = wizard.resumeSessionId();

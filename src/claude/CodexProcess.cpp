@@ -50,10 +50,16 @@ QString CodexProcess::executablePath()
     return QStandardPaths::findExecutable(QStringLiteral("codex"), additionalDirs);
 }
 
+QString CodexProcess::launchBinary()
+{
+    const QString resolved = executablePath();
+    return resolved.isEmpty() ? QStringLiteral("codex") : resolved;
+}
+
 QString CodexProcess::buildCommand(const QString &workingDir, const QString &resumeSessionId, const QString &model, const QStringList &additionalArgs)
 {
     QStringList args;
-    args << QStringLiteral("codex");
+    args << launchBinary();
 
     // `resume` is a subcommand and must precede its options; the session id is
     // its positional argument.
