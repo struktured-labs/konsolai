@@ -20,6 +20,18 @@ DEFAULT_LIGHT='Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Not
 # Overridable ONLY so the gate can be tested against itself (see tools/gate-selftest.sh).
 LIGHT="${KONSOLAI_GATE_FILTER:-$DEFAULT_LIGHT}"
 
+# BUILD FIRST. ctest never compiles: run it after editing source and it happily
+# reports on the PREVIOUS build. Verified 2026-07-29 -- with a source file newer
+# than its binary the gate still returned a verdict, about code that was not on
+# disk. A green from stale binaries is the same defect as a green from someone
+# else's test list: consulted, and answering about a tree that isn't ours.
+echo "GATE: building ($BUILD)..."
+if ! ninja -C "$BUILD" -j4 >"$LOGDIR/konsolai-build.log" 2>&1; then
+    echo "GATE: FAILED — build errors. Tests would have run against stale binaries."
+    grep -E "error:|FAILED:" "$LOGDIR/konsolai-build.log" | head -10
+    exit 1
+fi
+
 # SCOPE, NOT JUST VERDICT. `$?` answers "did what ran pass"; it is silent about
 # whether the right thing ran. Measured 2026-07-29, all exit 0:
 #   filter matching zero tests · filter typo'd down to a subset · unconfigured
