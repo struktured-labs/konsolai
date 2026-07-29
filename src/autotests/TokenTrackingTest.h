@@ -17,6 +17,12 @@ class TokenTrackingTest : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
+    // Runs after EVERY test function, including ones that fail. The per-test
+    // cleanupProjectDir() calls are trailing statements, so a failing
+    // QVERIFY/QCOMPARE aborts the function before them and leaks a directory
+    // into the user's real ~/.claude/projects. 67 had accumulated there.
+    void cleanup();
+
     // parseConversationTokens tests
     void testParseValidJsonl();
     void testParseMultipleAssistantMessages();

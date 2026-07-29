@@ -67,12 +67,21 @@ static QByteArray makeSystemLine()
 // Helper: set up the .claude/projects/<hashed> directory with a JSONL file
 // Returns the path to the JSONL file that was created.
 // ============================================================
+// Every project dir this test creates, so cleanup() can remove them even when a
+// test function aborts on a failed assertion before its trailing
+// cleanupProjectDir() call. These land in the user's REAL ~/.claude/projects.
+static QStringList s_createdProjectDirs;
+
 static QString setupProjectDir(const QString &workingDir, const QByteArray &jsonlContent, const QString &filename = QStringLiteral("conversation.jsonl"))
 {
     // Claude hashes the working dir by replacing / with -
     QString hashedName = workingDir;
     hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
     QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
+
+    if (!s_createdProjectDirs.contains(projectDir)) {
+        s_createdProjectDirs.append(projectDir);
+    }
 
     QDir().mkpath(projectDir);
 
@@ -91,6 +100,20 @@ static void cleanupProjectDir(const QString &workingDir)
     hashedName.replace(QLatin1Char('/'), QLatin1Char('-'));
     QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + hashedName;
     QDir(projectDir).removeRecursively();
+    s_createdProjectDirs.removeAll(projectDir);
+}
+
+// QTest calls this after every test function, pass or fail. The per-test
+// cleanupProjectDir() calls stay (they keep the dir lifetime obvious at the call
+// site) but they are trailing statements, so a failed assertion skips them. This
+// is the backstop: without it, 67 -tmp-TokenTrackingTest-* dirs had accumulated
+// in the user's real ~/.claude/projects, holding 134 stray JSONL files.
+void TokenTrackingTest::cleanup()
+{
+    for (const QString &dir : std::as_const(s_createdProjectDirs)) {
+        QDir(dir).removeRecursively();
+    }
+    s_createdProjectDirs.clear();
 }
 
 // ============================================================
