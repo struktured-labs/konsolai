@@ -1033,7 +1033,17 @@ QString ClaudeSession::shellCommand() const
         }
         extraArgs << effectiveExtraClaudeArgs();
 
-        agentCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
+        // Honour the wizard's model pick. Without this the picker is decorative
+        // on the Claude side: m_claudeModel is always Model::Default (nothing
+        // calls setClaudeModel), so every session launched as opus-5[1m] no
+        // matter what was selected.  parseModel maps the slug back to the enum
+        // so the [1m] beta suffix and --effort still come from buildCommand.
+        ClaudeProcess::Model model = m_claudeModel;
+        if (model == ClaudeProcess::Model::Default && !m_modelOverride.isEmpty()) {
+            model = ClaudeProcess::parseModel(m_modelOverride);
+        }
+
+        agentCmd = ClaudeProcess::buildCommand(model, QString(), extraArgs);
     }
 
     return m_tmuxManager->buildNewSessionCommand(m_sessionName,

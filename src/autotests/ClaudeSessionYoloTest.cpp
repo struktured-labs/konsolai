@@ -1033,6 +1033,25 @@ void ClaudeSessionYoloTest::testShellCommandCodexCarriesModelAndApproval()
     QVERIFY2(!codexPart.contains(QStringLiteral(" -s ")), qPrintable(codexPart));
 }
 
+void ClaudeSessionYoloTest::testShellCommandClaudeHonoursModelOverride()
+{
+    ClaudeSession session(QStringLiteral("test"), QDir::tempPath());
+    // Claude is the default kind; no setAgentKind call.
+    session.setModelOverride(QStringLiteral("claude-fable-5"));
+
+    const QString cmd = session.shellCommand();
+    // The wizard's picker must reach the launch. m_claudeModel is always
+    // Model::Default (nothing calls setClaudeModel), so without the override
+    // being consulted every Claude session launches opus-5[1m] regardless of
+    // what was selected — the picker looks live and is decorative.
+    QVERIFY2(cmd.contains(QStringLiteral("--model claude-fable-5")), qPrintable(cmd));
+    QVERIFY2(!cmd.contains(QStringLiteral("claude-opus-5[1m]")), qPrintable(cmd));
+
+    // An empty override still yields the configured default.
+    ClaudeSession plain(QStringLiteral("test2"), QDir::tempPath());
+    QVERIFY(plain.shellCommand().contains(QStringLiteral("claude-opus-5[1m]")));
+}
+
 void ClaudeSessionYoloTest::testShellCommandCodexHonoursExplicitApproval()
 {
     KonsolaiSettings settingsOwner;

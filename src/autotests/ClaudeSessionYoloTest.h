@@ -105,6 +105,7 @@ private Q_SLOTS:
     void testShellCommandCodexOmitsClaudeOnlyArgs();
     void testShellCommandCodexCarriesModelAndApproval();
     void testShellCommandCodexHonoursExplicitApproval();
+    void testShellCommandClaudeHonoursModelOverride();
 };
 
 }
