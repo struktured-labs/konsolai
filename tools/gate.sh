@@ -37,8 +37,24 @@ fi
 #   filter matching zero tests · filter typo'd down to a subset · unconfigured
 #   build dir. Each one made this gate print PASSED having verified nothing.
 # So the count is checked against the tree, and against a floor that only rises.
+# Numbers parsed from tool output must be PROVEN numeric before use. `[ x -eq 0 ]`
+# on a non-numeric value exits 2, and `if` reads 2 as false -- so the guard falls
+# through to the pass path. It would fail open exactly when it is needed, since a
+# change in ctest's output format is the drift this check exists to catch.
+# ${VAR:-0} covers empty and nothing else.
+require_num() { # value, description
+    case "$1" in
+    '' | *[!0-9]*)
+        echo "GATE: FAILED — could not parse $2 (got '$1'). ctest output format"
+        echo "      may have changed; refusing rather than guessing. Log: $LOG"
+        exit 1
+        ;;
+    esac
+}
+
 SELECTED=$(ctest --test-dir "$BUILD" -N -R "$LIGHT" 2>/dev/null | sed -n 's/^Total Tests: //p' | tail -1)
 SELECTED=${SELECTED:-0}
+require_num "$SELECTED" "the selected-test count"
 
 ctest --test-dir "$BUILD" -j1 -R "$LIGHT" >"$LOG" 2>&1
 EC=$?
@@ -47,6 +63,7 @@ grep -E "tests passed" "$LOG" | head -2
 # "N% tests passed, X tests failed out of RAN"
 RAN=$(sed -n 's/.*tests failed out of \([0-9]*\).*/\1/p' "$LOG" | tail -1)
 RAN=${RAN:-0}
+require_num "$RAN" "the ran-test count"
 
 if [ "$RAN" -ne "$SELECTED" ] || [ "$SELECTED" -eq 0 ]; then
     echo "GATE: FAILED — scope check. selected=$SELECTED ran=$RAN"
@@ -61,7 +78,11 @@ fi
 # overridden, since a self-test's count is not the suite's count.
 FLOOR_FILE="$(dirname "$0")/gate-floor.txt"
 if [ -z "${KONSOLAI_GATE_FILTER:-}" ]; then
+    # Read raw and refuse on corruption. Sanitising (tr -dc '0-9') would turn
+    # "4x1" into a plausible 41 and hide the damage.
     FLOOR=$(cat "$FLOOR_FILE" 2>/dev/null || echo 0)
+    FLOOR=${FLOOR:-0}
+    require_num "$FLOOR" "the floor in $FLOOR_FILE"
     if [ "$SELECTED" -lt "$FLOOR" ]; then
         echo "GATE: FAILED — the light suite SHRANK: $FLOOR -> $SELECTED tests."
         echo "      Tests vanished from the tree or the filter stopped matching."
