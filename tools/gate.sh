@@ -46,8 +46,13 @@ fi
 # starts passing, the grep below stops matching and the gate goes green through
 # the normal path. If ANY other suite fails, the carve-out does not apply and
 # the gate refuses. It cannot silently widen.
+# POSITIVE evidence required, not absence. An empty log — ctest failing to
+# launch at all — makes both counts zero, and two empty sets agree perfectly:
+# the carve-out would fire on a total failure. So it applies only when the
+# carved-out suite is DEMONSTRABLY the failure, and nothing else is.
+MINE=$(grep -cE "TokenTrackingTest.*\(Failed\)" "$LOG")
 OTHERS=$(grep -E "\(Failed\)" "$LOG" | grep -cv "TokenTrackingTest")
-if [ "$OTHERS" -eq 0 ]; then
+if [ "$MINE" -ge 1 ] && [ "$OTHERS" -eq 0 ]; then
     echo "GATE: PASSED-WITH-KNOWN-FLAKE — only TokenTrackingTest failed."
     echo "      Pre-existing (verified against a stashed tree). Fix it and delete"
     echo "      this carve-out; it is a deadline, not a permission slip."
