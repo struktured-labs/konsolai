@@ -93,6 +93,38 @@ if [ -z "${KONSOLAI_GATE_FILTER:-}" ]; then
         && echo "GATE: floor raised $FLOOR -> $SELECTED"
 fi
 
+# MEMBERSHIP, NOT JUST COUNT. selected-vs-ran compares two numbers that both
+# come from ctest, so a test file that was never registered is invisible to it:
+# 65 files on disk and 65 registered tests agreed here while two files were
+# unregistered. CLAUDE.md requires every feature to ship C++ tests, and a test
+# that is never built is one the gate reports PASSED without running.
+#
+# Ratcheted against a recorded baseline rather than asserted empty, because two
+# files have been unregistered since the fork (677d94305, inherited from
+# upstream Konsole -- their names have never appeared in CMakeLists.txt in any
+# commit). The set may not GROW; shrinking it is the fix.
+KNOWN_FILE="$(dirname "$0")/gate-unregistered.txt"
+REGISTERED=$(ctest --test-dir "$BUILD" -N 2>/dev/null | sed -n 's/^ *Test *#[0-9]*: //p' | sort -u)
+# Absolute, so running the gate from another directory cannot make the glob
+# expand to nothing and read as clean.
+AUTOTESTS="$(cd "$(dirname "$0")/.." && pwd)/src/autotests"
+if [ ! -d "$AUTOTESTS" ]; then
+    echo "GATE: FAILED — cannot find $AUTOTESTS to check test registration."
+    exit 1
+fi
+UNREG=$(for f in "$AUTOTESTS"/*Test.cpp; do
+    n=$(basename "$f" .cpp)
+    echo "$REGISTERED" | grep -qx "$n" || echo "$n"
+done | sort -u)
+NEW=$(comm -23 <(echo "$UNREG") <(sort -u "$KNOWN_FILE" 2>/dev/null))
+if [ -n "$NEW" ]; then
+    echo "GATE: FAILED — test file(s) on disk that ctest never runs:"
+    echo "$NEW" | sed 's/^/        /'
+    echo "      Add them to src/autotests/CMakeLists.txt. A test that is not"
+    echo "      registered cannot fail, and this gate would call that PASSED."
+    exit 1
+fi
+
 if [ "$EC" -eq 0 ]; then
     echo "GATE: PASSED (ctest exit 0, $RAN/$SELECTED tests ran)"
     exit 0
