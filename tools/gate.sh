@@ -12,23 +12,73 @@
 # tell a flake from a regression.
 set -uo pipefail
 BUILD="${1:-build}"
-LOG="${TMPDIR:-/tmp}/konsolai-gate.log"
+LOGDIR="$(cd "$(dirname "$0")/.." && pwd)/tmp"
+mkdir -p "$LOGDIR"
+LOG="$LOGDIR/konsolai-gate.log"
 
-LIGHT='Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget|Letta|TreeToolbar|Konsolai|Merge|Broadcast|SessionTreeWidget|Assistant|Reorganize|Codex|Wizard'
+DEFAULT_LIGHT='Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget|Letta|TreeToolbar|Konsolai|Merge|Broadcast|SessionTreeWidget|Assistant|Reorganize|Codex|Wizard'
+# Overridable ONLY so the gate can be tested against itself (see tools/gate-selftest.sh).
+LIGHT="${KONSOLAI_GATE_FILTER:-$DEFAULT_LIGHT}"
+
+# SCOPE, NOT JUST VERDICT. `$?` answers "did what ran pass"; it is silent about
+# whether the right thing ran. Measured 2026-07-29, all exit 0:
+#   filter matching zero tests · filter typo'd down to a subset · unconfigured
+#   build dir. Each one made this gate print PASSED having verified nothing.
+# So the count is checked against the tree, and against a floor that only rises.
+SELECTED=$(ctest --test-dir "$BUILD" -N -R "$LIGHT" 2>/dev/null | sed -n 's/^Total Tests: //p' | tail -1)
+SELECTED=${SELECTED:-0}
 
 ctest --test-dir "$BUILD" -j1 -R "$LIGHT" >"$LOG" 2>&1
 EC=$?
 grep -E "tests passed" "$LOG" | head -2
 
+# "N% tests passed, X tests failed out of RAN"
+RAN=$(sed -n 's/.*tests failed out of \([0-9]*\).*/\1/p' "$LOG" | tail -1)
+RAN=${RAN:-0}
+
+if [ "$RAN" -ne "$SELECTED" ] || [ "$SELECTED" -eq 0 ]; then
+    echo "GATE: FAILED — scope check. selected=$SELECTED ran=$RAN"
+    echo "      A suite that did not run cannot have passed. Check the build dir"
+    echo "      is configured and the filter still matches. Log: $LOG"
+    exit 1
+fi
+
+# Monotonic floor, DERIVED not hand-listed: it records what the tree actually
+# had and refuses a drop. Adding tests raises it automatically, so it cannot go
+# stale the way a literal `EXPECT=41` would. Skipped when the filter is
+# overridden, since a self-test's count is not the suite's count.
+FLOOR_FILE="$(dirname "$0")/gate-floor.txt"
+if [ -z "${KONSOLAI_GATE_FILTER:-}" ]; then
+    FLOOR=$(cat "$FLOOR_FILE" 2>/dev/null || echo 0)
+    if [ "$SELECTED" -lt "$FLOOR" ]; then
+        echo "GATE: FAILED — the light suite SHRANK: $FLOOR -> $SELECTED tests."
+        echo "      Tests vanished from the tree or the filter stopped matching."
+        echo "      If deliberate, lower $FLOOR_FILE in the same commit."
+        exit 1
+    fi
+    [ "$SELECTED" -gt "$FLOOR" ] && echo "$SELECTED" >"$FLOOR_FILE" \
+        && echo "GATE: floor raised $FLOOR -> $SELECTED"
+fi
+
 if [ "$EC" -eq 0 ]; then
-    echo "GATE: PASSED (ctest exit 0)"
+    echo "GATE: PASSED (ctest exit 0, $RAN/$SELECTED tests ran)"
     exit 0
 fi
 
 echo "GATE: first pass failed (ctest exit $EC) — retrying failures only:"
 grep -E "\(Failed\)" "$LOG" | head -10
 
-ctest --test-dir "$BUILD" -j1 --rerun-failed >"$LOG.retry" 2>&1
+# Retry the names from THIS run's log. `--rerun-failed` reads a persisted
+# LastTestsFailed.log, so when the first pass fails without recording failures
+# it silently reruns some EARLIER run's list — and a pass there would be
+# reported as RETRIED, i.e. green, on a scope that was never ours.
+FAILED=$(sed -n 's/.*[0-9]* - \([A-Za-z0-9_]*\) (Failed.*/\1/p' "$LOG" | sort -u)
+if [ -z "$FAILED" ]; then
+    echo "GATE: FAILED — ctest exit $EC but no failing test named. Log: $LOG"
+    exit 1
+fi
+RETRY_RE="^($(echo "$FAILED" | paste -sd'|' -))$"
+ctest --test-dir "$BUILD" -j1 -R "$RETRY_RE" >"$LOG.retry" 2>&1
 RC=$?
 if [ "$RC" -eq 0 ]; then
     echo "GATE: RETRIED — the above failed under load and passed in isolation."
