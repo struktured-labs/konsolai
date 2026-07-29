@@ -116,7 +116,16 @@ UNREG=$(for f in "$AUTOTESTS"/*Test.cpp; do
     n=$(basename "$f" .cpp)
     echo "$REGISTERED" | grep -qx "$n" || echo "$n"
 done | sort -u)
-NEW=$(comm -23 <(echo "$UNREG") <(sort -u "$KNOWN_FILE" 2>/dev/null))
+# NOT comm. `comm` requires both inputs sorted in the collation it compares with,
+# and when it reads a process substitution it cannot seek, so it silently returns
+# a SHORT list instead of erroring. Measured 2026-07-29 on a 1137-line list:
+#   real file        1137   correct
+#   <(same bytes)     905   silently short
+# A short list here means an unregistered test file goes unreported -- the gate
+# would pass over exactly what it exists to catch. grep -Fxv has no sortedness
+# precondition at all, so there is nothing to get wrong.
+NEW=$(printf '%s\n' "$UNREG" | grep -Fxv -f "$KNOWN_FILE" 2>/dev/null || true)
+NEW=$(printf '%s' "$NEW" | sed '/^$/d')
 if [ -n "$NEW" ]; then
     echo "GATE: FAILED — test file(s) on disk that ctest never runs:"
     echo "$NEW" | sed 's/^/        /'
