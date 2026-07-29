@@ -974,8 +974,15 @@ void ClaudeSessionYoloTest::testShellCommandCodexUsesResumeSubcommand()
     const QString cmd = session.shellCommand();
     // Codex resumes via a subcommand; emitting Claude's --resume flag would
     // make codex treat the id as a prompt and silently start a new session.
-    QVERIFY(cmd.contains(QStringLiteral("codex resume 019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3")));
     QVERIFY(!cmd.contains(QStringLiteral("--resume")));
+
+    // Assert the RESOLVED binary, not the substring "codex". tmux execs without
+    // a login shell, so a bare name is not on PATH and the pane dies instantly
+    // — the bug that actually shipped. `contains("codex resume <id>")` is
+    // satisfied by both the bare and the resolved form, so it cannot see that
+    // regression at all; this pins the exact token the session will exec.
+    const QString expected = CodexProcess::launchBinary() + QStringLiteral(" resume 019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3");
+    QVERIFY2(cmd.contains(expected), qPrintable(cmd));
 }
 
 void ClaudeSessionYoloTest::testShellCommandCodexOmitsClaudeOnlyArgs()
