@@ -16,7 +16,11 @@ LOGDIR="$(cd "$(dirname "$0")/.." && pwd)/tmp"
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/konsolai-gate.log"
 
-DEFAULT_LIGHT='Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget|Letta|TreeToolbar|Konsolai|Merge|Broadcast|SessionTreeWidget|Assistant|Reorganize|Codex|Wizard'
+# HookCleanupRace/RemoteSshArgs/SessionLinkFilter/YoloPolling were konsolai tests
+# that no prefix here matched, so the MANDATORY gate skipped them -- including
+# yolo polling and the hook-cleanup race. Found 2026-07-29 by running this gate
+# against the full suite for the first time. They add 0.31s.
+DEFAULT_LIGHT='Claude|Tmux|Token|Budget|SessionManager|SessionObserver|Agent|Notification|ProfileClaude|Resource|Prompt|OneShot|Keyboard|TabIndicator|StatusWidget|Letta|TreeToolbar|Konsolai|Merge|Broadcast|SessionTreeWidget|Assistant|Reorganize|Codex|Wizard|HookCleanupRace|RemoteSshArgs|SessionLinkFilter|YoloPolling'
 # Overridable ONLY so the gate can be tested against itself (see tools/gate-selftest.sh).
 LIGHT="${KONSOLAI_GATE_FILTER:-$DEFAULT_LIGHT}"
 
