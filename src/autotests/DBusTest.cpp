@@ -4,6 +4,34 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
+// DELIBERATELY NOT REGISTERED IN CMakeLists.txt. Do not wire this up.
+//
+// It has never been built in this repo -- `git log -S` shows its name has never
+// appeared in src/autotests/CMakeLists.txt in any commit, including the fork.
+// Reviewed and rejected 2026-07-30, on two measured grounds:
+//
+// 1. IT CANNOT TEST KONSOLAI. initTestCase() scans the session bus for a service
+//    named "org.kde.konsole" (line ~26). Konsolai registers
+//    "org.kde.konsolai-<pid>" -- verified live. So the name it looks for never
+//    matches us, and the interface it would exercise is not ours.
+//
+// 2. IT IS DESTRUCTIVE TO WHATEVER IT DOES MATCH. Having attached to any live
+//    org.kde.konsole* service -- an upstream Konsole the developer happens to be
+//    running -- it calls newSession x3, setTitle, setEnvironment, setCodec and
+//    setCurrentSession on that instance, then `quit` on /MainApplication
+//    followed by _process->kill(). Registering it means every `ctest` run
+//    terminates a real Konsole window. One was live (pid 2778119) when this was
+//    reviewed.
+//
+// So this is not "slow" or "environment-dependent" -- it is aimed at the wrong
+// service and it kills what it hits. tools/gate.sh keeps it in
+// tools/gate-unregistered.txt so the unregistered-test check does not flag it;
+// that baseline entry is a decision, not an oversight.
+//
+// If konsolai's own D-Bus surface (src/claude/ClaudeSessionAdaptor.cpp) ever
+// needs coverage, write a new test against "org.kde.konsolai-<pid>" that spawns
+// its OWN instance and tears it down -- do not adapt this one.
+
 // Own
 #include "DBusTest.h"
 #include "../profile/Profile.h"

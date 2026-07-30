@@ -1,2 +1,16 @@
 DBusTest
 SessionManagerTest
+# Test sources present in src/autotests/ that CMake deliberately does not build.
+# tools/gate.sh refuses any *Test.cpp NOT on this list, so entries here are
+# decisions and each needs a reason. Lines starting with # are inert as grep -F
+# patterns (verified: they cannot match a test name, and no blank line is present
+# because an empty -Fx pattern would match only empty lines anyway).
+#
+# DBusTest           reviewed and rejected 2026-07-30. Targets "org.kde.konsole"
+#                    while konsolai registers "org.kde.konsolai-<pid>", so it
+#                    cannot test us -- and it calls quit() plus _process->kill()
+#                    on whatever live service it DOES match, i.e. it terminates a
+#                    real Konsole window. Full reasoning at the top of the file.
+# SessionManagerTest a 2008 upstream placeholder whose only test body is
+#                    qWarning() << "SessionManager tests not implemented".
+#                    Registering it adds a warning and asserts nothing.
