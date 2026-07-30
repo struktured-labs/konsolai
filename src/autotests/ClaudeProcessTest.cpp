@@ -16,6 +16,7 @@
 
 // Konsolai
 #include "../claude/ClaudeProcess.h"
+#include "../claude/KonsolaiSettings.h"
 
 using namespace Konsolai;
 
@@ -112,6 +113,29 @@ void ClaudeProcessTest::testBuildCommand()
     // The default launch pins the 1M-context model at xhigh effort.
     QVERIFY(cmd.contains(QStringLiteral("claude-opus-5[1m]")));
     QVERIFY(cmd.contains(QStringLiteral("--effort xhigh")));
+}
+
+void ClaudeProcessTest::testBuildCommandCarriesPermissionMode()
+{
+    // A correct settings default is worth nothing if the flag never reaches the
+    // CLI. buildCommand() reads KonsolaiSettings::instance(), so this also pins
+    // that the singleton is reachable from the launch path -- if it were null the
+    // flag would be silently omitted and the session would fall back to the CLI's
+    // own default while settings claimed otherwise.
+    KonsolaiSettings settings;
+    settings.setClaudePermissionMode(QStringLiteral("auto"));
+
+    const QString cmd = ClaudeProcess::buildCommand();
+    QVERIFY2(cmd.contains(QStringLiteral("--permission-mode auto")), qPrintable(QStringLiteral("built command lacks the permission mode: %1").arg(cmd)));
+
+    // Negative control: a different mode must actually change the command, or the
+    // assertion above could be passing on a hardcoded string.
+    settings.setClaudePermissionMode(QStringLiteral("plan"));
+    const QString planCmd = ClaudeProcess::buildCommand();
+    QVERIFY(planCmd.contains(QStringLiteral("--permission-mode plan")));
+    QVERIFY(!planCmd.contains(QStringLiteral("--permission-mode auto")));
+
+    settings.setClaudePermissionMode(QStringLiteral("auto"));
 }
 
 void ClaudeProcessTest::testBuildCommandWithModel()

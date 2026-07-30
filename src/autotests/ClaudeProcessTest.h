@@ -32,6 +32,7 @@ private Q_SLOTS:
 
     // Command building tests
     void testBuildCommand();
+    void testBuildCommandCarriesPermissionMode();
     void testBuildCommandWithModel();
     void testBuildCommandWithWorkingDir();
     void testBuildCommandWithArgs();

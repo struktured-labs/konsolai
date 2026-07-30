@@ -26,6 +26,7 @@ private Q_SLOTS:
     void testDefaultGitRemoteRoot();
     void testDefaultGithubApiToken();
     void testDefaultModel();
+    void testDefaultPermissionMode();
     void testDefaultExtraClaudeArgs();
     void testExtraClaudeArgsRoundTrip();
     void testDefaultGitMode();

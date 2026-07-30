@@ -112,10 +112,14 @@ QString KonsolaiSettings::defaultModel() const
 QString KonsolaiSettings::claudePermissionMode() const
 {
     KConfigGroup group(m_config, QStringLiteral("Claude"));
-    // acceptEdits auto-approves file edits while still escalating riskier tool
-    // use, which is the CLI-native stand-in for yolo mode without handing over
-    // blanket command execution.
-    return group.readEntry("PermissionMode", QStringLiteral("acceptEdits"));
+    // auto lets the CLI decide approvals itself, which is the point of not using
+    // konsolai's yolo mode: the CLI has more context about a given tool call than
+    // a terminal-scraping approver does. acceptEdits was the previous default and
+    // still prompts for anything beyond file edits.
+    // Valid values (from `claude --help`, verified 2026-07-29): acceptEdits, auto,
+    // bypassPermissions, manual, dontAsk, plan. The CLI rejects anything else
+    // outright, so a typo here breaks session launch rather than degrading it.
+    return group.readEntry("PermissionMode", QStringLiteral("auto"));
 }
 
 void KonsolaiSettings::setClaudePermissionMode(const QString &mode)

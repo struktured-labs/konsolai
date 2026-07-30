@@ -62,6 +62,27 @@ void KonsolaiSettingsTest::testDefaultModel()
     QCOMPARE(settings.defaultModel(), QStringLiteral("claude-opus-5[1m]"));
 }
 
+void KonsolaiSettingsTest::testDefaultPermissionMode()
+{
+    KonsolaiSettings settings;
+    // "auto" hands approval decisions to the CLI, which has more context about a
+    // tool call than konsolai's terminal-scraping approver does. A session created
+    // from the wizard inherits this, so it is the wizard's effective default.
+    QCOMPARE(settings.claudePermissionMode(), QStringLiteral("auto"));
+
+    // The CLI rejects an unrecognised mode outright rather than ignoring it, so an
+    // invalid default here breaks session launch entirely. Pin the value to the
+    // set `claude --help` accepts (verified 2026-07-29).
+    static const QStringList validModes = {QStringLiteral("acceptEdits"),
+                                           QStringLiteral("auto"),
+                                           QStringLiteral("bypassPermissions"),
+                                           QStringLiteral("manual"),
+                                           QStringLiteral("dontAsk"),
+                                           QStringLiteral("plan")};
+    QVERIFY2(validModes.contains(settings.claudePermissionMode()),
+             qPrintable(QStringLiteral("default mode %1 is not a value the CLI accepts").arg(settings.claudePermissionMode())));
+}
+
 void KonsolaiSettingsTest::testDefaultExtraClaudeArgs()
 {
     KonsolaiSettings settings;
