@@ -161,10 +161,17 @@ if [ "$RC" -eq 0 ]; then
 fi
 # KNOWN PRE-EXISTING FAILURE, carved out with a deadline rather than suppressed.
 #
-# TokenTrackingTest::testFileWatcherTriggersRefresh fails when run after its
-# siblings in the same binary (QFileSystemWatcher debounce vs accumulated load);
-# it passes standalone. Verified pre-existing on 2026-07-29 by stashing all
-# local changes, rebuilding, and reproducing identically — it is not ours.
+# TokenTrackingTest::testFileWatcherTriggersRefresh fails INTERMITTENTLY in the
+# full binary (roughly half of runs) and passes standalone. Verified pre-existing
+# on 2026-07-29 by stashing all local changes, rebuilding, and reproducing
+# identically — it is not ours.
+#
+# THE CAUSE IS UNKNOWN. This comment previously read "QFileSystemWatcher debounce
+# vs accumulated load", which was inferred and never measured. Ruled out since:
+# it is not order-dependent (the two watcher tests pass together 4/4), and it is
+# not cross-run disk state (fixed 2026-07-29: the test was leaking dirs into
+# ~/.claude/projects on failure, and stopping that did not change the rate).
+# Do not record a mechanism here without measuring it.
 #
 # THIS CARVE-OUT SELF-DESTRUCTS: if TokenTrackingTest is the ONLY failure and it
 # starts passing, the grep below stops matching and the gate goes green through
