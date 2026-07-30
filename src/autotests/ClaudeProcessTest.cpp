@@ -10,6 +10,7 @@
 // Qt
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaEnum>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTest>
@@ -113,6 +114,21 @@ void ClaudeProcessTest::testBuildCommand()
     // The default launch pins the 1M-context model at xhigh effort.
     QVERIFY(cmd.contains(QStringLiteral("claude-opus-5[1m]")));
     QVERIFY(cmd.contains(QStringLiteral("--effort xhigh")));
+}
+
+void ClaudeProcessTest::testStateEnumSizePinnedForSwitchCoverage()
+{
+    // Every switch over ClaudeProcess::State in src/claude/ deliberately has NO
+    // default:, so adding a state produces -Wswitch warnings at all 8 switch
+    // sites naming each one. A build warning can be scrolled past; this makes it
+    // a test failure as well.
+    //
+    // Adding a state? The compiler will name the 8 switches -- handle it in each,
+    // then bump this count. Do NOT add a default: to silence them: that is
+    // exactly what let the Agent Details dialog render Starting, WaitingInput
+    // and Error as "Unknown" while correct strings existed 110 lines above it.
+    const QMetaEnum stateEnum = QMetaEnum::fromType<ClaudeProcess::State>();
+    QCOMPARE(stateEnum.keyCount(), 6);
 }
 
 void ClaudeProcessTest::testBuildCommandCarriesPermissionMode()

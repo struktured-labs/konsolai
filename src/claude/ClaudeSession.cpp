@@ -1241,9 +1241,10 @@ QString ClaudeSession::stateString() const
         return QStringLiteral("WaitingInput");
     case ClaudeProcess::State::Error:
         return QStringLiteral("Error");
-    default:
-        return QStringLiteral("Unknown");
     }
+    // Fallback after the switch rather than in a default:, so a new
+    // ClaudeProcess::State is a -Wswitch warning instead of silent "Unknown".
+    return QStringLiteral("Unknown");
 }
 
 QString ClaudeSession::currentTask() const

@@ -5715,9 +5715,10 @@ void SessionManagerPanel::showSessionStructure(const QString &sessionId)
             case ClaudeProcess::State::Error:
                 return i18n("Error");
             case ClaudeProcess::State::NotRunning:
-            default:
                 return i18n("Done");
             }
+            // Fallback lives here, not in a default:, so adding a state warns.
+            return i18n("Done");
         };
 
         // Collect prompt rounds
@@ -5812,7 +5813,11 @@ void SessionManagerPanel::showSubagentDetails(const SubagentInfo &info)
         title = i18n("Agent Details \u2014 %1 (%2)", info.agentType, info.teammateName);
     }
 
-    QString stateStr;
+    // No default: -- an unhandled ClaudeProcess::State must be a -Wswitch warning,
+    // not a silent "Unknown". This switch previously handled 3 of 6 states, so
+    // Starting, WaitingInput and Error all rendered as "Unknown" here while the
+    // correct strings already existed in the stateText lambda above.
+    QString stateStr = i18n("Unknown");
     switch (info.state) {
     case ClaudeProcess::State::Working:
         stateStr = i18n("Working");
@@ -5823,8 +5828,14 @@ void SessionManagerPanel::showSubagentDetails(const SubagentInfo &info)
     case ClaudeProcess::State::NotRunning:
         stateStr = i18n("Not Running");
         break;
-    default:
-        stateStr = i18n("Unknown");
+    case ClaudeProcess::State::Starting:
+        stateStr = i18n("Starting");
+        break;
+    case ClaudeProcess::State::WaitingInput:
+        stateStr = i18n("Waiting for Input");
+        break;
+    case ClaudeProcess::State::Error:
+        stateStr = i18n("Error");
         break;
     }
 

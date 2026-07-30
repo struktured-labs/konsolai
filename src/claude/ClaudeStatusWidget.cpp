@@ -286,7 +286,10 @@ void ClaudeStatusWidget::updateDisplay()
     }
 
     // Update style based on state
-    QString styleSheet;
+    // NotRunning and Starting were previously implicit in a default: -- gray is
+    // correct for both, but stating them means a seventh state warns instead of
+    // silently inheriting gray.
+    QString styleSheet = QStringLiteral("color: #757575;"); // Gray
     switch (m_currentState) {
     case ClaudeProcess::State::Error:
         styleSheet = QStringLiteral("color: #f44336;");  // Red
@@ -300,9 +303,9 @@ void ClaudeStatusWidget::updateDisplay()
     case ClaudeProcess::State::Idle:
         styleSheet = QStringLiteral("color: #4caf50;");  // Green
         break;
-    default:
-        styleSheet = QStringLiteral("color: #757575;");  // Gray
-        break;
+    case ClaudeProcess::State::NotRunning:
+    case ClaudeProcess::State::Starting:
+        break; // keep gray
     }
 
     m_stateLabel->setStyleSheet(styleSheet);
@@ -323,9 +326,8 @@ QString ClaudeStatusWidget::stateText(ClaudeProcess::State state) const
         return QStringLiteral("Waiting");
     case ClaudeProcess::State::Error:
         return QStringLiteral("Error");
-    default:
-        return QStringLiteral("Unknown");
     }
+    return QStringLiteral("Unknown"); // after the switch, so a new state warns
 }
 
 QString ClaudeStatusWidget::stateIcon(ClaudeProcess::State state) const
@@ -343,9 +345,8 @@ QString ClaudeStatusWidget::stateIcon(ClaudeProcess::State state) const
         return QStringLiteral("◎");
     case ClaudeProcess::State::Error:
         return QStringLiteral("✖");
-    default:
-        return QStringLiteral("?");
     }
+    return QStringLiteral("?"); // after the switch, so a new state warns
 }
 
 } // namespace Konsolai

@@ -210,9 +210,8 @@ QColor ClaudeTabIndicator::stateColor(ClaudeProcess::State state) const
         return QColor(255, 152, 0); // Orange
     case ClaudeProcess::State::Error:
         return QColor(244, 67, 54); // Red
-    default:
-        return QColor(158, 158, 158); // Light gray
     }
+    return QColor(158, 158, 158); // Light gray -- after the switch, so a new state warns
 }
 
 } // namespace Konsolai
