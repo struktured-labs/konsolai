@@ -138,6 +138,46 @@ if [ -n "$NEW" ]; then
     exit 1
 fi
 
+# COVERAGE, NOT JUST MEMBERSHIP.
+#
+# selected-vs-ran are two numbers that both come from the same ctest+filter, so a
+# filter matching too LITTLE makes both of them small, they agree, and this gate
+# goes green. That is not a hypothetical: .claude/commands/test-light.md carried
+# its own copy of the filter, drifted 14 terms behind, and was running 31 tests
+# where this gate runs 45 -- and its scope check would have reported 31 == 31.
+# Two instruments sharing a blind spot are one instrument wearing a disguise.
+#
+# So check a property the filter cannot influence: which test sources konsolai
+# authored, derived from git history rather than from a list anyone maintains.
+# Every konsolai-authored *Test.cpp must be selected by the light filter. The
+# fork SHA is a pin, but a commit SHA is immutable and the fork point never
+# moves -- unlike a line number or a hand-listed name.
+if [ -z "${KONSOLAI_GATE_FILTER:-}" ]; then
+    FORK=677d94305
+    REPO="$(cd "$(dirname "$0")/.." && pwd)"
+    git -C "$REPO" log "$FORK"..HEAD --diff-filter=A --name-only --format= \
+        -- 'src/autotests/*Test.cpp' 2>/dev/null | sort -u | sed 's|.*/||;s|\.cpp$||' >"$LOGDIR/konsolai-tests.txt"
+    OURS=$(wc -l <"$LOGDIR/konsolai-tests.txt")
+    # A derivation that enumerates nothing looks exactly like full coverage.
+    if [ "$OURS" -lt 20 ]; then
+        echo "GATE: FAILED — only $OURS konsolai-authored tests derived from git."
+        echo "      Expected dozens. The fork SHA $FORK may be missing from this"
+        echo "      clone, or this is not the konsolai repo. Refusing to treat an"
+        echo "      empty derivation as full coverage."
+        exit 1
+    fi
+    ctest --test-dir "$BUILD" -N -R "$LIGHT" 2>/dev/null \
+        | sed -n 's/^ *Test *#[0-9]*: //p' | sort -u >"$LOGDIR/selected-names.txt"
+    UNCOVERED=$(grep -Fxv -f "$LOGDIR/selected-names.txt" "$LOGDIR/konsolai-tests.txt" || true)
+    if [ -n "$UNCOVERED" ]; then
+        echo "GATE: FAILED — konsolai-authored test(s) the light filter does not select:"
+        echo "$UNCOVERED" | sed 's/^/        /'
+        echo "      Registering a test in CMake is not enough; DEFAULT_LIGHT must"
+        echo "      match its name. These would build, pass, and never run."
+        exit 1
+    fi
+fi
+
 if [ "$EC" -eq 0 ]; then
     echo "GATE: PASSED (ctest exit 0, $RAN/$SELECTED tests ran)"
     exit 0
