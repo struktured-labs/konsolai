@@ -381,15 +381,29 @@ void MainWindow::activeViewChanged(SessionController *controller)
     disconnect(bookmarkHandler(), &Konsole::BookmarkHandler::openUrl, nullptr, nullptr);
     connect(bookmarkHandler(), &Konsole::BookmarkHandler::openUrl, controller, &Konsole::SessionController::openUrl);
 
-    // Skip expensive KXmlGuiFactory remove/add cycle when switching between
-    // controllers that share the same action set (e.g., two Claude tabs).
-    // The XML GUI merge result is identical, so the churn is pure waste.
-    bool skipGuiFactorySwap = false;
-    if (!_pluggedController.isNull() && _pluggedController->isValid() && controller->isValid()) {
-        // Same action count heuristic: if both controllers have the same number
-        // of actions, the GUI merge result will be identical.
-        skipGuiFactorySwap = (_pluggedController->actionCollection()->count() == controller->actionCollection()->count());
-    }
+    // Skip the expensive KXmlGuiFactory remove/add cycle only when THIS
+    // controller is already the merged client — then the menubar is already
+    // correct and the churn is pure waste.
+    //
+    // This used to compare action COUNTS between the outgoing and incoming
+    // controllers, which was unsound twice over. Equal counts do not imply
+    // equal action sets; and more seriously, skipping left the factory holding
+    // the OUTGOING client while _pluggedController advanced to the incoming
+    // one. The two then disagreed about which client was merged, so the next
+    // non-skipped swap called removeClient() on a controller that had never
+    // been added (a no-op) and addClient() on the new one — stranding the old
+    // client in the factory. Both then merged their sessionui.rc <MenuBar>
+    // sections, which is why View accumulated duplicate entries the longer the
+    // window was used.
+    //
+    // KXMLGUIClient::factory() names the factory a client is currently merged
+    // into, so it answers the question directly instead of inferring it.
+    //
+    // Compared against THIS window's factory, not merely non-null: a detached
+    // or moved tab can be merged into a different MainWindow's factory, and
+    // treating that as "already merged" here would skip addClient() and leave
+    // this window's View menu without any session entries at all.
+    const bool skipGuiFactorySwap = controller->isValid() && controller->factory() == guiFactory();
 
     if (!_pluggedController.isNull()) {
         // Remove outgoing controller's actions from MainWindow so its
