@@ -611,6 +611,24 @@ public:
     static QStringList projectTokens(const QString &workingDirectory);
     static QHash<QString, QString> buildCategoryMap(const QList<QString> &workingDirectories);
 
+    /**
+     * Does one session row match what was typed in the filter box?
+     *
+     * @param haystack  everything searchable about the row, newline-joined
+     *                  (display label, tooltip, session id).
+     * @param filter    the raw filter text. Empty matches everything.
+     *
+     * Every konsolai session is literally named
+     * "konsolai-{workspace}-{profile}-{8hex}", and that name reaches the row
+     * through its tooltip. A plain substring test therefore made "konsolai" —
+     * and equally "default", or whatever the profile is called — match every
+     * row at once, so typing the name of a project that happens to BE konsolai
+     * filtered nothing. Only the trailing id distinguishes one session from
+     * another, so the boilerplate prefix is dropped before matching; the id
+     * itself stays searchable.
+     */
+    static bool matchesSessionFilter(const QString &haystack, const QString &filter);
+
 private:
     // Live count: number of distinct projects sharing this category key (m_categoryMap).
     int categoryProjectCount(const QString &categoryKey) const;
