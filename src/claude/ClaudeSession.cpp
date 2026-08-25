@@ -1560,20 +1560,14 @@ void ClaudeSession::pollForPermissionPrompt()
             return;
         }
 
-        // Extract last 5 lines from the full capture without splitting entire string.
-        // Walk backwards from end to find the 5th-from-last newline.
-        const int bottomCount = 5;
-        int pos = output.size();
-        for (int i = 0; i < bottomCount && pos > 0; ++i) {
-            pos = output.lastIndexOf(QLatin1Char('\n'), pos - 1);
-            if (pos < 0) {
-                pos = 0;
-                break;
-            }
-        }
-        const QString bottomLines = (pos > 0) ? output.mid(pos + 1) : output;
-
-        if (detectPermissionPrompt(bottomLines)) {
+        // Hand over the WHOLE capture. detectPermissionPrompt() still only
+        // MATCHES in the bottom few lines, but it needs the lines above them to
+        // recognise Claude Code's input box: that box is skipped by spotting its
+        // rule borders, and slicing here used to cut the top border off whenever
+        // the user's prompt was tall enough — leaving a typed "YES ..." looking
+        // exactly like a selected option. See
+        // testDetectPermissionPrompt_NoMatch_MultiLinePromptTopBorderScrolledOff.
+        if (detectPermissionPrompt(output)) {
             if (!m_permissionPromptDetected) {
                 // Check shared approval cooldown to prevent double-approve with hook path
                 if (m_lastApprovalTime.isValid() && m_lastApprovalTime.elapsed() < 2000) {
@@ -1607,7 +1601,7 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
     // Match the Claude Code interactive permission selection UI that appears
     // at the bottom of the terminal.  We check individual LINES so that the
     // selector arrow (❯) must be on the SAME line as the approval keyword —
-    // not just somewhere in the same 5-line window.
+    // not just somewhere in the same window.
     //
     // Claude Code formats vary across versions:
     //   ❯ Yes                        (compact form)
@@ -1615,15 +1609,20 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
     //   ❯ Allow once                 (alternate wording)
     //   ❯ Always allow               (second option, when pre-selected differently)
     //
-    // Critical: Claude Code's INPUT prompt also uses ❯ as a marker:
-    //   ─────────────  (border, all U+2500)
-    //   ❯ user typing here
-    //   ─────────────  (border, all U+2500)
-    // If the user types "yes"/"allow", we must NOT match that as a permission
-    // prompt.  Distinguishing feature: the input prompt's ❯ line is sandwiched
-    // between full-width horizontal-rule borders (lines that are almost
-    // entirely U+2500).  Permission UI uses boxed corners (╭╮╰╯) or plain
-    // text — never pure U+2500-only lines adjacent to ❯.
+    // Critical: Claude Code's INPUT prompt also uses ❯ as a marker, so a user
+    // who types "yes" or "allow" must not be read as approving anything.  Two
+    // independent guards, because each one alone has a hole:
+    //
+    //   1. The input line sits inside a box whose borders are near-solid rules.
+    //      Cheap and exact — but it needs to SEE a border, and the caller only
+    //      forwards the bottom of the pane.  A prompt taller than that window
+    //      pushes the box top out of view and the guard goes blind.
+    //   2. A permission prompt is a SELECTION LIST: the highlighted row always
+    //      has at least one sibling choice on its own line.  Typed text has no
+    //      siblings.  Needs no surrounding context, so it survives truncation.
+    //
+    // Pass the WHOLE capture: matching is restricted to the bottom lines below,
+    // and everything above is kept as context for guard 1.
 
     auto isInputBoxBorder = [](const QString &line) {
         const QString trimmed = line.trimmed();
@@ -1634,8 +1633,27 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
         return dashCount > trimmed.size() * 9 / 10;
     };
 
+    // A choice the selection UI offers.  Anchored at the start of the trimmed
+    // line and \b-terminated so prose that merely opens with these letters
+    // ("note that...", "allowlist") is not mistaken for an option.
+    static const QRegularExpression optionPattern(
+        QStringLiteral("^(?:[\\x{276F}>]\\s*)?(?:\\d+[.)]\\s*)?(yes|no|allow|deny|always|cancel|skip|don't|do not)\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    auto isOptionLine = [](const QString &line) {
+        const QString trimmed = line.trimmed();
+        return !trimmed.isEmpty() && optionPattern.match(trimmed).hasMatch();
+    };
+
     const auto lines = terminalOutput.split(QLatin1Char('\n'));
-    for (int i = 0; i < lines.size(); ++i) {
+
+    // Only a prompt at the very bottom is live; anything higher has already
+    // scrolled past.  Keeping this window at 5 preserves the previous matching
+    // behaviour exactly — the change is that lines ABOVE it are still readable
+    // as context instead of having been sliced off by the caller.
+    const int kMatchWindow = 5;
+    const int matchFrom = std::max(0, static_cast<int>(lines.size()) - kMatchWindow);
+
+    for (int i = matchFrom; i < lines.size(); ++i) {
         const QString &line = lines[i];
         if (!line.contains(QStringLiteral("❯"))) {
             continue;
@@ -1643,10 +1661,23 @@ bool ClaudeSession::detectPermissionPrompt(const QString &terminalOutput)
         if (!line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive) && !line.contains(QStringLiteral("Allow"), Qt::CaseInsensitive)) {
             continue;
         }
-        // Skip if this is the input prompt (sandwiched between border lines).
+        // Guard 1 — the input prompt, sandwiched between box borders.
         bool prevIsBorder = (i > 0) && isInputBoxBorder(lines[i - 1]);
         bool nextIsBorder = (i + 1 < lines.size()) && isInputBoxBorder(lines[i + 1]);
         if (prevIsBorder || nextIsBorder) {
+            continue;
+        }
+        // Guard 2 — require a sibling choice somewhere in the window.  Scanned
+        // over the match window only: an option-looking line far up the
+        // scrollback says nothing about what is on screen now.
+        bool hasSibling = false;
+        for (int j = matchFrom; j < lines.size(); ++j) {
+            if (j != i && isOptionLine(lines[j])) {
+                hasSibling = true;
+                break;
+            }
+        }
+        if (!hasSibling) {
             continue;
         }
         return true;
