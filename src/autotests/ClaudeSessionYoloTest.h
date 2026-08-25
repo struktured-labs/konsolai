@@ -57,6 +57,8 @@ private Q_SLOTS:
     void testDetectPermissionPrompt_NoMatch_SelectorOnDeny();
     void testDetectPermissionPrompt_NoMatch_UserTypingYesInInputBox();
     void testDetectPermissionPrompt_NoMatch_UserTypingAllowInInputBox();
+    void testDetectPermissionPrompt_NoMatch_MultiLinePromptTopBorderScrolledOff();
+    void testDetectPermissionPrompt_NoMatch_TypedYesHasNoSiblingOption();
     void testDetectIdlePrompt_NoMatch_CaretInMiddle();
 
     // Approval logging

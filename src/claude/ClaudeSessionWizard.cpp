@@ -497,6 +497,7 @@ void ClaudeSessionWizard::setupUi()
     m_pathLabel = new QLabel(i18n("Workspace root:"), this);
     rootRow->addWidget(m_pathLabel);
     m_projectRootEdit = new QLineEdit(this);
+    m_projectRootEdit->setObjectName(QStringLiteral("wizardProjectRootEdit"));
     m_projectRootEdit->setPlaceholderText(i18n("~/projects"));
     connect(m_projectRootEdit, &QLineEdit::textChanged, this, &ClaudeSessionWizard::onProjectRootChanged);
     rootRow->addWidget(m_projectRootEdit);
@@ -516,6 +517,7 @@ void ClaudeSessionWizard::setupUi()
     auto *promptGroup = new QGroupBox(i18n("Task Description"), this);
     auto *promptLayout = new QVBoxLayout(promptGroup);
     m_promptEdit = new QLineEdit(this);
+    m_promptEdit->setObjectName(QStringLiteral("wizardPromptEdit"));
     m_promptEdit->setPlaceholderText(i18n("Describe what you want to build..."));
     connect(m_promptEdit, &QLineEdit::textChanged, this, [this]() {
         onPromptChanged();
@@ -540,6 +542,7 @@ void ClaudeSessionWizard::setupUi()
     auto *folderRow = new QHBoxLayout();
     folderRow->addWidget(new QLabel(i18n("Folder name:"), this));
     m_folderNameEdit = new QLineEdit(this);
+    m_folderNameEdit->setObjectName(QStringLiteral("wizardFolderNameEdit"));
     m_folderNameEdit->setPlaceholderText(i18n("my-project-name"));
     connect(m_folderNameEdit, &QLineEdit::textChanged, this, &ClaudeSessionWizard::onFolderNameChanged);
 
@@ -748,7 +751,10 @@ void ClaudeSessionWizard::onPromptChanged()
     m_resumeSessionId.clear();
 
     m_folderNameEdit->setText(generateFolderName(prompt));
-    m_worktreeNameEdit->setText(generateWorktreeName(prompt));
+    // The git-section widgets are not built by setupUi() — see onGitStateDetected().
+    if (m_worktreeNameEdit) {
+        m_worktreeNameEdit->setText(generateWorktreeName(prompt));
+    }
 
     updatePreview();
 }
@@ -1023,6 +1029,14 @@ void ClaudeSessionWizard::detectGitState(const QString &path)
 
 void ClaudeSessionWizard::onGitStateDetected()
 {
+    // setupUi() does not build the git-mode section, so these are null in every
+    // shipping configuration. They are reached on EVERY keystroke in the folder
+    // and workspace-root fields via debouncedDetectGitAndConversations(), so an
+    // unguarded write here crashes the wizard as soon as the user types.
+    // The rest of the file already guards these pointers; these two did not.
+    if (!m_gitModeCombo || !m_sourceRepoEdit) {
+        return;
+    }
     if (m_isGitRepo) {
         m_gitModeCombo->setCurrentIndex(GitWorktree);
         m_sourceRepoEdit->setText(m_repoRoot);

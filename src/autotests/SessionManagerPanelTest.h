@@ -212,6 +212,8 @@ private Q_SLOTS:
     void testClosed_ShownWhenInVisibleStates();
     void testChipSync_PrimaryChipsReflectVisibleStatesAfterRebuild();
     void testChipSync_OverflowActionsReflectVisibleStatesAfterRebuild();
+    void testFilterIgnoresKonsolaiSessionNameBoilerplate();
+    void testFilterStillMatchesProjectAndId();
 };
 
 }

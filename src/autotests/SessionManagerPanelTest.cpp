@@ -3505,6 +3505,62 @@ void SessionManagerPanelTest::testChipSync_OverflowActionsReflectVisibleStatesAf
     settings.setVisibleSessionStates({QStringLiteral("active"), QStringLiteral("detached"), QStringLiteral("pinned"), QStringLiteral("closed")});
 }
 
+// ============================================================
+// Filter-box matching
+// ============================================================
+
+void SessionManagerPanelTest::testFilterIgnoresKonsolaiSessionNameBoilerplate()
+{
+    // REGRESSION: every session's tooltip carries its tmux name, and every
+    // tmux name starts with "konsolai-{workspace}-{profile}-". A raw
+    // contains() therefore matched EVERY row for those words, so filtering by
+    // the name of a project that happens to be called "konsolai" showed the
+    // whole tree instead of narrowing it.
+    const QString rowA = QStringLiteral(
+        "dr-mario-rl\n"
+        "dr-mario-rl\nProject: /home/u/projects/dr-mario-rl\n"
+        "Session: konsolai-default-Claude-151513d8\n"
+        "151513d8");
+    const QString rowB = QStringLiteral(
+        "konsolai\n"
+        "konsolai\nProject: /home/u/projects/konsolai\n"
+        "Session: konsolai-default-Claude-4150c716\n"
+        "4150c716");
+
+    // The boilerplate words must no longer drag unrelated rows in.
+    QVERIFY(!SessionManagerPanel::matchesSessionFilter(rowA, QStringLiteral("konsolai")));
+    QVERIFY(!SessionManagerPanel::matchesSessionFilter(rowA, QStringLiteral("default")));
+    QVERIFY(!SessionManagerPanel::matchesSessionFilter(rowA, QStringLiteral("Claude")));
+
+    // ...while the row that genuinely IS the konsolai project still matches,
+    // on its label and path rather than on the session-name prefix.
+    QVERIFY(SessionManagerPanel::matchesSessionFilter(rowB, QStringLiteral("konsolai")));
+
+    // Profile names containing a dash are absorbed by the prefix too — this is
+    // the case a non-greedy pattern would leave behind.
+    const QString dashedProfile = QStringLiteral("x\nSession: konsolai-work-my-profile-abcdef12\nabcdef12");
+    QVERIFY(!SessionManagerPanel::matchesSessionFilter(dashedProfile, QStringLiteral("my-profile")));
+}
+
+void SessionManagerPanelTest::testFilterStillMatchesProjectAndId()
+{
+    // Control: stripping the prefix must not blunt the filter. The parts that
+    // actually identify a session stay searchable, or this "fix" would just be
+    // a filter that matches less.
+    const QString row = QStringLiteral(
+        "dr-mario-rl\n"
+        "dr-mario-rl\nProject: /home/u/projects/dr-mario-rl\n"
+        "Session: konsolai-default-Claude-151513d8\n"
+        "151513d8");
+
+    QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("dr-mario"))); // label
+    QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("projects"))); // path
+    QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("151513d8"))); // the id survives
+    QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("151513D8"))); // case-insensitive
+    QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QString())); // empty matches all
+    QVERIFY(!SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("nonexistent")));
+}
+
 QTEST_MAIN(SessionManagerPanelTest)
 
 #include "moc_SessionManagerPanelTest.cpp"

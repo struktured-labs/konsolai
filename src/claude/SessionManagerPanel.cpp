@@ -4406,17 +4406,37 @@ void SessionManagerPanel::updateTreeWidgetWithLiveSessions(const QSet<QString> &
     syncChipUiToVisibleStates();
 }
 
+bool SessionManagerPanel::matchesSessionFilter(const QString &haystack, const QString &filter)
+{
+    if (filter.isEmpty()) {
+        return true;
+    }
+
+    // Collapse "konsolai-{workspace}-{profile}-{8hex}" down to just the id.
+    // Greedy [^\s]+ then backtracks onto the trailing "-{8hex}", so profiles
+    // containing dashes ("default-Claude") are absorbed by the prefix rather
+    // than surviving into the searchable text.
+    static const QRegularExpression tmuxName(QStringLiteral("konsolai-[^\\s]+-([0-9a-f]{8})"));
+    QString searchable = haystack;
+    searchable.replace(tmuxName, QStringLiteral("\\1"));
+
+    return searchable.contains(filter, Qt::CaseInsensitive);
+}
+
 void SessionManagerPanel::applyFilter(const QString &text)
 {
     if (!m_treeWidget) {
         return;
     }
 
-    // Helper: check if a leaf (session) item matches the filter text
+    // Helper: check if a leaf (session) item matches the filter text.
+    // Everything searchable is joined and handed to matchesSessionFilter, which
+    // strips the konsolai-{workspace}-{profile}- boilerplate before comparing —
+    // see its docs for why a raw contains() over the tooltip filtered nothing.
     auto itemMatchesFilter = [&text](QTreeWidgetItem *item) -> bool {
-        QString sessionId = item->data(0, Qt::UserRole).toString();
-        return item->text(0).contains(text, Qt::CaseInsensitive) || item->toolTip(0).contains(text, Qt::CaseInsensitive)
-            || sessionId.contains(text, Qt::CaseInsensitive);
+        const QString sessionId = item->data(0, Qt::UserRole).toString();
+        const QString haystack = item->text(0) + QLatin1Char('\n') + item->toolTip(0) + QLatin1Char('\n') + sessionId;
+        return matchesSessionFilter(haystack, text);
     };
 
     // Tree shape is now 2-3 levels:

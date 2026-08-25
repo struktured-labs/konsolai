@@ -345,6 +345,61 @@ void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_UserTypingAllowIn
     QVERIFY(!ClaudeSession::detectPermissionPrompt(output));
 }
 
+void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_MultiLinePromptTopBorderScrolledOff()
+{
+    // REGRESSION: typing a keyword near the TOP of a multi-line prompt used to
+    // auto-approve.
+    //
+    // The input-box guard is negative — it skips a "❯ ...Yes..." line only when
+    // it can SEE a rule border next to it. The poller used to slice the capture
+    // to its last 5 lines and hand only that to this function, so a prompt tall
+    // enough to push the box's top border out of the slice left the "❯ YES ..."
+    // line at index 0 with no visible border above it and ordinary prompt text
+    // below. The guard had nothing to fire on and the line read as a selection.
+    //
+    // Geometry matters: the keyword has to be on the ❯ line (the FIRST line of
+    // the composer), and that line has to land exactly 5th-from-bottom, which is
+    // why this fired intermittently rather than every time.
+    const QString top = QStringLiteral("╭") + QString(98, QChar(0x2500)) + QStringLiteral("╮");
+    const QString bottom = QStringLiteral("╰") + QString(98, QChar(0x2500)) + QStringLiteral("╯");
+
+    const QString pane = QStringLiteral("Some Claude output above\n") + top
+        + QStringLiteral("\n❯ YES do the thing\n"
+                         "  second line of the prompt\n"
+                         "  third line of the prompt\n")
+        + bottom + QStringLiteral("\n  ? for shortcuts\n");
+
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(pane));
+}
+
+void ClaudeSessionYoloTest::testDetectPermissionPrompt_NoMatch_TypedYesHasNoSiblingOption()
+{
+    // The same window the poller used to see AFTER slicing — the box top is
+    // already gone, so the border guard cannot help here by construction.
+    //
+    // What separates this from the real UI is that a permission prompt is a
+    // SELECTION LIST: the highlighted row always has at least one sibling
+    // choice on its own line ("No", "Deny", "Always allow"). A line the user
+    // typed has none. That check needs no surrounding context, so it holds even
+    // when the capture is truncated.
+    const QString bottom = QStringLiteral("╰") + QString(98, QChar(0x2500)) + QStringLiteral("╯");
+    const QString truncated = QStringLiteral(
+                                  "❯ YES do the thing\n"
+                                  "  second line of the prompt\n"
+                                  "  third line of the prompt\n")
+        + bottom + QStringLiteral("\n  ? for shortcuts");
+
+    QVERIFY(!ClaudeSession::detectPermissionPrompt(truncated));
+
+    // Control: the same shape WITH a sibling option is the real UI and must
+    // still match — otherwise this test would pass by disabling yolo entirely.
+    const QString real = QStringLiteral(
+        "Do you want to proceed?\n"
+        "  ❯ Yes\n"
+        "    No, and tell Claude what to do differently");
+    QVERIFY(ClaudeSession::detectPermissionPrompt(real));
+}
+
 // ============================================================
 // Approval logging tests
 // ============================================================

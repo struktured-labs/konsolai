@@ -51,6 +51,14 @@ ecm_add_tests(
     LINK_LIBRARIES ${KONSOLE_TEST_LIBS} KF6::Parts
 )
 
+# Needs the shell (MainWindow/ViewManager) plus KXmlGui to inspect the merged
+# client list, so it sits with the konsoleapp-linked tests rather than with the
+# konsolai_claude group.
+ecm_add_tests(
+    KonsolaiMenuMergeTest.cpp
+    LINK_LIBRARIES ${KONSOLE_TEST_LIBS} KF6::Parts KF6::XmlGui
+)
+
 # Claude Integration Tests
 set(KONSOLAI_CLAUDE_TEST_LIBS Qt::Test Qt::Network konsolai_claude konsoleprivate)
 
