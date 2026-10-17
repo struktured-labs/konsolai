@@ -161,6 +161,17 @@ public:
     static QString hashedProjectPath(const QString &projectPath);
 
     /**
+     * The conversation the Claude CLI running in tmux session
+     * `tmuxSessionName` is on, from the CLI's own registry: one
+     * <pid>.json per running CLI under `sessionsDir` (default
+     * ~/.claude/sessions), naming its sessionId and its tmux pane.
+     *
+     * Empty when no live process claims that session. The format belongs to
+     * the CLI and can change under us, so anything unexpected yields empty.
+     */
+    static QString liveConversationIdForTmuxSession(const QString &tmuxSessionName, const QString &sessionsDir = QString());
+
+    /**
      * Ensure SSH_AUTH_SOCK is set in the process environment.
      * Desktop-launched apps may not inherit the SSH agent socket.
      */

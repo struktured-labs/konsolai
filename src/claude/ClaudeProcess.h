@@ -182,6 +182,13 @@ Q_SIGNALS:
      */
     void taskCompleted(const QString &taskId, const QString &taskSubject, const QString &teammateName, const QString &teamName);
 
+    /**
+     * Emitted when a main-thread hook event names a conversation other than
+     * the last one seen — at startup, and again after /clear or /resume.
+     * Carries the UUID `claude --resume` accepts.
+     */
+    void conversationIdObserved(const QString &conversationId);
+
 public Q_SLOTS:
     /**
      * Update state based on hook event
@@ -214,6 +221,8 @@ private:
 
     State m_state = State::NotRunning;
     QString m_currentTask;
+    // Survives reset(): a restart resumes this same conversation.
+    QString m_conversationId;
 };
 
 } // namespace Konsolai

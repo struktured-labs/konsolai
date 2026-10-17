@@ -689,6 +689,12 @@ void ClaudeSession::connectSignals()
         }
     });
 
+    // Follow the conversation the CLI is actually on (it changes on /clear and
+    // /resume) so restart() and close/reopen resume that one.
+    connect(m_claudeProcess, &ClaudeProcess::conversationIdObserved, this, [this](const QString &conversationId) {
+        m_resumeSessionId = conversationId;
+    });
+
     // Advance prompt round when Claude finishes a response
     connect(m_claudeProcess, &ClaudeProcess::taskFinished, this, [this]() {
         m_currentPromptRound++;
@@ -999,10 +1005,19 @@ QString ClaudeSession::shellCommand() const
         return m_tmuxManager->buildAttachCommand(m_sessionName);
     }
 
+    const QString agentCmd = agentCommand(m_resumeSessionId);
+
+    return m_tmuxManager->buildNewSessionCommand(m_sessionName,
+                                                 agentCmd,
+                                                 true, // attachExisting
+                                                 m_workingDir);
+}
+
+QString ClaudeSession::agentCommand(const QString &resumeId) const
+{
     // Codex takes a different shape: resume is a subcommand rather than a
     // flag, and none of the Claude-specific extra args (channels, hooks) apply
     // to it — passing them would make codex reject the command line.
-    QString agentCmd;
     if (m_agentKind == AgentKind::Codex) {
         QString codexModel = m_modelOverride;
         QStringList codexArgs;
@@ -1024,32 +1039,26 @@ QString ClaudeSession::shellCommand() const
                 codexArgs << QStringLiteral("-s") << sandbox;
             }
         }
-        agentCmd = CodexProcess::buildCommand(m_workingDir, m_resumeSessionId, codexModel, codexArgs);
-    } else {
-        // Create new session or attach if exists
-        QStringList extraArgs;
-        if (!m_resumeSessionId.isEmpty()) {
-            extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
-        }
-        extraArgs << effectiveExtraClaudeArgs();
-
-        // Honour the wizard's model pick. Without this the picker is decorative
-        // on the Claude side: m_claudeModel is always Model::Default (nothing
-        // calls setClaudeModel), so every session launched as opus-5[1m] no
-        // matter what was selected.  parseModel maps the slug back to the enum
-        // so the [1m] beta suffix and --effort still come from buildCommand.
-        ClaudeProcess::Model model = m_claudeModel;
-        if (model == ClaudeProcess::Model::Default && !m_modelOverride.isEmpty()) {
-            model = ClaudeProcess::parseModel(m_modelOverride);
-        }
-
-        agentCmd = ClaudeProcess::buildCommand(model, QString(), extraArgs);
+        return CodexProcess::buildCommand(m_workingDir, resumeId, codexModel, codexArgs);
     }
 
-    return m_tmuxManager->buildNewSessionCommand(m_sessionName,
-                                                 agentCmd,
-                                                 true, // attachExisting
-                                                 m_workingDir);
+    QStringList extraArgs;
+    if (!resumeId.isEmpty()) {
+        extraArgs << QStringLiteral("--resume") << resumeId;
+    }
+    extraArgs << effectiveExtraClaudeArgs();
+
+    // Honour the wizard's model pick. Without this the picker is decorative
+    // on the Claude side: m_claudeModel is always Model::Default (nothing
+    // calls setClaudeModel), so every session launched as opus-5[1m] no
+    // matter what was selected.  parseModel maps the slug back to the enum
+    // so the [1m] beta suffix and --effort still come from buildCommand.
+    ClaudeProcess::Model model = m_claudeModel;
+    if (model == ClaudeProcess::Model::Default && !m_modelOverride.isEmpty()) {
+        model = ClaudeProcess::parseModel(m_modelOverride);
+    }
+
+    return ClaudeProcess::buildCommand(model, QString(), extraArgs);
 }
 
 QStringList ClaudeSession::buildRemoteSshArgs() const
@@ -1383,47 +1392,18 @@ void ClaudeSession::restart()
         m_claudeProcess->reset();
     }
 
-    // Detect current conversation ID so restart resumes the conversation.
-    // Try m_lastTokenFile first (already tracked), then scan the project dir.
-    if (m_resumeSessionId.isEmpty()) {
-        QString convFile = m_lastTokenFile;
-
-        // If token tracking hasn't populated m_lastTokenFile yet, find the newest JSONL now
-        if (convFile.isEmpty() && !m_workingDir.isEmpty()) {
-            QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + ClaudeSessionRegistry::hashedProjectPath(m_workingDir);
-            QDateTime newestTime;
-            QDirIterator it(projectDir, {QStringLiteral("*.jsonl")}, QDir::Files);
-            while (it.hasNext()) {
-                it.next();
-                QDateTime mtime = it.fileInfo().lastModified();
-                if (!newestTime.isValid() || mtime > newestTime) {
-                    newestTime = mtime;
-                    convFile = it.filePath();
-                }
-            }
-        }
-
-        if (!convFile.isEmpty()) {
-            QString basename = QFileInfo(convFile).completeBaseName();
-            if (!basename.isEmpty()) {
-                m_resumeSessionId = basename;
-                qDebug() << "ClaudeSession::restart() - detected conversation ID:" << m_resumeSessionId;
-            }
-        }
+    // Pin the conversation before respawning so the next metadata save records
+    // the one we resumed, not an empty ID.
+    const QString resumeId = restartResumeId();
+    if (!resumeId.isEmpty()) {
+        m_resumeSessionId = resumeId;
     }
-
-    // Build the claude command (same as initial launch)
-    QStringList extraArgs;
-    if (!m_resumeSessionId.isEmpty()) {
-        extraArgs << QStringLiteral("--resume") << m_resumeSessionId;
-    }
-    extraArgs << effectiveExtraClaudeArgs();
-    QString claudeCmd = ClaudeProcess::buildCommand(m_claudeModel, QString(), extraArgs);
+    const QString agentCmd = restartCommand();
 
     // Use respawn-pane to atomically kill the current process and start a new one.
     // This keeps the tmux session alive so the Konsole tab stays connected.
     QPointer<ClaudeSession> guard(this);
-    m_tmuxManager->respawnPaneAsync(m_sessionName, claudeCmd, [guard](bool ok) {
+    m_tmuxManager->respawnPaneAsync(m_sessionName, agentCmd, [guard](bool ok) {
         if (!guard) {
             return;
         }
@@ -1433,6 +1413,59 @@ void ClaudeSession::restart()
             qWarning() << "ClaudeSession::restart() - respawn-pane failed";
         }
     });
+}
+
+QString ClaudeSession::restartCommand() const
+{
+    return agentCommand(restartResumeId());
+}
+
+QString ClaudeSession::restartResumeId() const
+{
+    // Most authoritative first. The running CLI records its own conversation
+    // per tmux pane, which survives a konsolai restart (hooks don't: the CLI
+    // snapshotted the old socket). Next, the ID hook events keep current,
+    // /clear included. Last, a guess from the newest transcript for the
+    // workdir — wrong whenever several sessions share it.
+    if (m_agentKind == AgentKind::Claude) {
+        const QString live = ClaudeSessionRegistry::liveConversationIdForTmuxSession(m_sessionName);
+        if (!live.isEmpty()) {
+            return live;
+        }
+    }
+    if (!m_resumeSessionId.isEmpty()) {
+        return m_resumeSessionId;
+    }
+    if (m_workingDir.isEmpty()) {
+        return {};
+    }
+
+    if (m_agentKind == AgentKind::Codex) {
+        const QList<CodexConversation> conversations = CodexProcess::discoverConversations(m_workingDir); // newest first
+        return conversations.isEmpty() ? QString() : conversations.first().sessionId;
+    }
+
+    // Try m_lastTokenFile first (already tracked), then scan the project dir.
+    QString convFile = m_lastTokenFile;
+    if (convFile.isEmpty()) {
+        QString projectDir = QDir::homePath() + QStringLiteral("/.claude/projects/") + ClaudeSessionRegistry::hashedProjectPath(m_workingDir);
+        QDateTime newestTime;
+        QDirIterator it(projectDir, {QStringLiteral("*.jsonl")}, QDir::Files);
+        while (it.hasNext()) {
+            it.next();
+            QDateTime mtime = it.fileInfo().lastModified();
+            if (!newestTime.isValid() || mtime > newestTime) {
+                newestTime = mtime;
+                convFile = it.filePath();
+            }
+        }
+    }
+    if (convFile.isEmpty()) {
+        return {};
+    }
+    const QString basename = QFileInfo(convFile).completeBaseName();
+    qDebug() << "ClaudeSession::restart() - no hook-observed conversation, guessed newest:" << basename;
+    return basename;
 }
 
 QString ClaudeSession::getTranscript(int lines)

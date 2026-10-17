@@ -905,6 +905,82 @@ void ClaudeProcessHookEventTest::testNotificationIdleVariant()
     QCOMPARE(process.state(), ClaudeProcess::State::WaitingInput);
 }
 
+// ── Conversation ID capture ──
+//
+// restart() used to pick the NEWEST JSONL in the project dir. With three
+// sessions open in one workdir, a bulk restart resumed all three on the same
+// conversation. Every hook payload names the conversation its process is on,
+// so the session can track its own ID instead of guessing from mtimes.
+
+void ClaudeProcessHookEventTest::testSessionIdEmitsConversationIdObserved()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::conversationIdObserved);
+
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral(R"({"session_id": "7d1c2f0a-1111-4222-8333-944455556666"})"));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("7d1c2f0a-1111-4222-8333-944455556666"));
+}
+
+void ClaudeProcessHookEventTest::testRepeatedSessionIdDoesNotReemit()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::conversationIdObserved);
+
+    const QString payload = QStringLiteral(R"({"session_id": "7d1c2f0a-1111-4222-8333-944455556666", "tool_name": "Bash"})");
+    process.handleHookEvent(QStringLiteral("PreToolUse"), payload);
+    process.handleHookEvent(QStringLiteral("PostToolUse"), payload);
+    process.handleHookEvent(QStringLiteral("Stop"), payload);
+
+    QCOMPARE(spy.count(), 1);
+}
+
+void ClaudeProcessHookEventTest::testNewSessionIdAfterClearReemits()
+{
+    // /clear starts a new conversation in the same process. A restart after
+    // that must resume the NEW one, not the ID the session was launched with.
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::conversationIdObserved);
+
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral(R"({"session_id": "aaaaaaaa-1111-4222-8333-944455556666"})"));
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral(R"({"session_id": "bbbbbbbb-1111-4222-8333-944455556666"})"));
+
+    QCOMPARE(spy.count(), 2);
+    QCOMPARE(spy.at(1).at(0).toString(), QStringLiteral("bbbbbbbb-1111-4222-8333-944455556666"));
+}
+
+void ClaudeProcessHookEventTest::testMissingSessionIdNoSignal()
+{
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::conversationIdObserved);
+
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral("{}"));
+    process.handleHookEvent(QStringLiteral("Stop"), QStringLiteral(R"({"session_id": ""})"));
+
+    QCOMPARE(spy.count(), 0);
+}
+
+void ClaudeProcessHookEventTest::testSubagentEventsDoNotChangeConversationId()
+{
+    // Restarting onto a subagent's conversation would drop the user into a
+    // transcript they never typed in. Only main-thread events may set the ID.
+    ClaudeProcess process;
+    QSignalSpy spy(&process, &ClaudeProcess::conversationIdObserved);
+
+    process.handleHookEvent(QStringLiteral("SubagentStart"),
+                            QStringLiteral(R"({"session_id": "cccccccc-1111-4222-8333-944455556666", "agent_id": "a1", "agent_type": "Explore"})"));
+    process.handleHookEvent(QStringLiteral("SubagentStop"),
+                            QStringLiteral(R"({"session_id": "cccccccc-1111-4222-8333-944455556666", "agent_id": "a1", "agent_type": "Explore"})"));
+    // A tool call made INSIDE a subagent carries agent_id.
+    process.handleHookEvent(QStringLiteral("PreToolUse"),
+                            QStringLiteral(R"({"session_id": "cccccccc-1111-4222-8333-944455556666", "agent_id": "a1", "tool_name": "Read"})"));
+    process.handleHookEvent(QStringLiteral("TeammateIdle"),
+                            QStringLiteral(R"({"session_id": "dddddddd-1111-4222-8333-944455556666", "teammate_name": "researcher"})"));
+
+    QCOMPARE(spy.count(), 0);
+}
+
 QTEST_GUILESS_MAIN(ClaudeProcessHookEventTest)
 
 #include "moc_ClaudeProcessHookEventTest.cpp"

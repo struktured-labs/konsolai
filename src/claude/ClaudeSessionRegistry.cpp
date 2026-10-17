@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QPointer>
 #include <QProcessEnvironment>
 #include <QSet>
@@ -573,6 +574,43 @@ int ClaudeSessionRegistry::countFilesModified(const QString &jsonlPath)
     }
     file.close();
     return files.size();
+}
+
+QString ClaudeSessionRegistry::liveConversationIdForTmuxSession(const QString &tmuxSessionName, const QString &sessionsDir)
+{
+    if (tmuxSessionName.isEmpty()) {
+        return {};
+    }
+    const QString dir = sessionsDir.isEmpty() ? QDir::homePath() + QStringLiteral("/.claude/sessions") : sessionsDir;
+    // The "tmux" field is "<session>:@<window>.%<pane>". Match up to the colon:
+    // a bare prefix would let ...aaaa1111 claim ...aaaa11112's conversation.
+    const QString panePrefix = tmuxSessionName + QLatin1Char(':');
+
+    QString best;
+    qint64 bestUpdatedAt = -1;
+    const QFileInfoList files = QDir(dir).entryInfoList({QStringLiteral("*.json")}, QDir::Files);
+    for (const QFileInfo &fi : files) {
+        QFile f(fi.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+        if (!obj.value(QStringLiteral("tmux")).toString().startsWith(panePrefix)) {
+            continue;
+        }
+        const QString conversationId = obj.value(QStringLiteral("sessionId")).toString();
+        const qint64 pid = obj.value(QStringLiteral("pid")).toInteger();
+        // A dead pid's file names what the pane USED to run, before a restart.
+        if (conversationId.isEmpty() || pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1").arg(pid))) {
+            continue;
+        }
+        const qint64 updatedAt = obj.value(QStringLiteral("updatedAt")).toInteger();
+        if (updatedAt > bestUpdatedAt) {
+            bestUpdatedAt = updatedAt;
+            best = conversationId;
+        }
+    }
+    return best;
 }
 
 QString ClaudeSessionRegistry::hashedProjectPath(const QString &projectPath)

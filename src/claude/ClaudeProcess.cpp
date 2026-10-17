@@ -149,6 +149,18 @@ void ClaudeProcess::handleHookEvent(const QString &eventType, const QString &eve
     }
     QJsonObject obj = doc.object();
 
+    // Track which conversation this process is on, so a restart resumes it
+    // instead of whichever JSONL in the project dir was written last (wrong as
+    // soon as two sessions share a workdir). Events raised inside a subagent
+    // or by a teammate are excluded: their IDs are not ours to resume.
+    const QString conversationId = obj.value(QStringLiteral("session_id")).toString();
+    const bool fromOtherAgent = obj.contains(QStringLiteral("agent_id")) || eventType.startsWith(QStringLiteral("Subagent"))
+        || eventType == QStringLiteral("TeammateIdle") || eventType == QStringLiteral("TaskCompleted");
+    if (!conversationId.isEmpty() && !fromOtherAgent && conversationId != m_conversationId) {
+        m_conversationId = conversationId;
+        Q_EMIT conversationIdObserved(conversationId);
+    }
+
     if (eventType == QStringLiteral("Stop")) {
         // Claude finished responding
         setState(State::Idle);

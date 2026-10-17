@@ -87,6 +87,13 @@ private Q_SLOTS:
 
     // ── Notification: idle variant ──
     void testNotificationIdleVariant();
+
+    // ── Conversation ID capture (restart resumes the session's OWN conversation) ──
+    void testSessionIdEmitsConversationIdObserved();
+    void testRepeatedSessionIdDoesNotReemit();
+    void testNewSessionIdAfterClearReemits();
+    void testMissingSessionIdNoSignal();
+    void testSubagentEventsDoNotChangeConversationId();
 };
 
 }
