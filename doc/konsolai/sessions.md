@@ -38,6 +38,23 @@ The left sidebar (`View > Session Manager`) shows all sessions organized by cate
 | Dismiss | Hide from list without deleting |
 | Purge | Delete all metadata |
 
+### Category and Project-Group Actions (Right-Click)
+
+**Restart All Live in Category (N)** / **Restart All Live in Group (N)** restarts
+every live session under the node — to pick up a new CLI, MCP server or plugin
+version — after one confirmation. "Live" means its tmux session is running:
+
+- Sessions with an open tab restart in place (the pane is respawned; the tab stays).
+- Live sessions with no tab are reopened in a tab first, then restarted.
+- Remote sessions are skipped and the dialog says so: restart respawns through
+  the local tmux server, which can't reach a session on an SSH host.
+
+Each session resumes **its own** conversation, even when several share a
+working directory. The ID comes from the running CLI's own record
+(`~/.claude/sessions/<pid>.json`, matched by tmux session), then from hook
+events, and only as a last resort from the newest transcript in the workdir.
+Codex sessions restart as Codex, and a per-session model pick is kept.
+
 ## Remote Sessions
 
 Sessions can run on remote machines via SSH:

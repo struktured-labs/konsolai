@@ -11,6 +11,7 @@
 #include "ClaudeAssistantPromptBuilder.h"
 #include "ClaudeSession.h"
 #include "ClaudeSessionRegistry.h"
+#include "RestartPolicy.h"
 
 #include <QClipboard>
 #include <QDateTime>
@@ -445,6 +446,28 @@ public Q_SLOTS:
         updateTreeWidgetWithLiveSessions(m_cachedLiveNames);
     }
 
+    /**
+     * Test seam: replace the cached set of live tmux session names, which
+     * normally comes from an async tmux query.
+     */
+    void setLiveSessionNamesForTest(const QSet<QString> &names)
+    {
+        m_cachedLiveNames = names;
+    }
+
+    /**
+     * Live session IDs under the tree node with this composite key (a
+     * "category:", "group:" or "older:" node) — the set "Restart All Live"
+     * acts on. Empty when no such node is in the tree.
+     */
+    QStringList liveSessionIdsUnder(const QString &compositeKey) const;
+
+    /**
+     * Split session IDs for a bulk restart: restart in place, reopen first,
+     * or skip (remote). See RestartPolicy.
+     */
+    RestartPlan restartPlanFor(const QStringList &sessionIds) const;
+
 Q_SIGNALS:
     /**
      * Emitted when user wants to attach to a session
@@ -633,6 +656,13 @@ private:
     // Live count: number of distinct projects sharing this category key (m_categoryMap).
     int categoryProjectCount(const QString &categoryKey) const;
     QString stateTokenFor(const SessionMetadata &meta, bool isLive) const;
+    // Same liveness the tree renders with: a tab is open, or tmux is alive and
+    // the user hasn't just closed it.
+    bool isSessionLive(const SessionMetadata &meta) const;
+    QStringList collectLiveSessionIds(QTreeWidgetItem *node) const;
+    // Adds "Restart All Live in <scope> (N)" to a category/group menu when N > 0.
+    void addRestartLiveAction(QMenu &menu, QTreeWidgetItem *node);
+    void restartLiveSessions(const QStringList &sessionIds, const QString &scopeLabel);
     QIcon stateIcon(const QString &token) const;
     QString stateLabel(const QString &token) const;
     int sessionCountByState(const QString &token) const;
@@ -736,6 +766,17 @@ private:
     // Sessions explicitly closed via closeSession() — forced to "Closed" category
     // even if tmux hasn't died yet (async kill race)
     QSet<QString> m_explicitlyClosed;
+
+    // Tabless live sessions a bulk restart reopened, keyed by tmux name. The
+    // reattached ClaudeSession knows neither its agent kind nor its
+    // conversation, so both are captured here and applied in registerSession()
+    // before it restarts. Entries expire so a failed reopen can't fire later.
+    struct PendingRestart {
+        QDateTime requestedAt;
+        bool isCodex = false;
+        QString resumeId;
+    };
+    QHash<QString, PendingRestart> m_pendingRestartAfterReopen;
 
     // --- Tree expansion state preservation ---
 

@@ -631,6 +631,143 @@ QString SessionManagerPanel::stateTokenFor(const SessionMetadata &meta, bool isL
     return QStringLiteral("closed");
 }
 
+bool SessionManagerPanel::isSessionLive(const SessionMetadata &meta) const
+{
+    if (m_activeSessions.value(meta.sessionId)) {
+        return true;
+    }
+    const bool alive = m_cachedLiveNames.contains(meta.sessionName) || (meta.isRemote && m_cachedRemoteLiveNames.contains(meta.sessionName));
+    return alive && !m_explicitlyClosed.contains(meta.sessionId);
+}
+
+QStringList SessionManagerPanel::collectLiveSessionIds(QTreeWidgetItem *node) const
+{
+    // Walk the whole subtree: a category holds project groups, flattened
+    // session leaves, and "+N older…" tucks, any of which can hold sessions.
+    QStringList ids;
+    std::function<void(QTreeWidgetItem *)> walk = [&](QTreeWidgetItem *parent) {
+        for (int i = 0; i < parent->childCount(); ++i) {
+            QTreeWidgetItem *child = parent->child(i);
+            if (child->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("s:"))) {
+                const QString id = child->data(0, Qt::UserRole).toString();
+                const SessionMetadata *meta = sessionMetadata(id);
+                if (meta && stateTokenFor(*meta, isSessionLive(*meta)) == QLatin1String("active")) {
+                    ids.append(id);
+                }
+            }
+            walk(child);
+        }
+    };
+    if (node) {
+        walk(node);
+    }
+    return ids;
+}
+
+QStringList SessionManagerPanel::liveSessionIdsUnder(const QString &compositeKey) const
+{
+    std::function<QTreeWidgetItem *(QTreeWidgetItem *)> find = [&](QTreeWidgetItem *node) -> QTreeWidgetItem * {
+        if (node->data(0, Qt::UserRole + 6).toString() == compositeKey) {
+            return node;
+        }
+        for (int i = 0; i < node->childCount(); ++i) {
+            if (auto *hit = find(node->child(i))) {
+                return hit;
+            }
+        }
+        return nullptr;
+    };
+    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i) {
+        if (auto *hit = find(m_treeWidget->topLevelItem(i))) {
+            return collectLiveSessionIds(hit);
+        }
+    }
+    return {};
+}
+
+RestartPlan SessionManagerPanel::restartPlanFor(const QStringList &sessionIds) const
+{
+    QVector<RestartCandidate> candidates;
+    candidates.reserve(sessionIds.size());
+    for (const QString &id : sessionIds) {
+        const SessionMetadata *meta = sessionMetadata(id);
+        if (!meta) {
+            continue;
+        }
+        RestartCandidate c;
+        c.sessionId = id;
+        c.sessionName = meta->sessionName;
+        c.hasTab = !m_activeSessions.value(id).isNull();
+        c.isRemote = meta->isRemote;
+        candidates.append(c);
+    }
+    return planRestart(candidates);
+}
+
+void SessionManagerPanel::addRestartLiveAction(QMenu &menu, QTreeWidgetItem *node)
+{
+    const QStringList liveIds = collectLiveSessionIds(node);
+    const int count = restartPlanFor(liveIds).restartCount();
+    if (count == 0) {
+        return;
+    }
+    const bool isCategory = node->data(0, Qt::UserRole + 6).toString().startsWith(QStringLiteral("category:"));
+    menu.addSeparator();
+    QAction *action = menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
+                                     isCategory ? i18n("Restart All Live in Category (%1)", count) : i18n("Restart All Live in Group (%1)", count));
+    action->setObjectName(QStringLiteral("restartAllLiveAction"));
+    action->setToolTip(i18n("Restart every live session here to pick up CLI/MCP/plugin updates"));
+    // Node text carries a session count ("cowir (3)"); the dialog states its own.
+    static const QRegularExpression countSuffix(QStringLiteral("\\s*\\(\\d+\\)$"));
+    const QString scopeLabel = node->text(0).remove(countSuffix);
+    connect(action, &QAction::triggered, this, [this, liveIds, scopeLabel]() {
+        restartLiveSessions(liveIds, scopeLabel);
+    });
+}
+
+void SessionManagerPanel::restartLiveSessions(const QStringList &sessionIds, const QString &scopeLabel)
+{
+    // Re-plan at click time: tabs may have opened or closed since the menu did.
+    const RestartPlan plan = restartPlanFor(sessionIds);
+    if (plan.restartCount() == 0) {
+        return;
+    }
+
+    QString text = i18np("Restart 1 live session in \"%2\"?", "Restart %1 live sessions in \"%2\"?", plan.restartCount(), scopeLabel);
+    if (!plan.reopenThenRestart.isEmpty()) {
+        text += QStringLiteral("\n\n")
+            + i18np("1 of them has no open tab; it will be reopened first.",
+                    "%1 of them have no open tab; they will be reopened first.",
+                    plan.reopenThenRestart.size());
+    }
+    if (!plan.skippedRemote.isEmpty()) {
+        text += QStringLiteral("\n\n")
+            + i18np("1 remote session will be skipped: restart can't reach tmux over SSH.",
+                    "%1 remote sessions will be skipped: restart can't reach tmux over SSH.",
+                    plan.skippedRemote.size());
+    }
+    text +=
+        QStringLiteral("\n\n") + i18n("Each conversation is resumed by ID, but the CLI process is replaced — picking up new CLI, MCP, and plugin versions.");
+
+    if (QMessageBox::question(this, i18n("Restart Live Sessions"), text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+
+    for (const QString &id : plan.restartInPlace) {
+        if (QPointer<ClaudeSession> session = m_activeSessions.value(id)) {
+            session->restart();
+        }
+    }
+    for (const QString &id : plan.reopenThenRestart) {
+        const SessionMetadata *meta = sessionMetadata(id);
+        if (!meta) {
+            continue;
+        }
+        m_pendingRestartAfterReopen.insert(meta->sessionName, PendingRestart{QDateTime::currentDateTime(), meta->isCodex, meta->lastResumeSessionId});
+        Q_EMIT attachRequested(meta->sessionName);
+    }
+}
+
 QIcon SessionManagerPanel::stateIcon(const QString &token) const
 {
     if (token == QLatin1String("active")) {
@@ -1083,6 +1220,27 @@ void SessionManagerPanel::registerSession(ClaudeSession *session)
 
         qDebug() << "SessionManagerPanel: Restored yolo mode for" << sessionId << "- yolo:" << meta.yoloMode << "double:" << meta.doubleYoloMode
                  << "approvals:" << (meta.yoloApprovalCount + meta.doubleYoloApprovalCount);
+    }
+
+    // A bulk restart reopened this tabless session. The reattached session
+    // knows neither its agent kind nor its conversation, so apply what was
+    // captured at request time, then restart it. A stale request (the reopen
+    // failed and the user attached by hand later) is dropped, not honoured.
+    const PendingRestart pending = m_pendingRestartAfterReopen.take(session->sessionName());
+    if (pending.requestedAt.isValid() && pending.requestedAt.secsTo(QDateTime::currentDateTime()) <= 60) {
+        if (pending.isCodex) {
+            session->setAgentKind(ClaudeSession::AgentKind::Codex);
+            m_metadata[sessionId].isCodex = true;
+        }
+        if (session->resumeSessionId().isEmpty() && !pending.resumeId.isEmpty()) {
+            session->setResumeSessionId(pending.resumeId);
+        }
+        QPointer<ClaudeSession> guard(session);
+        QTimer::singleShot(0, this, [guard]() {
+            if (guard) {
+                guard->restart();
+            }
+        });
     }
 
     scheduleMetadataSave();
@@ -2310,6 +2468,8 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
             }
         }
 
+        addRestartLiveAction(menu, item);
+
         // Fleet launcher — launch/focus the latest session for every project
         // in this category. Confirms first (spawning N tabs unprompted is rude).
         {
@@ -2464,33 +2624,10 @@ void SessionManagerPanel::onContextMenu(const QPoint &pos)
         const QStringList archivedIds = buckets.value(QStringLiteral("archived"));
         const QStringList dismissedIds = buckets.value(QStringLiteral("dismissed"));
 
-        // Restart all active sessions in this group
+        addRestartLiveAction(menu, item);
+
         if (!activeIds.isEmpty()) {
             menu.addSeparator();
-            QAction *restartAllAction =
-                menu.addAction(QIcon::fromTheme(QStringLiteral("view-refresh")), i18n("Restart All Active in Group (%1)", activeIds.size()));
-            restartAllAction->setToolTip(i18n("Restart all active Claude sessions in this group to pick up CLI/MCP/plugin updates"));
-            QString groupLabel = item->text(0);
-            connect(restartAllAction, &QAction::triggered, this, [this, activeIds, groupLabel]() {
-                int ret = QMessageBox::question(this,
-                                                i18n("Restart Sessions in Group"),
-                                                i18n("Restart all %1 active Claude session(s) in \"%2\"?\n\n"
-                                                     "Each session's conversation will be preserved (resumed by ID), but the Claude CLI process "
-                                                     "will be replaced — picking up new CLI/MCP/plugin versions.",
-                                                     activeIds.size(),
-                                                     groupLabel),
-                                                QMessageBox::Yes | QMessageBox::No,
-                                                QMessageBox::No);
-                if (ret != QMessageBox::Yes) {
-                    return;
-                }
-                for (const QString &id : activeIds) {
-                    QPointer<ClaudeSession> session = m_activeSessions.value(id);
-                    if (session) {
-                        session->restart();
-                    }
-                }
-            });
 
             // Broadcast Message — open the broadcast dialog pre-populated with
             // this group's active sessions.

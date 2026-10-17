@@ -78,6 +78,7 @@ ecm_add_tests(
     LettaAgentProviderTest.cpp
     MergePolicyTest.cpp
     BroadcastPolicyTest.cpp
+    RestartPolicyTest.cpp
     ClaudeAssistantPromptBuilderTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )

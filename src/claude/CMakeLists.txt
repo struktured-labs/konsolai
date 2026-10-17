@@ -34,6 +34,7 @@ set(claude_SRCS
     MergePolicy.cpp
     MergeSessionsDialog.cpp
     BroadcastPolicy.cpp
+    RestartPolicy.cpp
     BroadcastDialog.cpp
     KonsolaiSettings.cpp
     BudgetController.cpp
