@@ -86,11 +86,10 @@ void KonsolaiSettingsTest::testDefaultPermissionMode()
 void KonsolaiSettingsTest::testDefaultExtraClaudeArgs()
 {
     KonsolaiSettings settings;
-    // Defaults to the plugin's channel namespace so async DMs from
-    // session-intercom actually bind in konsolai-launched sessions.
-    // "server:session-intercom" was wrong — only matches top-level MCP
-    // entries, not plugin-provided MCP servers.
-    QCOMPARE(settings.extraClaudeArgs(), QStringLiteral("--dangerously-load-development-channels plugin:session-intercom@struktured-labs"));
+    // Empty: ClaudeProcess::buildCommand() already binds session-intercom via
+    // --channels. The old default repeated it as the development flag, which
+    // brought back the "Loading development channels" dialog on every launch.
+    QCOMPARE(settings.extraClaudeArgs(), QString());
 }
 
 void KonsolaiSettingsTest::testExtraClaudeArgsRoundTrip()

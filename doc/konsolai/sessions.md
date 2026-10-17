@@ -55,6 +55,22 @@ working directory. The ID comes from the running CLI's own record
 events, and only as a last resort from the newest transcript in the workdir.
 Codex sessions restart as Codex, and a per-session model pick is kept.
 
+## Session-intercom channel (DMs between sessions)
+
+Every Claude session launches with `--channels plugin:session-intercom@struktured-labs`
+so intercom DMs arrive between turns as `<channel>` tags. Two things make that work:
+
+- **The plugin must be on the channel allowlist**, set once per machine in
+  `/etc/claude-code/managed-settings.json`. Run `bash tools/enable-channel-allowlist.sh`
+  (`--undo` removes it). Without it the session still starts, but the channel
+  doesn't register and the startup screen says the plugin is "not on the approved
+  channels allowlist". konsolai used to pass `--dangerously-load-development-channels`
+  instead, which raised a blocking warning dialog on every launch and restart.
+- **`MCP_PROTOCOL_NEGOTIATION=legacy`** prefixes the command. Claude Code won't
+  register a channel server that negotiates MCP revision 2026-07-28, and the
+  intercom server's SDK does; `claude --debug` then logs "Channel notifications
+  skipped: server did not declare claude/channel capability" and no DM is pushed.
+
 ## Remote Sessions
 
 Sessions can run on remote machines via SSH:

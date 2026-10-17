@@ -116,6 +116,29 @@ void ClaudeProcessTest::testBuildCommand()
     QVERIFY(cmd.contains(QStringLiteral("--effort xhigh")));
 }
 
+void ClaudeProcessTest::testBuildCommandUsesAllowlistedChannelNotDevFlag()
+{
+    // --dangerously-load-development-channels shows a blocking "WARNING:
+    // Loading development channels" dialog on EVERY launch and restart, and
+    // Claude Code never remembers the answer. With session-intercom on the
+    // managed-settings allowlist (allowedChannelPlugins), plain --channels
+    // binds it with no dialog.
+    const QString cmd = ClaudeProcess::buildCommand();
+    QVERIFY2(cmd.contains(QStringLiteral("--channels plugin:session-intercom@struktured-labs")), qPrintable(cmd));
+    QVERIFY2(!cmd.contains(QStringLiteral("--dangerously-load-development-channels")), qPrintable(cmd));
+}
+
+void ClaudeProcessTest::testBuildCommandKeepsLegacyMcpHandshakeForChannels()
+{
+    // Claude Code asks stdio servers for MCP revision 2026-07-28 and refuses
+    // to register a channel server that accepts it ("Channel notifications
+    // skipped: server did not declare claude/channel capability"). The intercom
+    // server's Python SDK accepts it, so no DM was pushed into any session.
+    // The env var must precede the binary so the shell scopes it to claude.
+    const QString cmd = ClaudeProcess::buildCommand();
+    QVERIFY2(cmd.startsWith(QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy claude ")), qPrintable(cmd));
+}
+
 void ClaudeProcessTest::testStateEnumSizePinnedForSwitchCoverage()
 {
     // Every switch over ClaudeProcess::State in src/claude/ deliberately has NO

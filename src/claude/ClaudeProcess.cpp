@@ -30,6 +30,12 @@ QString ClaudeProcess::buildCommand(Model model,
 {
     Q_UNUSED(workingDir)
     QStringList args;
+    // Keep MCP servers on the pre-2026-07-28 handshake. Claude Code asks stdio
+    // servers for that revision and will not register a channel server that
+    // accepts it ("Channel notifications skipped: server did not declare
+    // claude/channel capability") — the intercom server's Python SDK accepts
+    // it, so no DM reached any session. The shell scopes this to claude only.
+    args << QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy");
     args << QStringLiteral("claude");
 
     // Default: opus 5 with 1M context at xhigh effort — deep reasoning without
@@ -46,9 +52,15 @@ QString ClaudeProcess::buildCommand(Model model,
     // instead of needing intercom_poll. Uses plugin:<name>@<marketplace>
     // form because the server is plugin-provided (server: form is for
     // standalone MCP servers); Claude Code rejects mismatched kinds with
-    // "server <name> not in --channels list for this session". No-op for
-    // sessions that don't have the plugin installed.
-    args << QStringLiteral("--dangerously-load-development-channels") << QStringLiteral("plugin:session-intercom@struktured-labs");
+    // "server <name> not in --channels list for this session".
+    //
+    // Plain --channels, not --dangerously-load-development-channels: the
+    // development flag raises a blocking warning dialog on every launch and
+    // restart. --channels needs the plugin on the channel allowlist, set in
+    // /etc/claude-code/managed-settings.json (channelsEnabled +
+    // allowedChannelPlugins). Without that entry the session still starts;
+    // the channel just doesn't register, and the startup notice says why.
+    args << QStringLiteral("--channels") << QStringLiteral("plugin:session-intercom@struktured-labs");
 
     // Let the CLI apply its own approval policy rather than relying on yolo
     // mode driving the TUI. Empty means "say nothing and take the CLI default".
