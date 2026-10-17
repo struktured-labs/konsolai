@@ -34,7 +34,17 @@ bash Testing/run-all-gui-tests.sh
 
 # Isolated GUI tests (launches fresh instance)
 bash Testing/run-isolated-gui-tests.sh
+
+# Hermetic: own Xvfb, HOME, XDG dirs, tmux server and a fake `claude`
+bash Testing/run-restart-live-gui-test.sh
 ```
+
+`run-isolated-gui-tests.sh` isolates the display and D-Bus only: its instance
+still reads and writes the real `~/.local/share/konsolai/sessions.json`, and
+every real session looks dead to it. Prefer the hermetic pattern for new GUI
+tests that need seeded sessions — see `run-restart-live-gui-test.sh`, which
+never names the default tmux socket (a bare `tmux kill-server` there would
+kill the user's real server).
 
 ## Test Patterns
 
@@ -81,6 +91,7 @@ LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS} Qt::Widgets
 | `Testing/gui-lifecycle-test.py` | Session lifecycle GUI tests |
 | `Testing/run-all-gui-tests.sh` | Run all GUI tests |
 | `Testing/run-isolated-gui-tests.sh` | Launch fresh instance + run tests |
+| `Testing/run-restart-live-gui-test.sh` | Hermetic E2E: Restart All Live on category/group menus |
 
 ## Key Test Files
 

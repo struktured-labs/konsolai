@@ -506,6 +506,12 @@ public:
     QStringList effectiveExtraClaudeArgs() const;
 
     /**
+     * The agent CLI command line (claude or codex) for this session, without
+     * the tmux wrapper. Shared by launch and restart so the two cannot drift.
+     */
+    QString agentCommand(const QString &resumeId) const;
+
+    /**
      * Which agent CLI backs this session.
      *
      * Everything above the CLI — tmux persistence, tabs, the session tree,
@@ -805,6 +811,21 @@ public:
      * For remote sessions, returns an SSH-wrapped command.
      */
     QString shellCommand() const;
+
+    /**
+     * The agent command restart() respawns the pane with.
+     *
+     * A bare CLI command — no tmux wrapper — because respawn-pane runs it
+     * inside the session's existing pane.
+     */
+    QString restartCommand() const;
+
+    /**
+     * Conversation restart() resumes: the one the running CLI reports for
+     * this tmux session, else the hook-observed one, else the newest
+     * transcript for this workdir and agent.
+     */
+    QString restartResumeId() const;
 
     /**
      * Build SSH argument list for remote sessions.

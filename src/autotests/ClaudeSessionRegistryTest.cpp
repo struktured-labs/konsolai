@@ -8,13 +8,17 @@
 #include "ClaudeSessionRegistryTest.h"
 
 // Qt
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTest>
+
+#include <unistd.h>
 
 // Konsolai
 #include "../claude/ClaudeSessionRegistry.h"
@@ -334,6 +338,108 @@ void ClaudeSessionRegistryTest::testRemoteHasSessionAsync_emptyTarget()
     QVERIFY2(called, "Callback must fire even for an empty session name");
     QVERIFY2(!gotExists, "Empty session name cannot report an existing session");
     QVERIFY2(!gotSucceeded, "Empty session name check must be reported as inconclusive");
+}
+
+// ── liveConversationIdForTmuxSession ──
+//
+// Every running Claude CLI keeps ~/.claude/sessions/<pid>.json naming the
+// conversation it is on and the tmux pane it runs in. That is the one source
+// that tells apart several sessions sharing a workdir after a konsolai restart,
+// when hooks are stale and the newest-transcript guess picks one for all.
+// The format is the CLI's (observed in 2.1.296-2.1.302), so anything
+// unexpected must degrade to "unknown", never to a wrong ID.
+
+namespace
+{
+void writeCliSession(const QString &dir, qint64 pid, const QString &conversationId, const QString &tmux, qint64 updatedAt = 1000)
+{
+    QJsonObject obj;
+    obj[QStringLiteral("pid")] = pid;
+    obj[QStringLiteral("sessionId")] = conversationId;
+    obj[QStringLiteral("tmux")] = tmux;
+    obj[QStringLiteral("updatedAt")] = updatedAt;
+    QFile f(dir + QStringLiteral("/%1.json").arg(pid));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QJsonDocument(obj).toJson());
+}
+
+// A pid no process can hold: above the kernel's pid_max ceiling (2^22).
+constexpr qint64 kDeadPid = 4194304 + 12345;
+} // namespace
+
+void ClaudeSessionRegistryTest::testLiveConversationId_matchesTmuxSession()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    writeCliSession(dir.path(), QCoreApplication::applicationPid(), QStringLiteral("conv-mine"), QStringLiteral("konsolai-default-Claude-aaaa1111:@3.%3"));
+
+    QCOMPARE(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-aaaa1111"), dir.path()),
+             QStringLiteral("conv-mine"));
+    QVERIFY(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-bbbb2222"), dir.path()).isEmpty());
+}
+
+void ClaudeSessionRegistryTest::testLiveConversationId_ignoresDeadPid()
+{
+    // The previous CLI in a pane can leave its file behind; it names the
+    // conversation the pane USED to be on.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    writeCliSession(dir.path(), kDeadPid, QStringLiteral("conv-dead"), QStringLiteral("konsolai-default-Claude-aaaa1111:@3.%3"));
+
+    QVERIFY(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-aaaa1111"), dir.path()).isEmpty());
+}
+
+void ClaudeSessionRegistryTest::testLiveConversationId_nameMustEndAtColon()
+{
+    // "konsolai-x-Claude-aaaa1111" is a prefix of "...aaaa11112": a bare
+    // startsWith would resume another session's conversation.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    writeCliSession(dir.path(), QCoreApplication::applicationPid(), QStringLiteral("conv-other"), QStringLiteral("konsolai-default-Claude-aaaa11112:@3.%3"));
+
+    QVERIFY(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-aaaa1111"), dir.path()).isEmpty());
+}
+
+void ClaudeSessionRegistryTest::testLiveConversationId_newestEntryWins()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const qint64 me = QCoreApplication::applicationPid();
+    const qint64 parent = getppid(); // also alive for the duration of the test
+    writeCliSession(dir.path(), me, QStringLiteral("conv-old"), QStringLiteral("konsolai-default-Claude-aaaa1111:@3.%3"), 1000);
+    writeCliSession(dir.path(), parent, QStringLiteral("conv-new"), QStringLiteral("konsolai-default-Claude-aaaa1111:@3.%3"), 2000);
+
+    QCOMPARE(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-aaaa1111"), dir.path()),
+             QStringLiteral("conv-new"));
+}
+
+void ClaudeSessionRegistryTest::testLiveConversationId_malformedFilesIgnored()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    {
+        QFile garbage(dir.path() + QStringLiteral("/1.json"));
+        QVERIFY(garbage.open(QIODevice::WriteOnly));
+        garbage.write("{not json");
+    }
+    // Live pid and matching pane, but no sessionId.
+    QJsonObject noId;
+    noId[QStringLiteral("pid")] = QCoreApplication::applicationPid();
+    noId[QStringLiteral("tmux")] = QStringLiteral("konsolai-default-Claude-aaaa1111:@3.%3");
+    QFile f(dir.path() + QStringLiteral("/2.json"));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QJsonDocument(noId).toJson());
+    f.close();
+
+    QVERIFY(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-aaaa1111"), dir.path()).isEmpty());
+}
+
+void ClaudeSessionRegistryTest::testLiveConversationId_missingDirIsEmpty()
+{
+    QVERIFY(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QStringLiteral("konsolai-default-Claude-aaaa1111"),
+                                                                    QStringLiteral("/nonexistent/konsolai-test-dir"))
+                .isEmpty());
+    QVERIFY(ClaudeSessionRegistry::liveConversationIdForTmuxSession(QString(), QStringLiteral("/nonexistent/konsolai-test-dir")).isEmpty());
 }
 
 QTEST_GUILESS_MAIN(ClaudeSessionRegistryTest)

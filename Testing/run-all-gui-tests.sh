@@ -29,6 +29,16 @@ run_test "Smoke Test" "Testing/gui-smoke-test.py"
 run_test "Interaction Test" "Testing/gui-interaction-test.py"
 run_test "Lifecycle Test" "Testing/gui-lifecycle-test.py"
 
+# Hermetic: its own Xvfb, HOME and tmux server — never touches the live instance.
+echo ""
+echo "--- Restart All Live (hermetic) ---"
+if bash Testing/run-restart-live-gui-test.sh >/dev/null 2>&1; then
+    echo "  ✓ Restart All Live: ALL PASSED"
+else
+    echo "  ✗ Restart All Live: SOME FAILURES (rerun: bash Testing/run-restart-live-gui-test.sh)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
 echo ""
 echo "========================================"
 if [ $TOTAL_FAIL -eq 0 ]; then

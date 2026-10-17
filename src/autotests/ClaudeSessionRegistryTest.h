@@ -50,6 +50,14 @@ private Q_SLOTS:
     void testBuildRemoteHasSessionArgs_customPort();
     void testBuildRemoteHasSessionArgs_quotesSessionName();
     void testRemoteHasSessionAsync_emptyTarget();
+
+    // The CLI's own pid -> conversation registry (~/.claude/sessions/<pid>.json)
+    void testLiveConversationId_matchesTmuxSession();
+    void testLiveConversationId_ignoresDeadPid();
+    void testLiveConversationId_nameMustEndAtColon();
+    void testLiveConversationId_newestEntryWins();
+    void testLiveConversationId_malformedFilesIgnored();
+    void testLiveConversationId_missingDirIsEmpty();
 };
 
 }

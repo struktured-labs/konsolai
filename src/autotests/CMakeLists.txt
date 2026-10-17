@@ -68,6 +68,7 @@ ecm_add_tests(
     ClaudeSessionStateTest.cpp
     ClaudeSessionRegistryTest.cpp
     ClaudeSessionYoloTest.cpp
+    ClaudeSessionRestartTest.cpp
     ClaudeHookHandlerTest.cpp
     NotificationManagerTest.cpp
     ProfileClaudeTest.cpp
@@ -77,6 +78,7 @@ ecm_add_tests(
     LettaAgentProviderTest.cpp
     MergePolicyTest.cpp
     BroadcastPolicyTest.cpp
+    RestartPolicyTest.cpp
     ClaudeAssistantPromptBuilderTest.cpp
     LINK_LIBRARIES ${KONSOLAI_CLAUDE_TEST_LIBS}
 )

@@ -23,6 +23,7 @@
 #include "../claude/ClaudeSession.h"
 #include "../claude/KonsolaiSettings.h"
 #include "../claude/MergePolicy.h"
+#include "../claude/RestartPolicy.h"
 #include "../claude/SessionManagerPanel.h"
 
 using namespace Konsolai;
@@ -3559,6 +3560,135 @@ void SessionManagerPanelTest::testFilterStillMatchesProjectAndId()
     QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("151513D8"))); // case-insensitive
     QVERIFY(SessionManagerPanel::matchesSessionFilter(row, QString())); // empty matches all
     QVERIFY(!SessionManagerPanel::matchesSessionFilter(row, QStringLiteral("nonexistent")));
+}
+
+// ============================================================
+// Restart All Live
+// ============================================================
+//
+// Categories (the top-level groups) had Broadcast but no Restart, and the
+// project-group Restart counted tmux-live sessions without a tab in its "(N)"
+// then silently skipped them. These pin the set both menus act on, via the
+// same public predicates onContextMenu() consumes (QMenu::exec is modal and
+// hangs under Wayland — see the note above the merge tests).
+
+namespace
+{
+QStringList sorted(QStringList list)
+{
+    list.sort();
+    return list;
+}
+
+QString childGroupKey(QTreeWidgetItem *category, const QString &workdirSuffix)
+{
+    for (int i = 0; i < category->childCount(); ++i) {
+        const QString key = category->child(i)->data(0, Qt::UserRole + 6).toString();
+        if (key.startsWith(QStringLiteral("group:")) && key.endsWith(workdirSuffix)) {
+            return key;
+        }
+    }
+    return {};
+}
+} // namespace
+
+void SessionManagerPanelTest::testRestartLive_CategoryCollectsLiveSessionsAcrossProjects()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    QJsonArray sessions;
+    QJsonObject a = makeSession(QStringLiteral("rla"), QStringLiteral("konsolai-rla"), true);
+    a[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-alpha");
+    QJsonObject b = makeSession(QStringLiteral("rlb"), QStringLiteral("konsolai-rlb"), true);
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-beta");
+    QJsonObject dead = makeSession(QStringLiteral("rldead"), QStringLiteral("konsolai-rldead"), true);
+    dead[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-beta");
+    sessions.append(a);
+    sessions.append(b);
+    sessions.append(dead);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    panel.setLiveSessionNamesForTest({QStringLiteral("konsolai-rla"), QStringLiteral("konsolai-rlb")});
+    forceTreeRebuild(panel);
+    QVERIFY2(topLevelCategoryItem(findTree(panel), QStringLiteral("cowir")), "Expected category:cowir from LCP of cowir-alpha + cowir-beta");
+
+    // Both projects' live sessions; the dead one in cowir-beta is not live.
+    QCOMPARE(sorted(panel.liveSessionIdsUnder(QStringLiteral("category:cowir"))), QStringList({QStringLiteral("rla"), QStringLiteral("rlb")}));
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testRestartLive_GroupCollectsOnlyItsOwnProject()
+{
+    KonsolaiSettings settings;
+    resetSessionTreeSettings(&settings);
+
+    // Two sessions in cowir-alpha so it renders as a project group (a single
+    // session is flattened straight onto the category).
+    QJsonArray sessions;
+    QJsonObject a1 = makeSession(QStringLiteral("rga1"), QStringLiteral("konsolai-rga1"), true);
+    a1[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-alpha");
+    QJsonObject a2 = makeSession(QStringLiteral("rga2"), QStringLiteral("konsolai-rga2"), true);
+    a2[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-alpha");
+    QJsonObject b = makeSession(QStringLiteral("rgb"), QStringLiteral("konsolai-rgb"), true);
+    b[QStringLiteral("workingDirectory")] = QStringLiteral("/home/u/cowir-beta");
+    sessions.append(a1);
+    sessions.append(a2);
+    sessions.append(b);
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    panel.setLiveSessionNamesForTest({QStringLiteral("konsolai-rga1"), QStringLiteral("konsolai-rga2"), QStringLiteral("konsolai-rgb")});
+    forceTreeRebuild(panel);
+    QTreeWidgetItem *cowirCat = topLevelCategoryItem(findTree(panel), QStringLiteral("cowir"));
+    QVERIFY(cowirCat);
+    const QString alphaKey = childGroupKey(cowirCat, QStringLiteral("cowir-alpha"));
+    QVERIFY2(!alphaKey.isEmpty(), "Expected a project group for cowir-alpha");
+
+    QCOMPARE(sorted(panel.liveSessionIdsUnder(alphaKey)), QStringList({QStringLiteral("rga1"), QStringLiteral("rga2")}));
+
+    resetSessionTreeSettings(&settings);
+}
+
+void SessionManagerPanelTest::testRestartLive_TablessSessionsArePlannedForReopen()
+{
+    // Live in tmux, no tab open (no ClaudeSession registered). The old action
+    // counted these, then dropped them. They must be reopened, then restarted.
+    QJsonArray sessions;
+    sessions.append(makeSession(QStringLiteral("rtl1"), QStringLiteral("konsolai-rtl1"), true));
+    sessions.append(makeSession(QStringLiteral("rtl2"), QStringLiteral("konsolai-rtl2"), true));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    panel.setLiveSessionNamesForTest({QStringLiteral("konsolai-rtl1"), QStringLiteral("konsolai-rtl2")});
+
+    const RestartPlan plan = panel.restartPlanFor({QStringLiteral("rtl1"), QStringLiteral("rtl2")});
+    QVERIFY(plan.restartInPlace.isEmpty());
+    QCOMPARE(plan.reopenThenRestart, QStringList({QStringLiteral("rtl1"), QStringLiteral("rtl2")}));
+    QCOMPARE(plan.restartCount(), 2);
+}
+
+void SessionManagerPanelTest::testRestartLive_RemoteSessionsAreSkipped()
+{
+    QJsonArray sessions;
+    QJsonObject remote = makeSession(QStringLiteral("rrem"), QStringLiteral("konsolai-rrem"), true);
+    remote[QStringLiteral("isRemote")] = true;
+    // .invalid never resolves (RFC 2606): the panel probes remote liveness
+    // over ssh, and a test must not reach a real host.
+    remote[QStringLiteral("sshHost")] = QStringLiteral("restart-test.invalid");
+    sessions.append(remote);
+    sessions.append(makeSession(QStringLiteral("rloc"), QStringLiteral("konsolai-rloc"), true));
+    writeTestSessions(sessions);
+
+    SessionManagerPanel_INIT(panel);
+    panel.setLiveSessionNamesForTest({QStringLiteral("konsolai-rrem"), QStringLiteral("konsolai-rloc")});
+
+    const RestartPlan plan = panel.restartPlanFor({QStringLiteral("rrem"), QStringLiteral("rloc")});
+    QCOMPARE(plan.skippedRemote, QStringList({QStringLiteral("rrem")}));
+    QCOMPARE(plan.reopenThenRestart, QStringList({QStringLiteral("rloc")}));
+    QCOMPARE(plan.restartCount(), 1);
 }
 
 QTEST_MAIN(SessionManagerPanelTest)

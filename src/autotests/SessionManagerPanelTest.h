@@ -214,6 +214,12 @@ private Q_SLOTS:
     void testChipSync_OverflowActionsReflectVisibleStatesAfterRebuild();
     void testFilterIgnoresKonsolaiSessionNameBoilerplate();
     void testFilterStillMatchesProjectAndId();
+
+    // Restart All Live — category and project-group bulk restart
+    void testRestartLive_CategoryCollectsLiveSessionsAcrossProjects();
+    void testRestartLive_GroupCollectsOnlyItsOwnProject();
+    void testRestartLive_TablessSessionsArePlannedForReopen();
+    void testRestartLive_RemoteSessionsAreSkipped();
 };
 
 }
