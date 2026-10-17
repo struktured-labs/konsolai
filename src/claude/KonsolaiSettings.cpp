@@ -206,7 +206,7 @@ QString KonsolaiSettings::extraClaudeArgs() const
     // in ~/.claude.json / .mcp.json. "server:session-intercom" only matches a
     // user-installed top-level MCP server (which we don't ship), so it
     // silently no-ops. The plugin namespace below is what actually binds.
-    return group.readEntry("ExtraArgs", QStringLiteral("--dangerously-load-development-channels plugin:session-intercom@struktured-labs"));
+    return group.readEntry("ExtraArgs", QString());
 }
 
 void KonsolaiSettings::setExtraClaudeArgs(const QString &args)

@@ -101,11 +101,10 @@ public:
      * Free-form whitespace-separated string. Per-session overrides are stored
      * on ClaudeSession itself and take precedence when non-empty.
      *
-     * Default:
-     *   --dangerously-load-development-channels plugin:session-intercom@struktured-labs
-     * so the session-intercom plugin's channel-based async notifications
-     * actually bind (the plugin's MCP server lives under the plugin namespace,
-     * not as a top-level server entry).
+     * Default: empty. ClaudeProcess::buildCommand() already binds the
+     * session-intercom channel; this default used to repeat it as
+     * --dangerously-load-development-channels, which raised a warning dialog
+     * on every launch.
      */
     QString extraClaudeArgs() const;
     void setExtraClaudeArgs(const QString &args);

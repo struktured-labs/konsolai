@@ -54,7 +54,7 @@ void ClaudeSessionRestartTest::testRestartCommandCodexStaysCodex()
     const QString cmd = session.restartCommand();
     const QString expected = CodexProcess::launchBinary() + QStringLiteral(" resume 019fa0a5-00a5-7cf0-a5ea-8a083d4e9ca3");
     QVERIFY2(cmd.contains(expected), qPrintable(cmd));
-    QVERIFY2(!cmd.startsWith(QStringLiteral("claude ")), qPrintable(cmd));
+    QVERIFY2(!cmd.contains(QStringLiteral("claude ")), qPrintable(cmd));
     QVERIFY2(!cmd.contains(QStringLiteral("--resume")), qPrintable(cmd));
 }
 
@@ -110,7 +110,7 @@ void ClaudeSessionRestartTest::testRestartCommandIsNotWrappedInTmux()
     ClaudeSession session(QStringLiteral("test"), workdir.path());
 
     const QString cmd = session.restartCommand();
-    QVERIFY2(cmd.startsWith(QStringLiteral("claude ")), qPrintable(cmd));
+    QVERIFY2(cmd.startsWith(QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy claude ")), qPrintable(cmd));
     QVERIFY2(!cmd.contains(QStringLiteral("tmux")), qPrintable(cmd));
 }
 

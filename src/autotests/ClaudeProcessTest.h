@@ -37,6 +37,8 @@ private Q_SLOTS:
     void testBuildCommandWithModel();
     void testBuildCommandWithWorkingDir();
     void testBuildCommandWithArgs();
+    void testBuildCommandUsesAllowlistedChannelNotDevFlag();
+    void testBuildCommandKeepsLegacyMcpHandshakeForChannels();
 
     // Task management tests
     void testSetCurrentTask();
