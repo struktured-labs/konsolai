@@ -136,7 +136,7 @@ void ClaudeProcessTest::testBuildCommandKeepsLegacyMcpHandshakeForChannels()
     // server's Python SDK accepts it, so no DM was pushed into any session.
     // The env var must precede the binary so the shell scopes it to claude.
     const QString cmd = ClaudeProcess::buildCommand();
-    QVERIFY2(cmd.startsWith(QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy claude ")), qPrintable(cmd));
+    QVERIFY2(cmd.startsWith(QStringLiteral("env MCP_PROTOCOL_NEGOTIATION=legacy claude ")), qPrintable(cmd));
 }
 
 void ClaudeProcessTest::testStateEnumSizePinnedForSwitchCoverage()

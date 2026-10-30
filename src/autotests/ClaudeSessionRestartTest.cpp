@@ -110,7 +110,7 @@ void ClaudeSessionRestartTest::testRestartCommandIsNotWrappedInTmux()
     ClaudeSession session(QStringLiteral("test"), workdir.path());
 
     const QString cmd = session.restartCommand();
-    QVERIFY2(cmd.startsWith(QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy claude ")), qPrintable(cmd));
+    QVERIFY2(cmd.startsWith(QStringLiteral("env MCP_PROTOCOL_NEGOTIATION=legacy claude ")), qPrintable(cmd));
     QVERIFY2(!cmd.contains(QStringLiteral("tmux")), qPrintable(cmd));
 }
 

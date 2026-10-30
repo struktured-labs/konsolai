@@ -34,8 +34,9 @@ QString ClaudeProcess::buildCommand(Model model,
     // servers for that revision and will not register a channel server that
     // accepts it ("Channel notifications skipped: server did not declare
     // claude/channel capability") — the intercom server's Python SDK accepts
-    // it, so no DM reached any session. The shell scopes this to claude only.
-    args << QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy");
+    // it, so no DM reached any session. env scopes this to claude only.
+    // tmux execs multi-arg commands directly (no shell), so run the assignment via env.
+    args << QStringLiteral("env") << QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy");
     args << QStringLiteral("claude");
 
     // Default: opus 5 with 1M context at xhigh effort — deep reasoning without
