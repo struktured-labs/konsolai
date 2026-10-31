@@ -1100,11 +1100,11 @@ void ClaudeSessionYoloTest::testShellCommandClaudeHonoursModelOverride()
     // being consulted every Claude session launches opus-5[1m] regardless of
     // what was selected — the picker looks live and is decorative.
     QVERIFY2(cmd.contains(QStringLiteral("--model claude-fable-5")), qPrintable(cmd));
-    QVERIFY2(!cmd.contains(QStringLiteral("claude-opus-5[1m]")), qPrintable(cmd));
+    QVERIFY2(!cmd.contains(QStringLiteral("claude-opus-5-5[1m]")), qPrintable(cmd));
 
     // An empty override still yields the configured default.
     ClaudeSession plain(QStringLiteral("test2"), QDir::tempPath());
-    QVERIFY(plain.shellCommand().contains(QStringLiteral("claude-opus-5[1m]")));
+    QVERIFY(plain.shellCommand().contains(QStringLiteral("claude-opus-5-5[1m]")));
 }
 
 void ClaudeSessionYoloTest::testShellCommandCodexHonoursExplicitApproval()

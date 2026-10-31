@@ -70,7 +70,7 @@ void ClaudeProcessTest::testIsRunning()
 void ClaudeProcessTest::testModelName()
 {
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Default), QString());
-    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-5[1m]"));
+    QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Opus), QStringLiteral("claude-opus-5-5[1m]"));
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Sonnet), QStringLiteral("claude-sonnet-4-6[1m]"));
     QCOMPARE(ClaudeProcess::modelName(ClaudeProcess::Model::Haiku), QStringLiteral("claude-haiku-4-5-20251001"));
 }
@@ -111,9 +111,9 @@ void ClaudeProcessTest::testBuildCommand()
     QString cmd = ClaudeProcess::buildCommand();
 
     QVERIFY(cmd.contains(QStringLiteral("claude")));
-    // The default launch pins the 1M-context model at xhigh effort.
-    QVERIFY(cmd.contains(QStringLiteral("claude-opus-5[1m]")));
-    QVERIFY(cmd.contains(QStringLiteral("--effort xhigh")));
+    // The default launch pins the 1M-context Opus 5.5 at medium effort.
+    QVERIFY(cmd.contains(QStringLiteral("claude-opus-5-5[1m]")));
+    QVERIFY(cmd.contains(QStringLiteral("--effort medium")));
 }
 
 void ClaudeProcessTest::testBuildCommandUsesAllowlistedChannelNotDevFlag()

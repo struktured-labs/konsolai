@@ -39,11 +39,11 @@ QString ClaudeProcess::buildCommand(Model model,
     args << QStringLiteral("env") << QStringLiteral("MCP_PROTOCOL_NEGOTIATION=legacy");
     args << QStringLiteral("claude");
 
-    // Default: opus 5 with 1M context at xhigh effort — deep reasoning without
-    // the latency of max. Explicit model overrides this.
-    if (model == Model::Default) {
-        args << QStringLiteral("--model") << QStringLiteral("claude-opus-5[1m]");
-        args << QStringLiteral("--effort") << QStringLiteral("xhigh");
+    // Default: opus 5.5 with 1M context at medium effort. Explicit Opus picks
+    // get the same effort; other models use the CLI's own effort default.
+    if (model == Model::Default || model == Model::Opus) {
+        args << QStringLiteral("--model") << QStringLiteral("claude-opus-5-5[1m]");
+        args << QStringLiteral("--effort") << QStringLiteral("medium");
     } else {
         args << QStringLiteral("--model") << modelName(model);
     }
@@ -105,7 +105,7 @@ QString ClaudeProcess::modelName(Model model)
 {
     switch (model) {
     case Model::Opus:
-        return QStringLiteral("claude-opus-5[1m]");
+        return QStringLiteral("claude-opus-5-5[1m]");
     case Model::Sonnet:
         return QStringLiteral("claude-sonnet-4-6[1m]");
     case Model::Haiku:

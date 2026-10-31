@@ -59,7 +59,7 @@ void KonsolaiSettingsTest::testDefaultGithubApiToken()
 void KonsolaiSettingsTest::testDefaultModel()
 {
     KonsolaiSettings settings;
-    QCOMPARE(settings.defaultModel(), QStringLiteral("claude-opus-5[1m]"));
+    QCOMPARE(settings.defaultModel(), QStringLiteral("claude-opus-5-5[1m]"));
 }
 
 void KonsolaiSettingsTest::testDefaultPermissionMode()

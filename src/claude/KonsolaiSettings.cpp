@@ -106,7 +106,7 @@ QString KonsolaiSettings::defaultModel() const
     KConfigGroup group(m_config, QStringLiteral("Claude"));
     // The [1m] suffix opts into the 1M-token context beta. Bare "claude-opus-5"
     // would be the 200K window; the default deliberately requests 1M.
-    return group.readEntry("DefaultModel", QStringLiteral("claude-opus-5[1m]"));
+    return group.readEntry("DefaultModel", QStringLiteral("claude-opus-5-5[1m]"));
 }
 
 QString KonsolaiSettings::claudePermissionMode() const
